@@ -1,1207 +1,998 @@
-"""
-ROC Sphere — Companies Act (India) compliance & document automation module.
+// ROCSpherePage.jsx — ROC Sphere: Companies Act (India) document automation
+// New, self-contained module. Mirrors the visual language of
+// CompliancePage.jsx / TrademarkSphere.jsx / SalarySlips.jsx (Hub banner,
+// StatCard, dark-mode-aware Tailwind classes, sonner toasts).
 
-Self-contained backend router. Nothing here is imported by any other
-existing module, so dropping this file into backend/ does not touch any
-existing behaviour. It is wired into the app with exactly two lines in
-server.py (see INTEGRATION.md):
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  Landmark, Plus, X, Loader2, Trash2, Building2, Users as UsersIcon,
+  Download, FileText, Search, RefreshCw, Save, CheckCircle2, Upload,
+  ClipboardList, Gavel, NotebookPen, ChevronRight, AlertTriangle, Info,
+  ScrollText, Pencil,
+} from 'lucide-react';
+import { toast } from 'sonner';
+import api from '@/lib/api';
+import { useDark } from '@/hooks/useDark';
+import { HubBanner, StatCard, HUB_COLORS } from '@/components/SectionHub.jsx';
 
-    from backend.roc_sphere import router as roc_sphere_router
-    api_router.include_router(roc_sphere_router)
+/* ── helpers ─────────────────────────────────────────────────────────── */
 
-Covers:
-  - Company master (linked to an existing Client, or standalone)
-  - Directors / shareholders register
-  - Upload & best-effort parse of AOC-4 / MGT-7 (PDF) and MGT-7A / master
-    data (Excel/CSV) to prefill the company master
-  - Companies Act 2013 compliance checklist engine (heuristic, based on
-    company category/size — see COMPLIANCE_RULES below)
-  - Word (.docx) generation for: Board Resolution, Notice of Meeting
-    (Board/EGM/AGM), Minutes of Meeting (Board/General), Register of
-    Members / List of Shareholders, and a printable Compliance Checklist
-
-IMPORTANT — legal disclaimer baked into the product, not just this
-comment: MCA thresholds and formats change (e.g. the "small company"
-paid-up capital/turnover limits were revised effective 1 Dec 2025). The
-checklist engine is a drafting aid, not a substitute for a professional's
-judgement, and COMPLIANCE_RULES should be reviewed periodically against
-the current Companies Act / MCA rules.
-"""
-
-import io
-import logging
-import re
-import uuid
-from datetime import datetime, timezone, date
-from typing import Optional, List, Any, Dict
-
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
-from fastapi.responses import Response
-from pydantic import BaseModel, Field, ConfigDict
-
-from backend.dependencies import db, get_current_user, check_module_permission
-from backend.models import User
-
-# Permission flags used here (see backend/models.py DEFAULT_ROLE_PERMISSIONS
-# and backend/dependencies.py MODULE_ACTION_MAP):
-#   can_view_roc_sphere   — open the page, view company masters/checklist,
-#                            generate & download documents
-#   can_manage_roc_sphere — create/edit/delete company masters, upload
-#                            AOC-4/MGT-7 to prefill them
-# Admin-granted-only by default (same pattern as GST Reconciliation,
-# Trademark Sphere and the Salary Slip Generator) — toggled per-user from
-# Settings → Permission Governance → Compliance → "ROC Sphere".
-VIEW = check_module_permission("roc_sphere", "view")
-CREATE = check_module_permission("roc_sphere", "create")
-EDIT = check_module_permission("roc_sphere", "edit")
-DELETE = check_module_permission("roc_sphere", "delete")
-
-logger = logging.getLogger("roc_sphere")
-router = APIRouter(prefix="/roc-sphere", tags=["roc-sphere"])
-
-COMPANIES = db.roc_companies
-DOCS_LOG = db.roc_documents
-CLIENTS = db.clients
-
-COMPANY_CLIENT_TYPES = {"pvt_ltd", "PVT_LTD", "public_ltd", "section_8", "llp", "LLP", "opc"}
-
-
-def _uid() -> str:
-    return str(uuid.uuid4())
-
-
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _who(user: User) -> str:
-    return getattr(user, "full_name", None) or getattr(user, "username", None) or "—"
-
-
-def _fmt_date(v: Any) -> str:
-    if not v:
-        return "—"
-    if isinstance(v, (datetime, date)):
-        return v.strftime("%d-%m-%Y")
-    s = str(v)
-    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y"):
-        try:
-            return datetime.strptime(s[:10], fmt).strftime("%d-%m-%Y")
-        except ValueError:
-            continue
-    return s
-
-
-def _num(v: Any) -> float:
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-# ─────────────────────────────────────────────────────────────────────────
-# MODELS
-# ─────────────────────────────────────────────────────────────────────────
-
-class Director(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    name: str
-    din: Optional[str] = None
-    designation: Optional[str] = "Director"  # Director / Managing Director / Whole-time Director / Additional Director
-    date_of_appointment: Optional[str] = None
-    date_of_cessation: Optional[str] = None
-    pan: Optional[str] = None
-    address: Optional[str] = None
-
-
-class Shareholder(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    name: str
-    folio_no: Optional[str] = None
-    pan: Optional[str] = None
-    class_of_shares: Optional[str] = "Equity"
-    shares_held: float = 0
-    face_value: Optional[float] = 10
-    percentage: Optional[float] = None
-    address: Optional[str] = None
-
-
-class Auditor(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    name: Optional[str] = None
-    firm_reg_no: Optional[str] = None
-    membership_no: Optional[str] = None
-    appointed_from: Optional[str] = None
-    appointed_till: Optional[str] = None
-
-
-class RocCompanyIn(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    client_id: Optional[str] = None
-    company_name: str
-    cin: Optional[str] = None
-    category: str = "private"          # private | public | opc | section_8 | llp
-    is_small_company: Optional[bool] = None   # None = auto-compute from capital/turnover
-    listed: bool = False
-    roc_office: Optional[str] = None
-    pan: Optional[str] = None
-    date_of_incorporation: Optional[str] = None
-    registered_office_address: Optional[str] = None
-    authorized_capital: Optional[float] = 0
-    paid_up_capital: Optional[float] = 0
-    last_year_turnover: Optional[float] = 0
-    financial_year_end: Optional[str] = "31-03"
-    last_agm_date: Optional[str] = None
-    last_board_meeting_date: Optional[str] = None
-    directors: List[Director] = Field(default_factory=list)
-    designated_partners: List[Director] = Field(default_factory=list)
-    partners: List[Director] = Field(default_factory=list)
-    shareholders: List[Shareholder] = Field(default_factory=list)
-    master_data: Dict[str, Any] = Field(default_factory=dict)
-    mgt_shareholder_data: Dict[str, Any] = Field(default_factory=dict)
-    auditor: Optional[Auditor] = None
-    notes: Optional[str] = None
-
-
-class RocCompanyOut(RocCompanyIn):
-    id: str
-    created_at: datetime
-    updated_at: datetime
-    created_by: Optional[str] = None
-
-
-class ResolutionItem(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    particulars: str                 # short heading, e.g. "Opening of Bank Account"
-    resolution_text: str             # the "RESOLVED THAT ..." body
-    proposed_by: Optional[str] = None
-    seconded_by: Optional[str] = None
-
-
-class BoardResolutionRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    meeting_date: str
-    meeting_time: Optional[str] = "11:00 AM"
-    venue: Optional[str] = "Registered Office of the Company"
-    directors_present: List[str] = Field(default_factory=list)
-    chairman: Optional[str] = None
-    resolutions: List[ResolutionItem]
-
-
-class MeetingNoticeRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    meeting_type: str = "board"      # board | agm | egm
-    meeting_date: str
-    meeting_time: Optional[str] = "11:00 AM"
-    venue: Optional[str] = "Registered Office of the Company"
-    notice_date: Optional[str] = None
-    agenda_items: List[str] = Field(default_factory=list)
-    special_business: List[ResolutionItem] = Field(default_factory=list)
-
-
-class MinutesRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    meeting_type: str = "board"      # board | agm | egm
-    meeting_date: str
-    meeting_time: Optional[str] = "11:00 AM"
-    venue: Optional[str] = "Registered Office of the Company"
-    chairman: Optional[str] = None
-    directors_present: List[str] = Field(default_factory=list)
-    directors_absent: List[str] = Field(default_factory=list)
-    attendees_other: List[str] = Field(default_factory=list)
-    quorum_present: bool = True
-    resolutions: List[ResolutionItem] = Field(default_factory=list)
-    discussion_notes: Optional[str] = None
-
-
-# ─────────────────────────────────────────────────────────────────────────
-# COMPANY MASTER — CRUD
-# ─────────────────────────────────────────────────────────────────────────
-
-@router.get("/clients-eligible")
-async def list_eligible_clients(current_user: User = Depends(VIEW)):
-    """Clients that are registered entities (not proprietors) and don't yet
-    have a ROC Sphere company master — used to populate the 'create from
-    client' picker."""
-    cursor = CLIENTS.find({"client_type": {"$in": list(COMPANY_CLIENT_TYPES)}})
-    clients = [c async for c in cursor]
-    existing = {c["client_id"] async for c in COMPANIES.find({"client_id": {"$ne": None}}, {"client_id": 1}) if c.get("client_id")}
-    out = []
-    for c in clients:
-        if c.get("id") in existing:
-            continue
-        out.append({
-            "client_id": c.get("id"),
-            "company_name": c.get("company_name"),
-            "client_type": c.get("client_type"),
-            "pan": c.get("pan"),
-            "date_of_incorporation": c.get("date_of_incorporation"),
-            "address": c.get("address"),
-        })
-    return out
-
-
-CLIENT_CATEGORY_MAP = {
-    "pvt_ltd": "private", "PVT_LTD": "private",
-    "public_ltd": "public",
-    "section_8": "section_8",
-    "llp": "llp", "LLP": "llp",
-    "opc": "opc",
+async function parseBlobError(err) {
+  try {
+    const blob = err?.response?.data;
+    if (blob instanceof Blob) {
+      const text = await blob.text();
+      const json = JSON.parse(text);
+      return json.detail || 'Something went wrong';
+    }
+  } catch { /* fall through */ }
+  return err?.response?.data?.detail || 'Something went wrong';
 }
 
-
-async def _sync_companies_from_clients() -> int:
-    """Auto-provision a ROC Sphere company master for every Client record
-    that is a registered entity (Pvt/Public Ltd, LLP, OPC, Section 8) and
-    doesn't have one yet, prefilled from that client's CIN/PAN/address/
-    incorporation date. Existing ROC Sphere records (and anything a user
-    has since edited on them) are never touched -- this only fills the gap
-    for clients that have no linked record at all. Returns count created.
-    """
-    cursor = CLIENTS.find({"client_type": {"$in": list(COMPANY_CLIENT_TYPES)}})
-    clients = [c async for c in cursor]
-    if not clients:
-        return 0
-    existing_client_ids = {
-        c["client_id"]
-        async for c in COMPANIES.find({"client_id": {"$ne": None}}, {"client_id": 1})
-        if c.get("client_id")
-    }
-    now = _now()
-    new_docs = []
-    for c in clients:
-        cid = c.get("id")
-        if not cid or cid in existing_client_ids:
-            continue
-        contact_people = c.get("contact_persons") or []
-        is_llp = c.get("client_type") in ("llp", "LLP")
-        new_docs.append({
-            "id": _uid(),
-            "client_id": cid,
-            "company_name": c.get("company_name") or "Unnamed Company",
-            "cin": c.get("cin"),
-            "category": CLIENT_CATEGORY_MAP.get(c.get("client_type"), "private"),
-            "is_small_company": None,
-            "listed": False,
-            "roc_office": None,
-            "pan": c.get("pan"),
-            "date_of_incorporation": (str(c.get("date_of_incorporation"))[:10] if c.get("date_of_incorporation") else None),
-            "registered_office_address": c.get("address"),
-            "authorized_capital": 0,
-            "paid_up_capital": 0,
-            "last_year_turnover": 0,
-            "financial_year_end": "31-03",
-            "last_agm_date": None,
-            "last_board_meeting_date": None,
-            "directors": [] if is_llp else contact_people,
-            "designated_partners": contact_people if is_llp else [],
-            "partners": contact_people if is_llp else [],
-            "shareholders": [],
-            "master_data": {},
-            "mgt_shareholder_data": {},
-            "auditor": None,
-            "notes": None,
-            "created_at": now,
-            "updated_at": now,
-            "created_by": "Auto-synced from Clients",
-        })
-    if new_docs:
-        await COMPANIES.insert_many(new_docs)
-    return len(new_docs)
-
-
-@router.get("/companies")
-async def list_companies(
-    q: Optional[str] = Query(None),
-    current_user: User = Depends(VIEW),
-):
-    await _sync_companies_from_clients()
-    query: Dict[str, Any] = {}
-    if q:
-        query["company_name"] = {"$regex": re.escape(q), "$options": "i"}
-    cursor = COMPANIES.find(query).sort("company_name", 1)
-    items = [c async for c in cursor]
-    for c in items:
-        c.pop("_id", None)
-    return items
-
-
-@router.post("/companies/sync-from-clients")
-async def sync_from_clients_endpoint(current_user: User = Depends(CREATE)):
-    """Manual re-sync trigger (e.g. a 'Sync from Clients' button) -- same
-    logic as the automatic sync on GET /companies, exposed separately so
-    the UI can show how many were newly added after a bulk client import."""
-    created = await _sync_companies_from_clients()
-    return {"created": created}
-
-
-@router.get("/companies/{company_id}")
-async def get_company(company_id: str, current_user: User = Depends(VIEW)):
-    c = await COMPANIES.find_one({"id": company_id})
-    if not c:
-        raise HTTPException(404, "Company not found")
-    # Client contact persons are the source for the initial ROC people list.
-    # Preserve any richer ROC edits, but backfill empty registers from Client.
-    if c.get("client_id"):
-        client = await CLIENTS.find_one({"id": c["client_id"]}, {"_id": 0, "contact_persons": 1})
-        contacts = (client or {}).get("contact_persons") or []
-        if contacts:
-            if c.get("category") == "llp":
-                c.setdefault("designated_partners", contacts)
-                c.setdefault("partners", contacts)
-                if not c.get("designated_partners"):
-                    c["designated_partners"] = contacts
-                if not c.get("partners"):
-                    c["partners"] = contacts
-            elif not c.get("directors"):
-                c["directors"] = contacts
-    c.pop("_id", None)
-    return c
-
-
-@router.post("/companies")
-async def create_company(payload: RocCompanyIn, current_user: User = Depends(CREATE)):
-    now = _now()
-    doc = payload.model_dump()
-    doc["id"] = _uid()
-    doc["created_at"] = now
-    doc["updated_at"] = now
-    doc["created_by"] = _who(current_user)
-    await COMPANIES.insert_one(doc)
-    await _sync_company_to_client(doc)
-    doc.pop("_id", None)
-    return doc
-
-
-@router.put("/companies/{company_id}")
-async def update_company(company_id: str, payload: RocCompanyIn, current_user: User = Depends(EDIT)):
-    existing = await COMPANIES.find_one({"id": company_id})
-    if not existing:
-        raise HTTPException(404, "Company not found")
-    doc = payload.model_dump()
-    doc["updated_at"] = _now()
-    await COMPANIES.update_one({"id": company_id}, {"$set": doc})
-    await _sync_company_to_client({**existing, **doc})
-    merged = {**existing, **doc}
-    merged.pop("_id", None)
-    return merged
-
-
-async def _sync_company_to_client(company: Dict[str, Any]) -> None:
-    """Keep the linked Client as the searchable source of truth as well.
-
-    ROC has richer role-specific records than Clients, so the compact client
-    contact_persons list is populated from directors or LLP partners while
-    the complete source data is retained in dedicated fields.
-    """
-    client_id = company.get("client_id")
-    if not client_id:
-        return
-    is_llp = company.get("category") == "llp"
-    people = (company.get("designated_partners") or []) + (company.get("partners") or []) if is_llp else (company.get("directors") or [])
-    contacts = []
-    for person in people:
-        if not person or not person.get("name"):
-            continue
-        contacts.append({
-            "name": person.get("name"),
-            "designation": person.get("designation") or ("Designated Partner" if is_llp else "Director"),
-            "din": person.get("din"),
-            "pan": person.get("pan"),
-            "email": person.get("email"),
-            "phone": person.get("phone"),
-        })
-    update = {
-        "company_name": company.get("company_name"),
-        "pan": company.get("pan"),
-        "date_of_incorporation": company.get("date_of_incorporation"),
-        "address": company.get("registered_office_address"),
-        "contact_persons": contacts,
-        "roc_directors": company.get("directors") or [],
-        "roc_designated_partners": company.get("designated_partners") or [],
-        "roc_partners": company.get("partners") or [],
-        "roc_shareholders": company.get("shareholders") or [],
-        "roc_master_data": company.get("master_data") or {},
-        "roc_mgt_shareholder_data": company.get("mgt_shareholder_data") or {},
-    }
-    if is_llp:
-        update["llpin"] = company.get("cin")
-    else:
-        update["cin"] = company.get("cin")
-    await CLIENTS.update_one({"id": client_id}, {"$set": update})
-
-
-@router.delete("/companies/{company_id}")
-async def delete_company(company_id: str, current_user: User = Depends(DELETE)):
-    res = await COMPANIES.delete_one({"id": company_id})
-    if not res.deleted_count:
-        raise HTTPException(404, "Company not found")
-    await DOCS_LOG.delete_many({"company_id": company_id})
-    return {"deleted": True}
-
-
-# ─────────────────────────────────────────────────────────────────────────
-# AOC-4 / MGT-7 UPLOAD → BEST-EFFORT EXTRACTION
-# ─────────────────────────────────────────────────────────────────────────
-# MCA AOC-4/MGT-7 acknowledgement PDFs and the pre-fill XLSX ("master
-# data") export all have fairly consistent label:value layouts. This is a
-# heuristic text-scrape (same approach as backend/compliance.py's
-# parse_compliance_dates), not an XBRL parser — it prefills the form,
-# the user always reviews before saving.
-
-FIELD_PATTERNS = {
-    "cin": r"CIN[:\s]*([A-Z0-9]{21})",
-    "company_name": r"(?:Name of (?:the )?[Cc]ompany|Company Name)[:\s]*([A-Za-z0-9 &.,'\-]{3,120})",
-    "date_of_incorporation": r"Date of [Ii]ncorporation[:\s]*([0-3]?\d[-/][01]?\d[-/]\d{2,4})",
-    "registered_office_address": r"Registered [Oo]ffice [Aa]ddress[:\s]*([A-Za-z0-9,./\- ]{10,200})",
-    "authorized_capital": r"Authoris?ed [Cc]apital[:\s(Rs\.)]*([\d,]+)",
-    "paid_up_capital": r"Paid[- ]up [Cc]apital[:\s(Rs\.)]*([\d,]+)",
-    "last_year_turnover": r"Turnover[:\s(Rs\.)]*([\d,]+)",
-    "last_agm_date": r"Date of [Aa][Gg][Mm][:\s]*([0-3]?\d[-/][01]?\d[-/]\d{2,4})",
-    "last_board_meeting_date": r"Date of [Bb]oard [Mm]eeting[:\s]*([0-3]?\d[-/][01]?\d[-/]\d{2,4})",
-    "pan": r"PAN[:\s]*([A-Z]{5}\d{4}[A-Z])",
+function triggerBlobDownload(blob, filename) {
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
 }
 
+const CATEGORY_LABELS = {
+  private: 'Private Limited', public: 'Public Limited', opc: 'One Person Company', section_8: 'Section 8 Company', llp: 'LLP',
+};
 
-def _parse_people(text: str) -> Dict[str, List[Dict[str, Any]]]:
-    """Read the tabular director/signatory block in MCA master exports.
+const emptyCompanyForm = () => ({
+  client_id: null,
+  company_name: '',
+  cin: '',
+  category: 'private',
+  pan: '',
+  date_of_incorporation: '',
+  registered_office_address: '',
+  authorized_capital: 0,
+  paid_up_capital: 0,
+  last_year_turnover: 0,
+  last_agm_date: '',
+  last_board_meeting_date: '',
+  directors: [],
+  shareholders: [],
+  auditor: { name: '', firm_reg_no: '', membership_no: '', appointed_from: '', appointed_till: '' },
+  notes: '',
+});
 
-    MCA exports are inconsistent between PDF, XLSX and copied text. This
-    intentionally only creates a person when a DIN/PAN and a plausible name
-    occur together; it never invents shareholder names from a count.
-    """
-    people: List[Dict[str, Any]] = []
-    block_match = re.search(
-        r"(?:Directors?/Signatory Details|Director/SignatoryDetails)(.*?)(?:Charges|No Records found|$)",
-        text, re.I | re.S,
-    )
-    block = block_match.group(1) if block_match else text
-    lines = [re.sub(r"\s+", " ", x).strip(" -:\t") for x in block.splitlines()]
-    din_re = re.compile(r"^[A-Z0-9]{6,20}$", re.I)
-    for i, line in enumerate(lines):
-        if not din_re.fullmatch(line.replace(" ", "")):
-            continue
-        # In XLSX rows the DIN, name, designation are adjacent. In PDFs the
-        # columns may be vertical, so inspect a small forward window.
-        candidates = [x for x in lines[i + 1:i + 5] if x]
-        name = next((x for x in candidates if re.search(r"[A-Za-z]", x) and len(x) >= 5
-                     and not re.fullmatch(r"(Director|Promoter|Signatory|Active|Yes|No)", x, re.I)), None)
-        if not name or any(p.get("din") == line for p in people):
-            continue
-        designation = next((x for x in candidates if re.search(
-            r"director|partner|manager|secretary", x, re.I)), "Director")
-        people.append({
-            "name": name,
-            "din": line,
-            "designation": designation.title(),
-            "date_of_appointment": next((x for x in candidates if re.fullmatch(
-                r"\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}", x)), None),
-        })
-    return {"people": people}
+const TABS = [
+  { key: 'master', label: 'Company Master', icon: Building2 },
+  { key: 'directors', label: 'Directors & Shareholders', icon: UsersIcon },
+  { key: 'resolution', label: 'Board Resolution', icon: Gavel },
+  { key: 'notice', label: 'Notice of Meeting', icon: ScrollText },
+  { key: 'minutes', label: 'Minutes of Meeting', icon: NotebookPen },
+  { key: 'checklist', label: 'Compliance Checklist', icon: ClipboardList },
+];
 
+export default function ROCSpherePage() {
+  const isDark = useDark();
+  const [companies, setCompanies] = useState([]);
+  const [eligibleClients, setEligibleClients] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [company, setCompany] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState('master');
+  const [showNewCompany, setShowNewCompany] = useState(false);
+  const [search, setSearch] = useState('');
+  const [syncing, setSyncing] = useState(false);
 
-def _parse_mgt_shareholders(text: str) -> List[Dict[str, Any]]:
-    """Parse shareholder rows when the attached MGT-7/MGT-7A includes them.
+  const card = isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-white border-slate-200';
+  const text = isDark ? 'text-slate-100' : 'text-slate-900';
+  const muted = isDark ? 'text-slate-400' : 'text-slate-500';
+  const input = `w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/40 ${isDark ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-white border-slate-300 text-slate-900'}`;
 
-    The filed MGT-7A often references a separate XLSM attachment and therefore
-    contains only the shareholder count. In that case returning [] is correct
-    and preserves existing master data instead of fabricating names.
-    """
-    rows = []
-    for line in text.splitlines():
-        line = re.sub(r"\s+", " ", line).strip()
-        m = re.match(r"^\d+\s+([A-Za-z][A-Za-z .,&'-]{3,})\s+([A-Z]{5}\d{4}[A-Z])?\s*(\d[\d,]*)\s*$", line)
-        if m:
-            rows.append({"name": m.group(1).strip(), "pan": m.group(2), "shares_held": _num(m.group(3).replace(",", "")), "class_of_shares": "Equity"})
-    return rows
-
-
-def _extract_text_from_upload(filename: str, raw: bytes) -> str:
-    name = (filename or "").lower()
-    try:
-        if name.endswith(".pdf"):
-            import pdfplumber
-            text_parts = []
-            with pdfplumber.open(io.BytesIO(raw)) as pdf:
-                for page in pdf.pages[:10]:
-                    text_parts.append(page.extract_text() or "")
-            return "\n".join(text_parts)
-        if name.endswith((".xlsx", ".xls")):
-            import openpyxl
-            wb = openpyxl.load_workbook(io.BytesIO(raw), data_only=True)
-            lines = []
-            for ws in wb.worksheets:
-                for row in ws.iter_rows(values_only=True):
-                    lines.append(" ".join(str(c) for c in row if c is not None))
-            return "\n".join(lines)
-        if name.endswith(".csv"):
-            return raw.decode("utf-8", errors="ignore")
-        # last resort — try utf-8 text
-        return raw.decode("utf-8", errors="ignore")
-    except Exception as e:  # pragma: no cover
-        logger.warning("roc_sphere: text extraction failed for %s: %s", filename, e)
-        return ""
-
-
-def parse_master_data(filename: str, raw: bytes) -> Dict[str, Any]:
-    text = _extract_text_from_upload(filename, raw)
-    extracted: Dict[str, Any] = {}
-    for field, pattern in FIELD_PATTERNS.items():
-        m = re.search(pattern, text)
-        if not m:
-            continue
-        val = m.group(1).strip().rstrip(",")
-        if field in ("authorized_capital", "paid_up_capital", "last_year_turnover"):
-            val = _num(val.replace(",", ""))
-        extracted[field] = val
-    # Label/value parsing covers MCA's XLSX export where values are in the
-    # next cell and not on the same line as the label.
-    lines = [re.sub(r"\s+", " ", x).strip() for x in text.splitlines() if str(x).strip()]
-    labels = {
-        "cin": ("cin", "llpin"),
-        "company_name": ("company name", "name of the company"),
-        "registered_office_address": ("registered address", "registered office address"),
-        "date_of_incorporation": ("date of incorporation",),
-        "authorized_capital": ("authorised capital", "authorized capital"),
-        "paid_up_capital": ("paid up capital", "paid-up capital"),
-        "last_agm_date": ("date of last agm",),
-        "last_board_meeting_date": ("date of last board meeting",),
-        "pan": ("pan", "permanent account number"),
+  const loadCompanies = useCallback(async () => {
+    try {
+      const { data } = await api.get('/roc-sphere/companies');
+      setCompanies(data || []);
+      return data || [];
+    } catch (e) {
+      toast.error('Failed to load companies');
+      return [];
     }
-    for field, names in labels.items():
-        if field in extracted:
-            continue
-        for i, line in enumerate(lines[:-1]):
-            if any(line.lower().rstrip(":") == n or line.lower().startswith(n + ":") for n in names):
-                value = line.split(":", 1)[1].strip() if ":" in line else lines[i + 1]
-                if value and value != "-":
-                    extracted[field] = _num(value.replace(",", "")) if field in ("authorized_capital", "paid_up_capital") else value
-                    break
-    people = _parse_people(text)["people"]
-    if people:
-        extracted["_directors"] = people
-    mgt_people = _parse_mgt_shareholders(text) if re.search(r"mgt[- ]?7", filename or "", re.I) else []
-    if mgt_people:
-        extracted["_shareholders"] = mgt_people
-    extracted["_source_type"] = "mgt-7/mgt-7a" if re.search(r"mgt[- ]?7", filename or "", re.I) else "master-data"
-    extracted["_source_file"] = filename
-    extracted["_chars_scanned"] = len(text)
-    return extracted
+  }, []);
 
+  const loadEligibleClients = useCallback(async () => {
+    try {
+      const { data } = await api.get('/roc-sphere/clients-eligible');
+      setEligibleClients(data || []);
+    } catch { /* non-fatal */ }
+  }, []);
 
-@router.post("/companies/{company_id}/upload-master-data")
-async def upload_master_data(
-    company_id: str,
-    file: UploadFile = File(...),
-    apply: bool = Form(False),
-    current_user: User = Depends(CREATE),
-):
-    """Upload an AOC-4 / MGT-7 / MGT-7A acknowledgement PDF or an MCA
-    master-data Excel export. Returns the fields it could confidently
-    extract. Pass apply=true to merge them straight into the company
-    master (only non-empty extracted fields are written)."""
-    company = await COMPANIES.find_one({"id": company_id})
-    if not company:
-        raise HTTPException(404, "Company not found")
-    raw = await file.read()
-    if len(raw) > 15 * 1024 * 1024:
-        raise HTTPException(400, "File too large (15MB limit)")
-    extracted = parse_master_data(file.filename, raw)
-    if not any(k for k in extracted if not k.startswith("_")):
-        return {
-            "extracted": {},
-            "applied": False,
-            "message": "Could not confidently extract fields from this file — please enter details manually.",
-        }
-    if apply:
-        clean = {k: v for k, v in extracted.items() if not k.startswith("_") and v}
-        if extracted.get("_directors"):
-            if company.get("category") == "llp":
-                clean["designated_partners"] = extracted["_directors"]
-                clean["partners"] = extracted["_directors"]
-            else:
-                clean["directors"] = extracted["_directors"]
-        if extracted.get("_shareholders"):
-            clean["shareholders"] = extracted["_shareholders"]
-        source_key = "mgt_shareholder_data" if extracted.get("_source_type") == "mgt-7/mgt-7a" else "master_data"
-        clean[source_key] = {
-            k: v for k, v in extracted.items()
-            if not k.startswith("_")
-        }
-        clean["updated_at"] = _now()
-        await COMPANIES.update_one({"id": company_id}, {"$set": clean})
-        await _sync_company_to_client({**company, **clean})
-    # Private parser keys are useful to the apply step but not to the UI.
-    visible = {k: v for k, v in extracted.items() if not k.startswith("_")}
-    if extracted.get("_directors"):
-        visible["directors"] = extracted["_directors"]
-    if extracted.get("_shareholders"):
-        visible["shareholders"] = extracted["_shareholders"]
-    return {"extracted": visible, "applied": bool(apply)}
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      const list = await loadCompanies();
+      await loadEligibleClients();
+      if (list.length) setSelectedId(list[0].id);
+      setLoading(false);
+    })();
+  }, [loadCompanies, loadEligibleClients]);
 
-
-# ─────────────────────────────────────────────────────────────────────────
-# COMPLIANCE CHECKLIST ENGINE
-# ─────────────────────────────────────────────────────────────────────────
-# Heuristic, config-driven so it's easy to keep current. Review
-# thresholds against the latest MCA notifications periodically —
-# "small company" limits were last revised (paid-up ≤ Rs 10 cr, turnover
-# ≤ Rs 100 cr) with effect from 1 Dec 2025.
-
-SMALL_CO_PAID_UP_LIMIT = 10_00_00_000     # Rs 10 crore
-SMALL_CO_TURNOVER_LIMIT = 100_00_00_000   # Rs 100 crore
-
-
-def _is_llp(company: Dict[str, Any]) -> bool:
-    return company.get("category") == "llp"
-
-
-def _is_small_company(company: Dict[str, Any]) -> bool:
-    # "Small company" is a Companies Act, 2013 concept only — never applies to an LLP.
-    if _is_llp(company):
-        return False
-    if company.get("is_small_company") is not None:
-        return bool(company["is_small_company"])
-    if company.get("category") in ("public", "section_8"):
-        return False
-    paid_up = _num(company.get("paid_up_capital"))
-    turnover = _num(company.get("last_year_turnover"))
-    return paid_up <= SMALL_CO_PAID_UP_LIMIT and turnover <= SMALL_CO_TURNOVER_LIMIT
-
-
-# LLP Act, 2008 / LLP Rules audit-applicability thresholds
-LLP_AUDIT_TURNOVER_LIMIT = 40_00_000       # Rs. 40 lakh turnover
-LLP_AUDIT_CONTRIBUTION_LIMIT = 25_00_000   # Rs. 25 lakh partners' contribution
-
-
-def build_llp_compliance_checklist(company: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Compliance checklist under the LLP Act, 2008 / LLP Rules — entirely
-    separate from the Companies Act, 2013 checklist below, since an LLP has
-    no share capital, no Board/AGM in the company-law sense, no AOC-4/MGT-7/
-    ADT-1/CSR/MGT-14/PAS-6, etc. Keyed off Designated Partners, not Directors."""
-    items: List[Dict[str, Any]] = []
-    num_dp = len(company.get("directors") or [])  # "directors" list doubles as Designated Partners for LLP records
-    turnover = _num(company.get("last_year_turnover"))
-    contribution = _num(company.get("paid_up_capital"))  # "paid_up_capital" field doubles as total partners' contribution
-    audit_applicable = turnover > LLP_AUDIT_TURNOVER_LIMIT or contribution > LLP_AUDIT_CONTRIBUTION_LIMIT
-
-    def add(form, particulars, due, frequency, applicable=True, notes=None):
-        items.append({
-            "form": form, "particulars": particulars, "due_date_rule": due,
-            "frequency": frequency, "applicable": applicable, "notes": notes,
-        })
-
-    add("Form 11", "Annual Return of the LLP", "Within 60 days of FY close (by 30th May)", "Annual")
-    add("Form 8", "Statement of Account & Solvency (incl. Statement of Solvency by Designated Partners)",
-        "Within 30 days from end of 6 months of FY close (by 30th October)", "Annual")
-    add("Statutory Audit", "Audit of accounts by a Chartered Accountant",
-        "Before filing Form 8", "Annual",
-        applicable=audit_applicable,
-        notes=f"Mandatory only if turnover > ₹{LLP_AUDIT_TURNOVER_LIMIT:,} or partners' contribution > ₹{LLP_AUDIT_CONTRIBUTION_LIMIT:,}; otherwise a self-declaration of solvency suffices.")
-    add("DIR-3 KYC", "KYC of every Designated Partner holding a DIN/DPIN", "By 30th September every year", "Annual", applicable=num_dp > 0)
-    add("Form 3", "Filing of LLP Agreement / any changes to the LLP Agreement", "Within 30 days of execution/change", "Event-based")
-    add("Form 4", "Notice of appointment/cessation/change of a partner or Designated Partner, or change of name/address of a partner",
-        "Within 30 days of the event", "Event-based")
-    add("Form 15", "Notice of change of registered office of the LLP", "Within 30 days of the change", "Event-based")
-    add("Income Tax Return", "Filing of the LLP's income tax return",
-        "31st July (no audit) / 31st October (audit applicable)", "Annual",
-        notes="Due date shifts to 31st Oct if the LLP is subject to tax audit / transfer-pricing audit.")
-    add("GST Returns", "GSTR-1 / GSTR-3B (and annual return GSTR-9) if GST-registered", "Monthly/Quarterly + Annual", "Periodic",
-        applicable=bool(company.get("gst_registered", True)),
-        notes="Applicable only if the LLP holds a GST registration — verify against the client's actual GSTIN status.")
-    add("Meeting of Designated Partners", "Periodic meeting of Designated Partners as required by the LLP Agreement",
-        "As per the LLP Agreement (no statutory AGM/Board Meeting requirement under the LLP Act)", "As per LLP Agreement")
-    add("Register of Partners / Designated Partners", "Internal registers to be maintained & kept updated", "Ongoing", "Ongoing")
-
-    return items
-
-
-def build_compliance_checklist(company: Dict[str, Any]) -> List[Dict[str, Any]]:
-    category = company.get("category", "private")
-    if category == "llp":
-        return build_llp_compliance_checklist(company)
-    is_opc = category == "opc"
-    is_small = _is_small_company(company)
-    is_section8 = category == "section_8"
-    num_directors = len(company.get("directors") or [])
-
-    items: List[Dict[str, Any]] = []
-
-    def add(form, particulars, due, frequency, applicable=True, notes=None):
-        items.append({
-            "form": form,
-            "particulars": particulars,
-            "due_date_rule": due,
-            "frequency": frequency,
-            "applicable": applicable,
-            "notes": notes,
-        })
-
-    # Annual filings
-    add("AOC-4" + (" (XBRL)" if company.get("listed") else ""), "Filing of Financial Statements", "Within 30 days of AGM", "Annual")
-    add("MGT-7A" if is_small or is_opc else "MGT-7", "Annual Return", "Within 60 days of AGM", "Annual")
-    add("ADT-1", "Appointment/Ratification of Statutory Auditor", "Within 15 days of AGM (on appointment)", "As applicable")
-    add("DIR-3 KYC", "KYC of every Director holding a DIN", "By 30th September every year", "Annual", applicable=num_directors > 0)
-    add("DPT-3", "Return of Deposits / particulars of transactions not treated as deposits", "By 30th June every year", "Annual")
-    add("MSME-1", "Half-yearly return of outstanding dues to Micro & Small Enterprises", "29th April & 31st October", "Half-Yearly")
-
-    # Meetings
-    if not is_opc:
-        add("AGM", "Annual General Meeting", "Within 6 months of FY end (9 months for first AGM); gap between two AGMs ≤ 15 months", "Annual", applicable=not is_opc)
-    board_meetings_required = 2 if (is_small or is_opc) else 4
-    add("Board Meeting", f"Minimum {board_meetings_required} Board Meetings in a calendar year, gap ≤ 120 days between two meetings",
-        "Ongoing", "Quarterly" if board_meetings_required == 4 else "Half-Yearly")
-
-    # Registers / compliance
-    add("MBP-1", "Director's disclosure of interest in other entities", "First Board Meeting of the FY / on change", "Annual + event-based")
-    add("DIR-8", "Director's declaration of non-disqualification", "First Board Meeting of the FY", "Annual")
-    add("Register of Members / Charges / Directors", "Statutory registers to be maintained & kept updated", "Ongoing", "Ongoing")
-    add("CSR-2", "Report on CSR", "As notified (with AOC-4 or separately)", "Annual",
-        applicable=_num(company.get("paid_up_capital")) >= 5_00_00_000 or _num(company.get("last_year_turnover")) >= 100_00_00_000,
-        notes="Applicable only if CSR provisions (Sec 135) trigger — verify against latest profit criterion too.")
-
-    if is_section8:
-        add("CSR-1", "Registration for undertaking CSR activities (if applicable)", "Before undertaking CSR work", "One-time", notes="Section 8 company specific")
-
-    if company.get("category") == "public" or company.get("listed"):
-        add("MGT-14", "Filing of certain Board/Special resolutions with ROC", "Within 30 days of passing", "Event-based")
-
-    add("PAS-6", "Reconciliation of Share Capital Audit Report (unlisted companies with dematerialised shares)", "Within 60 days of half-year end", "Half-Yearly", applicable=not is_opc and not is_section8)
-
-    return items
-
-
-@router.get("/companies/{company_id}/compliance-checklist")
-async def get_compliance_checklist(company_id: str, current_user: User = Depends(VIEW)):
-    company = await COMPANIES.find_one({"id": company_id})
-    if not company:
-        raise HTTPException(404, "Company not found")
-    checklist = build_compliance_checklist(company)
-    is_llp = _is_llp(company)
-    return {
-        "company_name": company.get("company_name"),
-        "category": company.get("category"),
-        "is_small_company": None if is_llp else _is_small_company(company),
-        "checklist": checklist,
-        "generated_at": _now().isoformat(),
-        "disclaimer": (
-            "Generated from the LLP's category/turnover/contribution using current "
-            "LLP Act, 2008 / LLP Rules thresholds as configured in the app. Verify "
-            "against the latest MCA notifications before relying on it for filing."
-            if is_llp else
-            "Generated from company category/capital/turnover using current "
-            "Companies Act 2013 thresholds as configured in the app. Verify "
-            "against the latest MCA notifications before relying on it for filing."
-        ),
+  const loadOne = useCallback(async (id) => {
+    if (!id) { setCompany(null); return; }
+    try {
+      const { data } = await api.get(`/roc-sphere/companies/${id}`);
+      setCompany(data);
+    } catch (e) {
+      toast.error('Failed to load company');
     }
+  }, []);
 
+  useEffect(() => { loadOne(selectedId); }, [selectedId, loadOne]);
 
-# ─────────────────────────────────────────────────────────────────────────
-# DOCX GENERATION
-# ─────────────────────────────────────────────────────────────────────────
+  const filteredCompanies = useMemo(() => {
+    if (!search.trim()) return companies;
+    const q = search.toLowerCase();
+    return companies.filter((c) => (c.company_name || '').toLowerCase().includes(q) || (c.cin || '').toLowerCase().includes(q));
+  }, [companies, search]);
 
-def _base_doc():
-    from docx import Document
-    from docx.shared import Pt
-    document = Document()
-    style = document.styles["Normal"]
-    style.font.name = "Times New Roman"
-    style.font.size = Pt(12)
-    sections = document.sections
-    for s in sections:
-        s.top_margin = s.bottom_margin = s.left_margin = s.right_margin = document.sections[0].left_margin
-    return document
+  const saveCompany = async (patch) => {
+    if (!company?.id) return;
+    try {
+      const { data } = await api.put(`/roc-sphere/companies/${company.id}`, { ...company, ...patch });
+      setCompany(data);
+      setCompanies((prev) => prev.map((c) => (c.id === data.id ? { ...c, ...data } : c)));
+      toast.success('Saved');
+    } catch (e) {
+      toast.error(await parseBlobError(e) || 'Save failed');
+    }
+  };
 
+  const deleteCompany = async () => {
+    if (!company?.id) return;
+    if (!window.confirm(`Remove "${company.company_name}" from ROC Sphere? This does not affect the linked client record.`)) return;
+    try {
+      await api.delete(`/roc-sphere/companies/${company.id}`);
+      toast.success('Removed');
+      const list = await loadCompanies();
+      setSelectedId(list[0]?.id || null);
+    } catch {
+      toast.error('Delete failed');
+    }
+  };
 
-def _heading(document, text, size=14, center=True, bold=True, underline=False):
-    from docx.shared import Pt
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    p = document.add_paragraph()
-    if center:
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = p.add_run(text)
-    run.bold = bold
-    run.underline = underline
-    run.font.size = Pt(size)
-    return p
+  const syncFromClients = async () => {
+    setSyncing(true);
+    try {
+      const { data } = await api.post('/roc-sphere/companies/sync-from-clients');
+      const list = await loadCompanies();
+      await loadEligibleClients();
+      if (!selectedId && list.length) setSelectedId(list[0].id);
+      toast.success(data?.created ? `Added ${data.created} compan${data.created === 1 ? 'y' : 'ies'} from Clients` : 'Already up to date with Clients');
+    } catch (e) {
+      toast.error(await parseBlobError(e) || 'Sync failed');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
+  return (
+    <div className={`min-h-screen ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
+      {/* Banner and the card grid below now share the same horizontal
+          padding (px-4 sm:px-6) and no max-width cap, so their left/right
+          edges line up and the cards use the full width available. */}
+      <div className="px-4 sm:px-6 pt-6">
+        <HubBanner
+          icon={Landmark}
+          eyebrow="Compliance"
+          title="ROC Sphere"
+          subtitle="Company master, Companies Act filings & ready-to-file drafts"
+          isDark={isDark}
+          stats={[
+            { label: 'Companies', value: companies.length },
+            { label: 'Private Ltd', value: companies.filter((c) => c.category === 'private').length },
+            { label: 'Public Ltd', value: companies.filter((c) => c.category === 'public').length },
+            { label: 'LLP', value: companies.filter((c) => c.category === 'llp').length },
+          ]}
+        />
+      </div>
 
-def _para(document, text, center=False, bold=False, italic=False):
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    p = document.add_paragraph()
-    if center:
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = p.add_run(text)
-    run.bold = bold
-    run.italic = italic
-    return p
+      <div className="px-4 sm:px-6 py-6 grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {/* ── Company list / picker ───────────────────────────────────── */}
+        <div className={`lg:col-span-1 rounded-xl border ${card} p-4 h-fit`}>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className={`font-semibold text-sm ${text}`}>Companies</h3>
+            <div className="flex items-center gap-1.5">
+              <button onClick={syncFromClients} disabled={syncing} title="Sync from Clients"
+                className={`p-1.5 rounded-lg disabled:opacity-60 ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-slate-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}>
+                {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              </button>
+              <button onClick={() => setShowNewCompany(true)} title="Add company manually" className="p-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white">
+                <Plus size={14} />
+              </button>
+            </div>
+          </div>
+          <p className={`text-[11px] ${muted} mb-3 -mt-2`}>Auto-synced from Pvt Ltd / Public Ltd / LLP / OPC / Section 8 clients</p>
+          <div className="relative mb-3">
+            <Search size={14} className={`absolute left-2.5 top-2.5 ${muted}`} />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search company / CIN…"
+              className={`${input} pl-8 py-1.5 text-xs`} />
+          </div>
+          {loading ? (
+            <div className="flex justify-center py-8"><Loader2 className="animate-spin" size={20} /></div>
+          ) : filteredCompanies.length === 0 ? (
+            <p className={`text-xs ${muted} py-6 text-center`}>
+              No registered-entity clients found (Pvt Ltd / Public Ltd / LLP / OPC / Section 8).<br />
+              Add one as a Client, or click <RefreshCw size={11} className="inline" /> to re-sync, or + to add manually.
+            </p>
+          ) : (
+            <div className="space-y-1 max-h-[60vh] overflow-y-auto">
+              {filteredCompanies.map((c) => (
+                <button key={c.id} onClick={() => setSelectedId(c.id)}
+                  className={`w-full text-left px-3 py-2 rounded-lg text-xs flex items-center justify-between gap-2 transition
+                    ${selectedId === c.id ? 'bg-blue-600 text-white' : isDark ? 'hover:bg-slate-700/60 text-slate-200' : 'hover:bg-slate-100 text-slate-700'}`}>
+                  <span className="truncate">
+                    <span className="font-medium block truncate">{c.company_name}</span>
+                    <span className={`text-[10px] ${selectedId === c.id ? 'text-blue-100' : muted}`}>{CATEGORY_LABELS[c.category] || c.category}</span>
+                  </span>
+                  <ChevronRight size={12} className="shrink-0" />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
+        {/* ── Detail panel ─────────────────────────────────────────────── */}
+        <div className="lg:col-span-3 space-y-4">
+          {!company ? (
+            <div className={`rounded-xl border ${card} p-10 text-center ${muted}`}>
+              Select a company on the left, or add one to get started.
+            </div>
+          ) : (
+            <>
+              <div className={`rounded-xl border ${card} p-4 flex flex-wrap items-center justify-between gap-2`}>
+                <div>
+                  <h2 className={`text-lg font-bold ${text}`}>{company.company_name}</h2>
+                  <p className={`text-xs ${muted}`}>CIN: {company.cin || '—'} · {CATEGORY_LABELS[company.category] || company.category}</p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button onClick={deleteCompany} className="text-xs flex items-center gap-1 px-2 py-1.5 rounded-lg text-red-500 hover:bg-red-500/10">
+                    <Trash2 size={13} /> Remove
+                  </button>
+                  <button onClick={() => setTab('upload')} className="text-xs flex items-center gap-1 px-2 py-1.5 rounded-lg text-blue-600 hover:bg-blue-500/10">
+                    <Upload size={13} /> Upload ROC Forms
+                  </button>
+                </div>
+              </div>
 
-def build_board_resolution_doc(company: Dict[str, Any], req: BoardResolutionRequest, prepared_by: str) -> bytes:
-    d = _base_doc()
-    name = company.get("company_name", "").upper()
-    cin = company.get("cin") or "—"
-    is_llp = _is_llp(company)
-    body_label = "Designated Partners of the LLP" if is_llp else "Board of Directors of the Company"
-    present_label = "Designated Partners Present" if is_llp else "Directors Present"
-    sign_label = "Designated Partner" if is_llp else "Director / Company Secretary"
-    din_label = "DIN/DPIN" if is_llp else "DIN/Membership No."
-    _heading(d, name, size=16)
-    _para(d, f"CIN: {cin}" if not is_llp else f"LLPIN: {cin}", center=True)
-    _para(d, f"Registered Office: {company.get('registered_office_address') or '—'}", center=True)
-    d.add_paragraph()
-    _heading(d, "EXTRACT OF MINUTES / CERTIFIED TRUE COPY OF RESOLUTION(S)", size=13)
-    _para(
-        d,
-        f"Passed at the meeting of the {body_label} held on "
-        f"{_fmt_date(req.meeting_date)} at {req.meeting_time} at {req.venue}."
-    )
-    if req.directors_present:
-        _para(d, f"{present_label}: " + ", ".join(req.directors_present))
-    if req.chairman:
-        _para(d, f"Chairman of the Meeting: {req.chairman}")
-    d.add_paragraph()
+              {/* Tabs */}
+              <div className={`rounded-xl border ${card} overflow-hidden`}>
+                <div className={`flex overflow-x-auto border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                  {TABS.map((t) => {
+                    const Icon = t.icon;
+                    const active = tab === t.key;
+                    return (
+                      <button key={t.key} onClick={() => setTab(t.key)}
+                        className={`shrink-0 flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium border-b-2 transition
+                          ${active ? 'border-blue-600 text-blue-600' : `border-transparent ${muted} hover:text-blue-500`}`}>
+                        <Icon size={13} /> {t.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="p-4">
+                  {tab === 'master' && <MasterTab company={company} isDark={isDark} onSave={saveCompany} input={input} text={text} muted={muted} />}
+                  {tab === 'directors' && <DirectorsTab company={company} isDark={isDark} onSave={saveCompany} input={input} text={text} muted={muted} />}
+                  {tab === 'resolution' && <ResolutionTab company={company} isDark={isDark} input={input} text={text} muted={muted} />}
+                  {tab === 'notice' && <NoticeTab company={company} isDark={isDark} input={input} text={text} muted={muted} />}
+                  {tab === 'minutes' && <MinutesTab company={company} isDark={isDark} input={input} text={text} muted={muted} />}
+                  {tab === 'checklist' && <ChecklistTab company={company} isDark={isDark} text={text} muted={muted} />}
+                  {tab === 'upload' && <UploadTab company={company} isDark={isDark} input={input} text={text} muted={muted} onApplied={() => loadOne(company.id)} />}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
 
-    for i, r in enumerate(req.resolutions, 1):
-        _para(d, f"{i}. {r.particulars}", bold=True)
-        _para(d, f'"RESOLVED THAT {r.resolution_text.strip().rstrip(".")}."')
-        if r.proposed_by or r.seconded_by:
-            bits = []
-            if r.proposed_by:
-                bits.append(f"Proposed by: {r.proposed_by}")
-            if r.seconded_by:
-                bits.append(f"Seconded by: {r.seconded_by}")
-            _para(d, "   " + " | ".join(bits), italic=True)
-        d.add_paragraph()
+      {showNewCompany && (
+        <NewCompanyModal
+          isDark={isDark} input={input} text={text} muted={muted}
+          eligibleClients={eligibleClients}
+          onClose={() => setShowNewCompany(false)}
+          onCreated={async (created) => {
+            setShowNewCompany(false);
+            const list = await loadCompanies();
+            await loadEligibleClients();
+            setSelectedId(created.id);
+            void list;
+          }}
+        />
+      )}
+    </div>
+  );
+}
 
-    _para(d, "\nCertified True Copy")
-    d.add_paragraph()
-    _para(d, "For " + name, bold=True)
-    d.add_paragraph()
-    d.add_paragraph()
-    _para(d, sign_label)
-    _para(d, f"{din_label}: __________________")
-    _para(d, f"Date: {_fmt_date(datetime.now())}", )
-    _para(d, f"Prepared by: {prepared_by} (Taskosphere ROC Sphere)", italic=True)
+/* ═══════════════════════════════════════════════════════════════════════
+ * New company modal — from scratch or prefilled from an existing client
+ * ═══════════════════════════════════════════════════════════════════════ */
 
-    buf = io.BytesIO()
-    d.save(buf)
-    return buf.getvalue()
+function NewCompanyModal({ isDark, input, text, muted, eligibleClients, onClose, onCreated }) {
+  const [form, setForm] = useState(emptyCompanyForm());
+  const [saving, setSaving] = useState(false);
 
+  const fromClient = (clientId) => {
+    if (!clientId) { setForm(emptyCompanyForm()); return; }
+    const c = eligibleClients.find((x) => x.client_id === clientId);
+    if (!c) return;
+    const catMap = { pvt_ltd: 'private', PVT_LTD: 'private', public_ltd: 'public', section_8: 'section_8', llp: 'llp', LLP: 'llp', opc: 'opc' };
+    setForm((f) => ({
+      ...f,
+      client_id: c.client_id,
+      company_name: c.company_name || '',
+      category: catMap[c.client_type] || 'private',
+      pan: c.pan || '',
+      date_of_incorporation: (c.date_of_incorporation || '').slice(0, 10),
+      registered_office_address: c.address || '',
+    }));
+  };
 
-def build_notice_doc(company: Dict[str, Any], req: MeetingNoticeRequest, prepared_by: str) -> bytes:
-    d = _base_doc()
-    name = company.get("company_name", "").upper()
-    is_llp = _is_llp(company)
-    if is_llp:
-        label = {
-            "board": "NOTICE OF MEETING OF DESIGNATED PARTNERS",
-            "agm": "NOTICE OF MEETING OF PARTNERS",
-            "egm": "NOTICE OF MEETING OF PARTNERS (EXTRA-ORDINARY)",
-        }.get(req.meeting_type, "NOTICE OF MEETING")
-    else:
-        label = {
-            "board": "NOTICE OF BOARD MEETING",
-            "agm": "NOTICE OF ANNUAL GENERAL MEETING",
-            "egm": "NOTICE OF EXTRA-ORDINARY GENERAL MEETING",
-        }.get(req.meeting_type, "NOTICE OF MEETING")
-    sign_label = "Designated Partner" if is_llp else "Director / Company Secretary"
-    order_label = "By Order of the Designated Partners" if is_llp else "By Order of the Board"
-    _heading(d, name, size=16)
-    _para(d, f"LLPIN: {company.get('cin') or '—'}" if is_llp else f"CIN: {company.get('cin') or '—'}", center=True)
-    _para(d, f"Registered Office: {company.get('registered_office_address') or '—'}", center=True)
-    d.add_paragraph()
-    _heading(d, label, size=13, underline=True)
-    _para(d, f"Notice dated: {_fmt_date(req.notice_date or datetime.now())}")
-    d.add_paragraph()
-    if req.meeting_type == "board":
-        body = "Designated Partners of the LLP" if is_llp else "Board of Directors of the Company"
-        _para(d, f"NOTICE is hereby given that a meeting of the {body} will be held on "
-                 f"{_fmt_date(req.meeting_date)} at {req.meeting_time} at {req.venue}, to transact the following business:")
-    else:
-        body = "Partners of the LLP" if is_llp else "members of the Company"
-        _para(d, f"NOTICE is hereby given that the {label.split('OF ')[-1].title()} of the {body} will be held on "
-                 f"{_fmt_date(req.meeting_date)} at {req.meeting_time} at {req.venue}, to transact the following business:")
-    d.add_paragraph()
-    if req.agenda_items:
-        _para(d, "ORDINARY BUSINESS / AGENDA:", bold=True)
-        for i, item in enumerate(req.agenda_items, 1):
-            _para(d, f"{i}. {item}")
-        d.add_paragraph()
-    if req.special_business:
-        _para(d, "SPECIAL BUSINESS:", bold=True)
-        for i, r in enumerate(req.special_business, 1):
-            _para(d, f"{i}. {r.particulars}", bold=True)
-            _para(d, f'"RESOLVED THAT {r.resolution_text.strip().rstrip(".")}."')
-        d.add_paragraph()
+  const submit = async () => {
+    if (!form.company_name.trim()) { toast.error('Company name is required'); return; }
+    setSaving(true);
+    try {
+      const { data } = await api.post('/roc-sphere/companies', form);
+      toast.success('Company added to ROC Sphere');
+      onCreated(data);
+    } catch (e) {
+      toast.error(await parseBlobError(e) || 'Failed to create company');
+    } finally {
+      setSaving(false);
+    }
+  };
 
-    if req.meeting_type != "board":
-        _para(d, "NOTES:", bold=True)
-        if is_llp:
-            _para(d, "1. Attendance, quorum and voting shall be governed by the provisions of the LLP Agreement.")
-            _para(d, "2. A Partner may be represented by an authorised representative only if expressly permitted by the LLP Agreement.")
-        else:
-            _para(d, "1. A member entitled to attend and vote is entitled to appoint a proxy to attend and vote instead of "
-                     "himself/herself, and such proxy need not be a member of the Company.")
-            _para(d, "2. Proxies, in order to be effective, must be received at the Registered Office not less than 48 hours "
-                     "before the commencement of the meeting.")
-    d.add_paragraph()
-    _para(d, order_label)
-    _para(d, "For " + name, bold=True)
-    d.add_paragraph()
-    _para(d, sign_label)
-    _para(d, f"Prepared by: {prepared_by} (Taskosphere ROC Sphere)", italic=True)
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className={`w-full max-w-lg rounded-xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'} p-5`} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className={`font-semibold ${text}`}>Add Company Manually</h3>
+          <button onClick={onClose}><X size={18} className={muted} /></button>
+        </div>
+        <p className={`text-xs ${muted} mb-3`}>Companies from your Clients list sync in automatically — use this only for a company that isn't a Client yet.</p>
 
-    buf = io.BytesIO()
-    d.save(buf)
-    return buf.getvalue()
+        {eligibleClients.length > 0 && (
+          <div className="mb-3">
+            <label className={`text-xs font-medium ${muted} mb-1 block`}>Or link it to an unsynced client instead</label>
+            <select className={input} onChange={(e) => fromClient(e.target.value)} defaultValue="">
+              <option value="">— Start from scratch —</option>
+              {eligibleClients.map((c) => (
+                <option key={c.client_id} value={c.client_id}>{c.company_name} ({c.client_type})</option>
+              ))}
+            </select>
+          </div>
+        )}
 
+        <div className="space-y-3">
+          <div>
+            <label className={`text-xs font-medium ${muted} mb-1 block`}>Company Name *</label>
+            <input className={input} value={form.company_name} onChange={(e) => setForm({ ...form, company_name: e.target.value })} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={`text-xs font-medium ${muted} mb-1 block`}>Category</label>
+              <select className={input} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+                {Object.entries(CATEGORY_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={`text-xs font-medium ${muted} mb-1 block`}>CIN</label>
+              <input className={input} value={form.cin} onChange={(e) => setForm({ ...form, cin: e.target.value.toUpperCase() })} placeholder="U12345GJ2020PTC000000" />
+            </div>
+          </div>
+          <div>
+            <label className={`text-xs font-medium ${muted} mb-1 block`}>Registered Office Address</label>
+            <input className={input} value={form.registered_office_address} onChange={(e) => setForm({ ...form, registered_office_address: e.target.value })} />
+          </div>
+        </div>
 
-def build_minutes_doc(company: Dict[str, Any], req: MinutesRequest, prepared_by: str) -> bytes:
-    d = _base_doc()
-    name = company.get("company_name", "").upper()
-    is_llp = _is_llp(company)
-    if is_llp:
-        label = {
-            "board": "MINUTES OF THE MEETING OF THE DESIGNATED PARTNERS",
-            "agm": "MINUTES OF THE MEETING OF THE PARTNERS",
-            "egm": "MINUTES OF THE MEETING OF THE PARTNERS (EXTRA-ORDINARY)",
-        }.get(req.meeting_type, "MINUTES OF MEETING")
-    else:
-        label = {
-            "board": "MINUTES OF THE MEETING OF THE BOARD OF DIRECTORS",
-            "agm": "MINUTES OF THE ANNUAL GENERAL MEETING",
-            "egm": "MINUTES OF THE EXTRA-ORDINARY GENERAL MEETING",
-        }.get(req.meeting_type, "MINUTES OF MEETING")
-    present_label = "Designated Partners Present" if is_llp else "Directors Present"
-    absent_label = "Designated Partners Absent (Leave of Absence granted)" if is_llp else "Directors Absent (Leave of Absence granted)"
-    other_label = "Other Partners / Attendees Present" if is_llp else "Members / Attendees Present"
-    _heading(d, name, size=16)
-    _para(d, f"LLPIN: {company.get('cin') or '—'}" if is_llp else f"CIN: {company.get('cin') or '—'}", center=True)
-    d.add_paragraph()
-    _heading(d, label, size=13, underline=True)
-    _para(d, f"Held on {_fmt_date(req.meeting_date)} at {req.meeting_time} at {req.venue}.")
-    d.add_paragraph()
-    if req.meeting_type == "board":
-        _para(d, f"{present_label}: " + (", ".join(req.directors_present) or "—"))
-        if req.directors_absent:
-            _para(d, f"{absent_label}: " + ", ".join(req.directors_absent))
-    else:
-        _para(d, f"{present_label}: " + (", ".join(req.directors_present) or "—"))
-        if req.attendees_other:
-            _para(d, f"{other_label}: " + ", ".join(req.attendees_other))
-    if req.chairman:
-        _para(d, f"{req.chairman} chaired the meeting.")
-    _para(
-        d,
-        "Quorum was confirmed to be present."
-        if req.quorum_present else
-        ("NOTE: Quorum was NOT present — meeting stands adjourned as per the LLP Agreement." if is_llp
-         else "NOTE: Quorum was NOT present — meeting stands adjourned as per Companies Act / AoA provisions.")
-    )
-    d.add_paragraph()
+        <div className="flex justify-end gap-2 mt-5">
+          <button onClick={onClose} className={`px-3 py-1.5 rounded-lg text-sm ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>Cancel</button>
+          <button onClick={submit} disabled={saving} className="px-4 py-1.5 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1.5 disabled:opacity-60">
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Create
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-    if req.discussion_notes:
-        _para(d, "DISCUSSION:", bold=True)
-        _para(d, req.discussion_notes)
-        d.add_paragraph()
+/* ═══════════════════════════════════════════════════════════════════════
+ * Company Master tab
+ * ═══════════════════════════════════════════════════════════════════════ */
 
-    if req.resolutions:
-        _para(d, "RESOLUTIONS PASSED:", bold=True)
-        for i, r in enumerate(req.resolutions, 1):
-            _para(d, f"{i}. {r.particulars}", bold=True)
-            _para(d, f'"RESOLVED THAT {r.resolution_text.strip().rstrip(".")}."')
-            d.add_paragraph()
+function MasterTab({ company, isDark, onSave, input, text, muted }) {
+  const [form, setForm] = useState(company);
+  useEffect(() => setForm(company), [company]);
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  const setNum = (k) => (e) => setForm({ ...form, [k]: parseFloat(e.target.value) || 0 });
 
-    _para(d, "There being no other business, the meeting concluded with a vote of thanks to the Chair.")
-    d.add_paragraph()
-    d.add_paragraph()
-    _para(d, "Designated Partner" if is_llp else "Chairman", bold=True)
-    _para(d, f"Prepared by: {prepared_by} (Taskosphere ROC Sphere)", italic=True)
+  const Field = ({ label, k, type = 'text', numeric }) => (
+    <div>
+      <label className={`text-xs font-medium ${muted} mb-1 block`}>{label}</label>
+      <input type={type} className={input} value={form[k] ?? ''} onChange={numeric ? setNum(k) : set(k)} />
+    </div>
+  );
 
-    buf = io.BytesIO()
-    d.save(buf)
-    return buf.getvalue()
+  return (
+    <div className="space-y-4">
+      <div className="grid sm:grid-cols-2 gap-3">
+        <Field label="Company Name" k="company_name" />
+        <Field label="CIN" k="cin" />
+        <div>
+          <label className={`text-xs font-medium ${muted} mb-1 block`}>Category</label>
+          <select className={input} value={form.category} onChange={set('category')}>
+            {Object.entries(CATEGORY_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </div>
+        <Field label="PAN" k="pan" />
+        <Field label="Date of Incorporation" k="date_of_incorporation" type="date" />
+        <Field label="Financial Year End (MM-DD)" k="financial_year_end" />
+        <Field label="Authorized Capital (Rs.)" k="authorized_capital" numeric />
+        <Field label="Paid-up Capital (Rs.)" k="paid_up_capital" numeric />
+        <Field label="Last Year's Turnover (Rs.)" k="last_year_turnover" numeric />
+        <Field label="Last AGM Date" k="last_agm_date" type="date" />
+        <Field label="Last Board Meeting Date" k="last_board_meeting_date" type="date" />
+      </div>
+      <div>
+        <label className={`text-xs font-medium ${muted} mb-1 block`}>Registered Office Address</label>
+        <textarea className={input} rows={2} value={form.registered_office_address || ''} onChange={set('registered_office_address')} />
+      </div>
 
+      <div className={`rounded-lg border p-3 ${isDark ? 'border-slate-700 bg-slate-900/40' : 'border-slate-200 bg-slate-50'}`}>
+        <p className={`text-xs font-semibold ${muted} mb-2`}>Statutory Auditor</p>
+        <div className="grid sm:grid-cols-2 gap-3">
+          {['name', 'firm_reg_no', 'membership_no'].map((k) => (
+            <div key={k}>
+              <label className={`text-xs font-medium ${muted} mb-1 block capitalize`}>{k.replace(/_/g, ' ')}</label>
+              <input className={input} value={form.auditor?.[k] || ''}
+                onChange={(e) => setForm({ ...form, auditor: { ...(form.auditor || {}), [k]: e.target.value } })} />
+            </div>
+          ))}
+        </div>
+      </div>
 
-def build_shareholders_doc(company: Dict[str, Any], prepared_by: str) -> bytes:
-    d = _base_doc()
-    name = company.get("company_name", "").upper()
-    _heading(d, name, size=16)
-    _para(d, f"CIN: {company.get('cin') or '—'}", center=True)
-    d.add_paragraph()
-    _heading(d, "REGISTER OF MEMBERS / LIST OF SHAREHOLDERS", size=13, underline=True)
-    _para(d, f"As on: {_fmt_date(datetime.now())}")
-    d.add_paragraph()
+      <div>
+        <label className={`text-xs font-medium ${muted} mb-1 block`}>Notes</label>
+        <textarea className={input} rows={2} value={form.notes || ''} onChange={set('notes')} />
+      </div>
 
-    shareholders = company.get("shareholders") or []
-    total_shares = sum(_num(s.get("shares_held")) for s in shareholders) or 1
+      <button onClick={() => onSave(form)} className="px-4 py-2 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1.5">
+        <Save size={14} /> Save Company Master
+      </button>
+    </div>
+  );
+}
 
-    table = d.add_table(rows=1, cols=6)
-    table.style = "Table Grid"
-    hdr = table.rows[0].cells
-    for i, h in enumerate(["Sl. No.", "Name of Member", "Folio No. / PAN", "Class of Shares", "No. of Shares Held", "% Holding"]):
-        hdr[i].text = ""
-        hdr[i].paragraphs[0].add_run(h).bold = True
+/* ═══════════════════════════════════════════════════════════════════════
+ * Directors & Shareholders tab
+ * ═══════════════════════════════════════════════════════════════════════ */
 
-    for idx, s in enumerate(shareholders, 1):
-        row = table.add_row().cells
-        pct = s.get("percentage")
-        if pct is None:
-            pct = round(_num(s.get("shares_held")) / total_shares * 100, 2)
-        row[0].text = str(idx)
-        row[1].text = s.get("name", "")
-        row[2].text = " / ".join(filter(None, [s.get("folio_no"), s.get("pan")])) or "—"
-        row[3].text = s.get("class_of_shares") or "Equity"
-        row[4].text = f"{_num(s.get('shares_held')):,.0f}"
-        row[5].text = f"{pct}%"
+function DirectorsTab({ company, isDark, onSave, input, text, muted }) {
+  const [directors, setDirectors] = useState(company.directors || []);
+  const [designatedPartners, setDesignatedPartners] = useState(company.designated_partners || []);
+  const [partners, setPartners] = useState(company.partners || []);
+  const [shareholders, setShareholders] = useState(company.shareholders || []);
+  const isLLP = company.category === 'llp';
+  useEffect(() => {
+    setDirectors(company.directors || []);
+    setDesignatedPartners(company.designated_partners || []);
+    setPartners(company.partners || []);
+    setShareholders(company.shareholders || []);
+  }, [company]);
 
-    d.add_paragraph()
-    _para(d, f"Total Paid-up Share Capital: Rs. {_num(company.get('paid_up_capital')):,.0f}", bold=True)
-    _para(d, f"Authorized Share Capital: Rs. {_num(company.get('authorized_capital')):,.0f}", bold=True)
-    d.add_paragraph()
-    _para(d, f"Prepared by: {prepared_by} (Taskosphere ROC Sphere)", italic=True)
+  const addDirector = () => setDirectors([...directors, { name: '', din: '', designation: 'Director', date_of_appointment: '' }]);
+  const addPerson = (setter, list, designation) => setter([...list, { name: '', din: '', designation, date_of_appointment: '' }]);
+  const addShareholder = () => setShareholders([...shareholders, { name: '', folio_no: '', shares_held: 0, class_of_shares: 'Equity' }]);
 
-    buf = io.BytesIO()
-    d.save(buf)
-    return buf.getvalue()
+  const totalShares = shareholders.reduce((s, sh) => s + (parseFloat(sh.shares_held) || 0), 0);
+  const renderPeople = (title, list, setList, designationOptions) => (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <h4 className={`text-sm font-semibold ${text}`}>{title}</h4>
+        <button onClick={() => addPerson(setList, list, designationOptions[0])} className="text-xs flex items-center gap-1 text-blue-500"><Plus size={13} /> Add {title.replace(/s$/, '')}</button>
+      </div>
+      <div className="space-y-2">
+        {list.map((d, i) => (
+          <div key={i} className={`grid grid-cols-12 gap-2 items-center p-2 rounded-lg ${isDark ? 'bg-slate-900/40' : 'bg-slate-50'}`}>
+            <input className={`${input} col-span-3`} placeholder="Name" value={d.name || ''} onChange={(e) => { const c = [...list]; c[i] = { ...c[i], name: e.target.value }; setList(c); }} />
+            <input className={`${input} col-span-2`} placeholder="DIN / PAN" value={d.din || d.pan || ''} onChange={(e) => { const c = [...list]; c[i] = { ...c[i], din: e.target.value }; setList(c); }} />
+            <select className={`${input} col-span-3`} value={d.designation || designationOptions[0]} onChange={(e) => { const c = [...list]; c[i] = { ...c[i], designation: e.target.value }; setList(c); }}>
+              {designationOptions.map((x) => <option key={x}>{x}</option>)}
+            </select>
+            <input type="date" className={`${input} col-span-3`} value={(d.date_of_appointment || '').slice(0, 10)} onChange={(e) => { const c = [...list]; c[i] = { ...c[i], date_of_appointment: e.target.value }; setList(c); }} />
+            <button onClick={() => setList(list.filter((_, x) => x !== i))} className="col-span-1 text-red-500"><Trash2 size={14} /></button>
+          </div>
+        ))}
+        {list.length === 0 && <p className={`text-xs ${muted}`}>No {title.toLowerCase()} added yet.</p>}
+      </div>
+    </div>
+  );
 
+  return (
+    <div className="space-y-6">
+      {!isLLP && <div>
+        <div className="flex items-center justify-between mb-2">
+          <h4 className={`text-sm font-semibold ${text}`}>Directors</h4>
+          <button onClick={addDirector} className="text-xs flex items-center gap-1 text-blue-500"><Plus size={13} /> Add Director</button>
+        </div>
+        <div className="space-y-2">
+          {directors.map((d, i) => (
+            <div key={i} className={`grid grid-cols-12 gap-2 items-center p-2 rounded-lg ${isDark ? 'bg-slate-900/40' : 'bg-slate-50'}`}>
+              <input className={`${input} col-span-3`} placeholder="Name" value={d.name} onChange={(e) => { const c = [...directors]; c[i] = { ...c[i], name: e.target.value }; setDirectors(c); }} />
+              <input className={`${input} col-span-2`} placeholder="DIN" value={d.din || ''} onChange={(e) => { const c = [...directors]; c[i] = { ...c[i], din: e.target.value }; setDirectors(c); }} />
+              <select className={`${input} col-span-3`} value={d.designation || 'Director'} onChange={(e) => { const c = [...directors]; c[i] = { ...c[i], designation: e.target.value }; setDirectors(c); }}>
+                {['Director', 'Managing Director', 'Whole-time Director', 'Additional Director', 'Independent Director', 'Nominee Director'].map((x) => <option key={x}>{x}</option>)}
+              </select>
+              <input type="date" className={`${input} col-span-3`} value={d.date_of_appointment || ''} onChange={(e) => { const c = [...directors]; c[i] = { ...c[i], date_of_appointment: e.target.value }; setDirectors(c); }} />
+              <button onClick={() => setDirectors(directors.filter((_, x) => x !== i))} className="col-span-1 text-red-500"><Trash2 size={14} /></button>
+            </div>
+          ))}
+          {directors.length === 0 && <p className={`text-xs ${muted}`}>No directors added yet.</p>}
+        </div>
+      </div>}
 
-def build_checklist_doc(company: Dict[str, Any], checklist: List[Dict[str, Any]], prepared_by: str) -> bytes:
-    d = _base_doc()
-    name = company.get("company_name", "").upper()
-    _heading(d, name, size=16)
-    _para(d, f"CIN: {company.get('cin') or '—'}", center=True)
-    d.add_paragraph()
-    _heading(d, "ROC / COMPANIES ACT, 2013 — COMPLIANCE CHECKLIST", size=13, underline=True)
-    _para(d, f"Generated on: {_fmt_date(datetime.now())}")
-    d.add_paragraph()
+      {isLLP && renderPeople('Designated Partners', designatedPartners, setDesignatedPartners, ['Designated Partner', 'Designated Partner (Managing)'])}
+      {isLLP && renderPeople('Partners', partners, setPartners, ['Partner', 'Nominee Partner'])}
 
-    table = d.add_table(rows=1, cols=5)
-    table.style = "Table Grid"
-    hdr = table.rows[0].cells
-    for i, h in enumerate(["Form / Item", "Particulars", "Due Date Rule", "Frequency", "Applicable"]):
-        hdr[i].text = ""
-        hdr[i].paragraphs[0].add_run(h).bold = True
-    for item in checklist:
-        row = table.add_row().cells
-        row[0].text = item["form"]
-        row[1].text = item["particulars"] + (f" ({item['notes']})" if item.get("notes") else "")
-        row[2].text = item["due_date_rule"]
-        row[3].text = item["frequency"]
-        row[4].text = "Yes" if item["applicable"] else "No"
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h4 className={`text-sm font-semibold ${text}`}>Shareholders {totalShares > 0 && <span className={`font-normal ${muted}`}>(Total: {totalShares.toLocaleString('en-IN')} shares)</span>}</h4>
+          <button onClick={addShareholder} className="text-xs flex items-center gap-1 text-blue-500"><Plus size={13} /> Add Shareholder</button>
+        </div>
+        <div className="space-y-2">
+          {shareholders.map((s, i) => (
+            <div key={i} className={`grid grid-cols-12 gap-2 items-center p-2 rounded-lg ${isDark ? 'bg-slate-900/40' : 'bg-slate-50'}`}>
+              <input className={`${input} col-span-3`} placeholder="Name" value={s.name} onChange={(e) => { const c = [...shareholders]; c[i] = { ...c[i], name: e.target.value }; setShareholders(c); }} />
+              <input className={`${input} col-span-2`} placeholder="Folio / PAN" value={s.folio_no || ''} onChange={(e) => { const c = [...shareholders]; c[i] = { ...c[i], folio_no: e.target.value }; setShareholders(c); }} />
+              <input className={`${input} col-span-2`} placeholder="Class" value={s.class_of_shares || 'Equity'} onChange={(e) => { const c = [...shareholders]; c[i] = { ...c[i], class_of_shares: e.target.value }; setShareholders(c); }} />
+              <input type="number" className={`${input} col-span-3`} placeholder="Shares held" value={s.shares_held || 0} onChange={(e) => { const c = [...shareholders]; c[i] = { ...c[i], shares_held: parseFloat(e.target.value) || 0 }; setShareholders(c); }} />
+              <button onClick={() => setShareholders(shareholders.filter((_, x) => x !== i))} className="col-span-1 text-red-500"><Trash2 size={14} /></button>
+            </div>
+          ))}
+          {shareholders.length === 0 && <p className={`text-xs ${muted}`}>No shareholders added yet.</p>}
+        </div>
+      </div>
 
-    d.add_paragraph()
-    _para(d, "This checklist is a drafting aid generated from the company's category, capital and turnover as "
-             "recorded in Taskosphere. Please verify against the latest MCA notifications before filing.", italic=True)
-    _para(d, f"Prepared by: {prepared_by} (Taskosphere ROC Sphere)", italic=True)
+      <button onClick={() => onSave({ directors, designated_partners: designatedPartners, partners, shareholders })} className="px-4 py-2 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1.5">
+        <Save size={14} /> Save {isLLP ? 'Partners' : 'Directors'} & Shareholders
+      </button>
+    </div>
+  );
+}
 
-    buf = io.BytesIO()
-    d.save(buf)
-    return buf.getvalue()
+/* ═══════════════════════════════════════════════════════════════════════
+ * Shared: resolution-list editor used by Board Resolution + Notice(special business)
+ * ═══════════════════════════════════════════════════════════════════════ */
 
+function ResolutionListEditor({ items, setItems, input, muted }) {
+  const add = () => setItems([...items, { particulars: '', resolution_text: '', proposed_by: '', seconded_by: '' }]);
+  return (
+    <div className="space-y-3">
+      {items.map((r, i) => (
+        <div key={i} className={`p-3 rounded-lg border ${muted.includes('slate-400') ? 'border-slate-700 bg-slate-900/40' : 'border-slate-200 bg-slate-50'} space-y-2`}>
+          <div className="flex items-center justify-between">
+            <span className={`text-xs font-semibold ${muted}`}>Resolution {i + 1}</span>
+            <button onClick={() => setItems(items.filter((_, x) => x !== i))} className="text-red-500"><Trash2 size={13} /></button>
+          </div>
+          <input className={input} placeholder="Particulars (e.g. Opening of Bank Account)" value={r.particulars}
+            onChange={(e) => { const c = [...items]; c[i] = { ...c[i], particulars: e.target.value }; setItems(c); }} />
+          <textarea className={input} rows={2} placeholder='Resolution text — the part after "RESOLVED THAT ..."' value={r.resolution_text}
+            onChange={(e) => { const c = [...items]; c[i] = { ...c[i], resolution_text: e.target.value }; setItems(c); }} />
+          <div className="grid grid-cols-2 gap-2">
+            <input className={input} placeholder="Proposed by" value={r.proposed_by} onChange={(e) => { const c = [...items]; c[i] = { ...c[i], proposed_by: e.target.value }; setItems(c); }} />
+            <input className={input} placeholder="Seconded by" value={r.seconded_by} onChange={(e) => { const c = [...items]; c[i] = { ...c[i], seconded_by: e.target.value }; setItems(c); }} />
+          </div>
+        </div>
+      ))}
+      <button onClick={add} className="text-xs flex items-center gap-1 text-blue-500"><Plus size={13} /> Add Resolution</button>
+    </div>
+  );
+}
 
-def _docx_response(content: bytes, filename: str) -> Response:
-    return Response(
-        content=content,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "Access-Control-Expose-Headers": "Content-Disposition",
-        },
-    )
+/* ═══════════════════════════════════════════════════════════════════════
+ * Board Resolution tab
+ * ═══════════════════════════════════════════════════════════════════════ */
 
+function ResolutionTab({ company, isDark, input, text, muted }) {
+  const [meetingDate, setMeetingDate] = useState('');
+  const [meetingTime, setMeetingTime] = useState('11:00 AM');
+  const [venue, setVenue] = useState('Registered Office of the Company');
+  const [chairman, setChairman] = useState('');
+  const [directorsPresent, setDirectorsPresent] = useState((company.directors || []).map((d) => d.name).join(', '));
+  const [resolutions, setResolutions] = useState([{ particulars: '', resolution_text: '', proposed_by: '', seconded_by: '' }]);
+  const [generating, setGenerating] = useState(false);
 
-def _safe(text: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_-]+", "_", text or "").strip("_") or "Document"
+  const generate = async () => {
+    if (!meetingDate) { toast.error('Meeting date is required'); return; }
+    if (!resolutions.length || !resolutions[0].resolution_text) { toast.error('Add at least one resolution'); return; }
+    setGenerating(true);
+    try {
+      const payload = {
+        meeting_date: meetingDate, meeting_time: meetingTime, venue, chairman,
+        directors_present: directorsPresent.split(',').map((s) => s.trim()).filter(Boolean),
+        resolutions,
+      };
+      const res = await api.post(`/roc-sphere/companies/${company.id}/generate/board-resolution`, payload, { responseType: 'blob' });
+      triggerBlobDownload(res.data, `Board_Resolution_${company.company_name.replace(/\s+/g, '_')}.docx`);
+      toast.success('Board Resolution generated');
+    } catch (e) {
+      toast.error(await parseBlobError(e) || 'Generation failed');
+    } finally {
+      setGenerating(false);
+    }
+  };
 
+  return (
+    <div className="space-y-4">
+      <p className={`text-xs ${muted}`}>Drafts a certified-true-copy style Board Resolution (Companies Act, 2013 / SS-1 format) — review before circulation or filing.</p>
+      <div className="grid sm:grid-cols-3 gap-3">
+        <div><label className={`text-xs font-medium ${muted} mb-1 block`}>Meeting Date *</label><input type="date" className={input} value={meetingDate} onChange={(e) => setMeetingDate(e.target.value)} /></div>
+        <div><label className={`text-xs font-medium ${muted} mb-1 block`}>Time</label><input className={input} value={meetingTime} onChange={(e) => setMeetingTime(e.target.value)} /></div>
+        <div><label className={`text-xs font-medium ${muted} mb-1 block`}>Venue</label><input className={input} value={venue} onChange={(e) => setVenue(e.target.value)} /></div>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <div><label className={`text-xs font-medium ${muted} mb-1 block`}>Chairman</label><input className={input} value={chairman} onChange={(e) => setChairman(e.target.value)} /></div>
+        <div><label className={`text-xs font-medium ${muted} mb-1 block`}>Directors Present (comma separated)</label><input className={input} value={directorsPresent} onChange={(e) => setDirectorsPresent(e.target.value)} /></div>
+      </div>
+      <ResolutionListEditor items={resolutions} setItems={setResolutions} input={input} muted={muted} />
+      <button onClick={generate} disabled={generating} className="px-4 py-2 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1.5 disabled:opacity-60">
+        {generating ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Generate Board Resolution (.docx)
+      </button>
+    </div>
+  );
+}
 
-async def _log_doc(company_id: str, doc_type: str, filename: str, user: User):
-    await DOCS_LOG.insert_one({
-        "id": _uid(),
-        "company_id": company_id,
-        "doc_type": doc_type,
-        "filename": filename,
-        "generated_at": _now(),
-        "generated_by": _who(user),
-    })
+/* ═══════════════════════════════════════════════════════════════════════
+ * Notice of Meeting tab
+ * ═══════════════════════════════════════════════════════════════════════ */
 
+function NoticeTab({ company, isDark, input, text, muted }) {
+  const [meetingType, setMeetingType] = useState('board');
+  const [meetingDate, setMeetingDate] = useState('');
+  const [meetingTime, setMeetingTime] = useState('11:00 AM');
+  const [venue, setVenue] = useState('Registered Office of the Company');
+  const [agendaText, setAgendaText] = useState('');
+  const [specialBusiness, setSpecialBusiness] = useState([]);
+  const [generating, setGenerating] = useState(false);
 
-@router.post("/companies/{company_id}/generate/board-resolution")
-async def generate_board_resolution(company_id: str, req: BoardResolutionRequest, current_user: User = Depends(VIEW)):
-    company = await COMPANIES.find_one({"id": company_id})
-    if not company:
-        raise HTTPException(404, "Company not found")
-    try:
-        content = build_board_resolution_doc(company, req, _who(current_user))
-    except ImportError as e:
-        raise HTTPException(500, f"Document generator not installed on the server: {e}")
-    fname = f"Board_Resolution_{_safe(company.get('company_name'))}_{_safe(req.meeting_date)}.docx"
-    await _log_doc(company_id, "board_resolution", fname, current_user)
-    return _docx_response(content, fname)
+  const generate = async () => {
+    if (!meetingDate) { toast.error('Meeting date is required'); return; }
+    setGenerating(true);
+    try {
+      const payload = {
+        meeting_type: meetingType, meeting_date: meetingDate, meeting_time: meetingTime, venue,
+        agenda_items: agendaText.split('\n').map((s) => s.trim()).filter(Boolean),
+        special_business: specialBusiness,
+      };
+      const res = await api.post(`/roc-sphere/companies/${company.id}/generate/notice`, payload, { responseType: 'blob' });
+      triggerBlobDownload(res.data, `Notice_${meetingType.toUpperCase()}_${company.company_name.replace(/\s+/g, '_')}.docx`);
+      toast.success('Notice generated');
+    } catch (e) {
+      toast.error(await parseBlobError(e) || 'Generation failed');
+    } finally {
+      setGenerating(false);
+    }
+  };
 
+  return (
+    <div className="space-y-4">
+      <p className={`text-xs ${muted}`}>Board Meeting notice needs no minimum notice period under SS-1 unless the AoA says otherwise; General Meeting (AGM/EGM) notices generally require 21 clear days — check applicability of shorter notice.</p>
+      <div className="grid sm:grid-cols-4 gap-3">
+        <div>
+          <label className={`text-xs font-medium ${muted} mb-1 block`}>Meeting Type</label>
+          <select className={input} value={meetingType} onChange={(e) => setMeetingType(e.target.value)}>
+            <option value="board">Board Meeting</option>
+            <option value="agm">Annual General Meeting (AGM)</option>
+            <option value="egm">Extra-Ordinary General Meeting (EGM)</option>
+          </select>
+        </div>
+        <div><label className={`text-xs font-medium ${muted} mb-1 block`}>Meeting Date *</label><input type="date" className={input} value={meetingDate} onChange={(e) => setMeetingDate(e.target.value)} /></div>
+        <div><label className={`text-xs font-medium ${muted} mb-1 block`}>Time</label><input className={input} value={meetingTime} onChange={(e) => setMeetingTime(e.target.value)} /></div>
+        <div><label className={`text-xs font-medium ${muted} mb-1 block`}>Venue</label><input className={input} value={venue} onChange={(e) => setVenue(e.target.value)} /></div>
+      </div>
+      <div>
+        <label className={`text-xs font-medium ${muted} mb-1 block`}>Agenda / Ordinary Business (one per line)</label>
+        <textarea className={input} rows={4} value={agendaText} onChange={(e) => setAgendaText(e.target.value)}
+          placeholder={'To confirm the minutes of the previous meeting\nTo consider and approve the financial statements\n...'} />
+      </div>
+      <div>
+        <label className={`text-xs font-medium ${muted} mb-1 block`}>Special Business (optional)</label>
+        <ResolutionListEditor items={specialBusiness} setItems={setSpecialBusiness} input={input} muted={muted} />
+      </div>
+      <button onClick={generate} disabled={generating} className="px-4 py-2 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1.5 disabled:opacity-60">
+        {generating ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Generate Notice (.docx)
+      </button>
+    </div>
+  );
+}
 
-@router.post("/companies/{company_id}/generate/notice")
-async def generate_notice(company_id: str, req: MeetingNoticeRequest, current_user: User = Depends(VIEW)):
-    company = await COMPANIES.find_one({"id": company_id})
-    if not company:
-        raise HTTPException(404, "Company not found")
-    try:
-        content = build_notice_doc(company, req, _who(current_user))
-    except ImportError as e:
-        raise HTTPException(500, f"Document generator not installed on the server: {e}")
-    fname = f"Notice_{req.meeting_type.upper()}_{_safe(company.get('company_name'))}_{_safe(req.meeting_date)}.docx"
-    await _log_doc(company_id, f"notice_{req.meeting_type}", fname, current_user)
-    return _docx_response(content, fname)
+/* ═══════════════════════════════════════════════════════════════════════
+ * Minutes of Meeting tab
+ * ═══════════════════════════════════════════════════════════════════════ */
 
+function MinutesTab({ company, isDark, input, text, muted }) {
+  const [meetingType, setMeetingType] = useState('board');
+  const [meetingDate, setMeetingDate] = useState('');
+  const [meetingTime, setMeetingTime] = useState('11:00 AM');
+  const [venue, setVenue] = useState('Registered Office of the Company');
+  const [chairman, setChairman] = useState('');
+  const [directorsPresent, setDirectorsPresent] = useState((company.directors || []).map((d) => d.name).join(', '));
+  const [directorsAbsent, setDirectorsAbsent] = useState('');
+  const [attendeesOther, setAttendeesOther] = useState('');
+  const [discussion, setDiscussion] = useState('');
+  const [resolutions, setResolutions] = useState([]);
+  const [generating, setGenerating] = useState(false);
 
-@router.post("/companies/{company_id}/generate/minutes")
-async def generate_minutes(company_id: str, req: MinutesRequest, current_user: User = Depends(VIEW)):
-    company = await COMPANIES.find_one({"id": company_id})
-    if not company:
-        raise HTTPException(404, "Company not found")
-    try:
-        content = build_minutes_doc(company, req, _who(current_user))
-    except ImportError as e:
-        raise HTTPException(500, f"Document generator not installed on the server: {e}")
-    fname = f"Minutes_{req.meeting_type.upper()}_{_safe(company.get('company_name'))}_{_safe(req.meeting_date)}.docx"
-    await _log_doc(company_id, f"minutes_{req.meeting_type}", fname, current_user)
-    return _docx_response(content, fname)
+  const generate = async () => {
+    if (!meetingDate) { toast.error('Meeting date is required'); return; }
+    setGenerating(true);
+    try {
+      const payload = {
+        meeting_type: meetingType, meeting_date: meetingDate, meeting_time: meetingTime, venue, chairman,
+        directors_present: directorsPresent.split(',').map((s) => s.trim()).filter(Boolean),
+        directors_absent: directorsAbsent.split(',').map((s) => s.trim()).filter(Boolean),
+        attendees_other: attendeesOther.split(',').map((s) => s.trim()).filter(Boolean),
+        quorum_present: true,
+        discussion_notes: discussion,
+        resolutions,
+      };
+      const res = await api.post(`/roc-sphere/companies/${company.id}/generate/minutes`, payload, { responseType: 'blob' });
+      triggerBlobDownload(res.data, `Minutes_${meetingType.toUpperCase()}_${company.company_name.replace(/\s+/g, '_')}.docx`);
+      toast.success('Minutes generated');
+    } catch (e) {
+      toast.error(await parseBlobError(e) || 'Generation failed');
+    } finally {
+      setGenerating(false);
+    }
+  };
 
+  return (
+    <div className="space-y-4">
+      <p className={`text-xs ${muted}`}>Minutes must be entered in the Minutes Book within 30 days of the meeting (Sec. 118) and signed by the Chairman.</p>
+      <div className="grid sm:grid-cols-4 gap-3">
+        <div>
+          <label className={`text-xs font-medium ${muted} mb-1 block`}>Meeting Type</label>
+          <select className={input} value={meetingType} onChange={(e) => setMeetingType(e.target.value)}>
+            <option value="board">Board Meeting</option>
+            <option value="agm">Annual General Meeting (AGM)</option>
+            <option value="egm">Extra-Ordinary General Meeting (EGM)</option>
+          </select>
+        </div>
+        <div><label className={`text-xs font-medium ${muted} mb-1 block`}>Meeting Date *</label><input type="date" className={input} value={meetingDate} onChange={(e) => setMeetingDate(e.target.value)} /></div>
+        <div><label className={`text-xs font-medium ${muted} mb-1 block`}>Time</label><input className={input} value={meetingTime} onChange={(e) => setMeetingTime(e.target.value)} /></div>
+        <div><label className={`text-xs font-medium ${muted} mb-1 block`}>Venue</label><input className={input} value={venue} onChange={(e) => setVenue(e.target.value)} /></div>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <div><label className={`text-xs font-medium ${muted} mb-1 block`}>Chairman</label><input className={input} value={chairman} onChange={(e) => setChairman(e.target.value)} /></div>
+        <div><label className={`text-xs font-medium ${muted} mb-1 block`}>Present (comma separated)</label><input className={input} value={directorsPresent} onChange={(e) => setDirectorsPresent(e.target.value)} /></div>
+        <div><label className={`text-xs font-medium ${muted} mb-1 block`}>Absent / Leave granted</label><input className={input} value={directorsAbsent} onChange={(e) => setDirectorsAbsent(e.target.value)} /></div>
+        <div><label className={`text-xs font-medium ${muted} mb-1 block`}>Other attendees (auditor, CS, invitees)</label><input className={input} value={attendeesOther} onChange={(e) => setAttendeesOther(e.target.value)} /></div>
+      </div>
+      <div>
+        <label className={`text-xs font-medium ${muted} mb-1 block`}>Discussion Notes (optional)</label>
+        <textarea className={input} rows={2} value={discussion} onChange={(e) => setDiscussion(e.target.value)} />
+      </div>
+      <div>
+        <label className={`text-xs font-medium ${muted} mb-1 block`}>Resolutions Passed</label>
+        <ResolutionListEditor items={resolutions} setItems={setResolutions} input={input} muted={muted} />
+      </div>
+      <button onClick={generate} disabled={generating} className="px-4 py-2 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1.5 disabled:opacity-60">
+        {generating ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Generate Minutes (.docx)
+      </button>
+    </div>
+  );
+}
 
-@router.get("/companies/{company_id}/generate/shareholders")
-async def generate_shareholders(company_id: str, current_user: User = Depends(VIEW)):
-    company = await COMPANIES.find_one({"id": company_id})
-    if not company:
-        raise HTTPException(404, "Company not found")
-    try:
-        content = build_shareholders_doc(company, _who(current_user))
-    except ImportError as e:
-        raise HTTPException(500, f"Document generator not installed on the server: {e}")
-    fname = f"Shareholders_{_safe(company.get('company_name'))}.docx"
-    await _log_doc(company_id, "shareholders", fname, current_user)
-    return _docx_response(content, fname)
+/* ═══════════════════════════════════════════════════════════════════════
+ * Compliance Checklist tab
+ * ═══════════════════════════════════════════════════════════════════════ */
 
+function ChecklistTab({ company, isDark, text, muted }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
 
-@router.get("/companies/{company_id}/generate/checklist")
-async def generate_checklist_doc(company_id: str, current_user: User = Depends(VIEW)):
-    company = await COMPANIES.find_one({"id": company_id})
-    if not company:
-        raise HTTPException(404, "Company not found")
-    checklist = build_compliance_checklist(company)
-    try:
-        content = build_checklist_doc(company, checklist, _who(current_user))
-    except ImportError as e:
-        raise HTTPException(500, f"Document generator not installed on the server: {e}")
-    fname = f"Compliance_Checklist_{_safe(company.get('company_name'))}.docx"
-    await _log_doc(company_id, "checklist", fname, current_user)
-    return _docx_response(content, fname)
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const { data: d } = await api.get(`/roc-sphere/companies/${company.id}/compliance-checklist`);
+        setData(d);
+      } catch {
+        toast.error('Failed to compute checklist');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [company.id]);
 
+  const downloadShareholders = async () => {
+    try {
+      const res = await api.get(`/roc-sphere/companies/${company.id}/generate/shareholders`, { responseType: 'blob' });
+      triggerBlobDownload(res.data, `Shareholders_${company.company_name.replace(/\s+/g, '_')}.docx`);
+    } catch (e) { toast.error(await parseBlobError(e) || 'Download failed'); }
+  };
 
-@router.get("/companies/{company_id}/documents")
-async def list_generated_documents(company_id: str, current_user: User = Depends(VIEW)):
-    cursor = DOCS_LOG.find({"company_id": company_id}).sort("generated_at", -1)
-    items = [x async for x in cursor]
-    for x in items:
-        x.pop("_id", None)
-    return items
+  const downloadChecklist = async () => {
+    setDownloading(true);
+    try {
+      const res = await api.get(`/roc-sphere/companies/${company.id}/generate/checklist`, { responseType: 'blob' });
+      triggerBlobDownload(res.data, `Compliance_Checklist_${company.company_name.replace(/\s+/g, '_')}.docx`);
+    } catch (e) { toast.error(await parseBlobError(e) || 'Download failed'); } finally { setDownloading(false); }
+  };
+
+  if (loading) return <div className="flex justify-center py-10"><Loader2 className="animate-spin" size={20} /></div>;
+  if (!data) return null;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className={`text-xs ${muted} flex items-center gap-1.5`}>
+          <Info size={13} /> {data.is_small_company ? 'Classified as a Small Company' : 'Not classified as a Small Company'} based on current capital/turnover.
+        </div>
+        <div className="flex gap-2">
+          <button onClick={downloadShareholders} className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-600/20 text-slate-500 hover:bg-slate-600/30">
+            <Download size={12} /> Shareholder Register
+          </button>
+          <button onClick={downloadChecklist} disabled={downloading} className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-60">
+            {downloading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />} Download Checklist (.docx)
+          </button>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto rounded-lg border border-slate-700/40">
+        <table className="w-full text-xs">
+          <thead className={isDark ? 'bg-slate-900/60' : 'bg-slate-100'}>
+            <tr>
+              {['Form / Item', 'Particulars', 'Due Date Rule', 'Frequency', 'Applicable'].map((h) => (
+                <th key={h} className={`text-left px-3 py-2 font-semibold ${muted}`}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {data.checklist.map((item, i) => (
+              <tr key={i} className={`border-t ${isDark ? 'border-slate-800' : 'border-slate-200'} ${!item.applicable ? 'opacity-40' : ''}`}>
+                <td className={`px-3 py-2 font-medium ${text}`}>{item.form}</td>
+                <td className={`px-3 py-2 ${muted}`}>{item.particulars}{item.notes && <span className="block text-[10px] italic">{item.notes}</span>}</td>
+                <td className={`px-3 py-2 ${muted}`}>{item.due_date_rule}</td>
+                <td className={`px-3 py-2 ${muted}`}>{item.frequency}</td>
+                <td className="px-3 py-2">
+                  {item.applicable ? <CheckCircle2 size={14} className="text-emerald-500" /> : <span className={muted}>N/A</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className={`text-[11px] ${muted} flex items-start gap-1.5`}>
+        <AlertTriangle size={13} className="shrink-0 mt-0.5" /> {data.disclaimer}
+      </p>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * Upload AOC-4 / MGT-7 tab
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+function UploadTab({ company, isDark, input, text, muted, onApplied }) {
+  const [masterFiles, setMasterFiles] = useState([]);
+  const [rocFiles, setRocFiles] = useState([]);
+  const [extracting, setExtracting] = useState(false);
+  const [extracted, setExtracted] = useState(null);
+  const [results, setResults] = useState([]);
+
+  const handleUpload = async (files, sourceType, apply) => {
+    if (!files.length) { toast.error(`Choose ${sourceType === 'master' ? 'master data' : 'ROC form'} files first`); return; }
+    setExtracting(true);
+    try {
+      const fd = new FormData();
+      files.forEach((file) => fd.append('files', file));
+      fd.append('source_type', sourceType);
+      fd.append('apply', apply ? 'true' : 'false');
+      const { data } = await api.post(`/roc-sphere/companies/${company.id}/upload-master-data`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setExtracted(data.extracted);
+      setResults(data.results || []);
+      if (apply && data.applied) {
+        toast.success('Company master updated from upload');
+        onApplied();
+      } else if (!Object.keys(data.extracted || {}).some((k) => !k.startsWith('_'))) {
+        toast.error(data.message || 'Could not extract fields — please enter manually');
+      } else {
+        toast.success('Fields extracted — review below, then Apply');
+      }
+    } catch (e) {
+      toast.error(await parseBlobError(e) || 'Upload failed');
+    } finally {
+      setExtracting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <h3 className={`text-sm font-semibold ${text}`}>Upload ROC Forms</h3>
+      <p className={`text-xs ${muted}`}>
+        Upload MCA master data, AOC-4, MGT-7, MGT-7A, DIR-12 or other ROC forms. Company details and directors are
+        read from master data; MGT-7/MGT-7A and shareholder attachments are merged into the shareholder register.
+        Applied details are saved in both ROC Company Master and the linked Client record.
+      </p>
+      <div className="grid md:grid-cols-2 gap-3">
+        <div className={`rounded-lg border-2 border-dashed p-4 ${isDark ? 'border-slate-700' : 'border-slate-300'}`}>
+          <p className={`text-xs font-semibold ${text} mb-1`}>Master Data (separate extraction)</p>
+          <p className={`text-[11px] ${muted} mb-3`}>Upload MCA master-data XLSX, XLS or CSV files.</p>
+          <input type="file" multiple accept=".xlsx,.xls,.csv" onChange={(e) => setMasterFiles(Array.from(e.target.files || []))}
+            className={`text-xs ${muted}`} />
+          {!!masterFiles.length && <p className={`text-xs mt-2 ${text}`}>{masterFiles.length} master file(s) selected</p>}
+          <div className="flex gap-2 mt-3">
+            <button onClick={() => handleUpload(masterFiles, 'master', false)} disabled={extracting || !masterFiles.length}
+              className={`px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 disabled:opacity-60 ${isDark ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-700'}`}>
+              <FileText size={13} /> Preview Master Data
+            </button>
+            <button onClick={() => handleUpload(masterFiles, 'master', true)} disabled={extracting || !masterFiles.length}
+              className="px-3 py-1.5 rounded-lg text-xs bg-blue-600 text-white flex items-center gap-1 disabled:opacity-60">
+              <CheckCircle2 size={13} /> Apply
+            </button>
+          </div>
+        </div>
+        <div className={`rounded-lg border-2 border-dashed p-4 ${isDark ? 'border-slate-700' : 'border-slate-300'}`}>
+          <p className={`text-xs font-semibold ${text} mb-1`}>ROC Forms (filing extraction)</p>
+          <p className={`text-[11px] ${muted} mb-3`}>Upload multiple AOC-4, MGT-7, MGT-7A, DIR-12 or other ROC PDFs.</p>
+          <input type="file" multiple accept=".pdf" onChange={(e) => setRocFiles(Array.from(e.target.files || []))}
+            className={`text-xs ${muted}`} />
+          {!!rocFiles.length && <p className={`text-xs mt-2 ${text}`}>{rocFiles.length} ROC form(s) selected</p>}
+          <div className="flex gap-2 mt-3">
+            <button onClick={() => handleUpload(rocFiles, 'roc', false)} disabled={extracting || !rocFiles.length}
+              className={`px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 disabled:opacity-60 ${isDark ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-700'}`}>
+              <FileText size={13} /> Preview ROC Forms
+            </button>
+            <button onClick={() => handleUpload(rocFiles, 'roc', true)} disabled={extracting || !rocFiles.length}
+              className="px-3 py-1.5 rounded-lg text-xs bg-blue-600 text-white flex items-center gap-1 disabled:opacity-60">
+              <CheckCircle2 size={13} /> Apply
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {extracted && (
+        <div className={`rounded-lg border p-3 ${isDark ? 'border-slate-700 bg-slate-900/40' : 'border-slate-200 bg-slate-50'}`}>
+          <p className={`text-xs font-semibold ${muted} mb-2`}>Extracted fields</p>
+          {results.length > 0 && <p className={`text-[11px] ${muted} mb-2`}>{results.map((r) => `${r.filename} (${r.source_type})`).join(' · ')}</p>}
+          <div className="grid sm:grid-cols-2 gap-2 text-xs">
+            {Object.entries(extracted).filter(([k, v]) => !k.startsWith('_') && !Array.isArray(v)).map(([k, v]) => (
+              <div key={k} className="flex justify-between gap-2">
+                <span className={muted}>{k.replace(/_/g, ' ')}</span>
+                <span className={text}>{String(v)}</span>
+              </div>
+            ))}
+            {extracted.directors && (
+              <div className="sm:col-span-2">
+                <span className={muted}>directors / partners</span>
+                <span className={`${text} block`}>{extracted.directors.map((p) => `${p.name}${p.din ? ` (${p.din})` : ''}`).join(', ')}</span>
+              </div>
+            )}
+            {extracted.shareholders && (
+              <div className="sm:col-span-2">
+                <span className={muted}>shareholders</span>
+                <span className={`${text} block`}>{extracted.shareholders.map((p) => `${p.name} — ${p.shares_held || 0} shares`).join(', ')}</span>
+              </div>
+            )}
+            {!Object.keys(extracted).filter((k) => !k.startsWith('_') && !['directors', 'shareholders'].includes(k)).length && !extracted.directors && !extracted.shareholders && (
+              <p className={muted}>No fields could be confidently extracted from this file.</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
