@@ -592,76 +592,109 @@ def parse_master_data(filename: str, raw: bytes) -> Dict[str, Any]:
     return extracted
 
 
+ROC_FORM_ALLOWED_EXT = (".pdf",)
+ROC_FORM_RECOGNIZED = (
+    ("aoc-4", r"aoc[- ]?4"), ("mgt-7a", r"mgt[- ]?7a"), ("mgt-7", r"mgt[- ]?7\b"),
+    ("dir-12", r"dir[- ]?12"), ("adt-1", r"adt[- ]?1"), ("inc-22", r"inc[- ]?22"),
+    ("pas-3", r"pas[- ]?3"), ("mgt-14", r"mgt[- ]?14"), ("dpt-3", r"dpt[- ]?3"),
+)
+
+
+def _identify_roc_form_type(filename: str, text: str) -> str:
+    """Best-effort filing-type label for the audit trail — checked against
+    both the filename and the extracted text since MCA acknowledgement
+    PDFs are sometimes downloaded with generic names."""
+    hay = f"{filename}\n{text[:1500]}".lower()
+    for label, pattern in ROC_FORM_RECOGNIZED:
+        if re.search(pattern, hay):
+            return label
+    return "roc-form"
+
+
 @router.post("/companies/{company_id}/upload-master-data")
 async def upload_master_data(
     company_id: str,
     files: List[UploadFile] = File(...),
     apply: bool = Form(False),
-    source_type: str = Form("auto"),
+    source_type: str = Form("roc"),
     current_user: User = Depends(CREATE),
 ):
-    """Process a batch of files while keeping master data and ROC filings
-    on separate extraction paths.
+    """Upload ROC Forms — AOC-4, MGT-7, MGT-7A, DIR-12, ADT-1, INC-22, PAS-3,
+    MGT-14, DPT-3 acknowledgement PDFs — and best-effort extract filing data
+    (financials, shareholders) to prefill the company master.
 
-    Master data is expected to be XLSX/CSV (or explicitly labelled master)
-    and populates company identity plus directors. ROC forms are processed as
-    filings and populate filing-specific fields/shareholders. Multiple files
-    in either group are merged in one request.
+    This is the *filing extraction* path and is intentionally separate from
+    the Master Data importer below (`/companies/{id}/master-data/fetch`),
+    which reads the MCA "Company/LLP Master Data" export instead. Keeping
+    them on separate endpoints/parsers means a bad or unusual ROC form
+    never affects Master Data accuracy and vice versa. Robust to partial
+    batch failures: one unreadable file no longer aborts the whole upload.
     """
     company = await COMPANIES.find_one({"id": company_id})
     if not company:
         raise HTTPException(404, "Company not found")
     if not files:
-        raise HTTPException(400, "Choose at least one file")
+        raise HTTPException(400, "Choose at least one ROC form (PDF)")
+
     results = []
-    master_extracted: Dict[str, Any] = {}
+    errors: List[str] = []
     roc_extracted: Dict[str, Any] = {}
     total_size = 0
+
     for uploaded in files:
+        filename = uploaded.filename or "uploaded-file"
+        if not filename.lower().endswith(ROC_FORM_ALLOWED_EXT):
+            errors.append(f"{filename}: skipped — ROC Forms must be PDF (use the Master Data tab for XLSX/CSV)")
+            continue
         raw = await uploaded.read()
         total_size += len(raw)
         if total_size > 50 * 1024 * 1024:
-            raise HTTPException(400, "Combined file size too large (50MB limit)")
-        filename = uploaded.filename or "uploaded-file"
-        is_master = source_type == "master" or (
-            source_type == "auto" and filename.lower().endswith((".xlsx", ".xls", ".csv"))
-        )
-        extracted = parse_master_data(filename, raw)
-        extracted["_source_type"] = "master-data" if is_master else "roc-form"
-        result = {"filename": filename, "source_type": extracted["_source_type"],
-                  "extracted": {k: v for k, v in extracted.items() if not k.startswith("_")}}
-        results.append(result)
-        target = master_extracted if is_master else roc_extracted
+            errors.append(f"{filename}: skipped — combined upload exceeds the 50MB limit")
+            continue
+        if not raw:
+            errors.append(f"{filename}: skipped — empty file")
+            continue
+        try:
+            extracted = parse_master_data(filename, raw)
+        except Exception as e:  # a single corrupt/scanned PDF must not kill the batch
+            logger.warning("roc_sphere upload-roc-form: failed to parse %s: %s", filename, e)
+            errors.append(f"{filename}: could not be read — it may be scanned/image-only or password-protected")
+            continue
+
+        form_type = _identify_roc_form_type(filename, "")
+        extracted["_source_type"] = form_type
+        fields_found = {k: v for k, v in extracted.items() if not k.startswith("_")}
+        results.append({"filename": filename, "source_type": form_type, "extracted": fields_found,
+                         "fields_found": len(fields_found)})
         for key, value in extracted.items():
             if not key.startswith("_") and value:
-                target[key] = value
+                roc_extracted[key] = value
         if extracted.get("_directors"):
-            target["_directors"] = (target.get("_directors") or []) + extracted["_directors"]
+            roc_extracted["_directors"] = (roc_extracted.get("_directors") or []) + extracted["_directors"]
         if extracted.get("_shareholders"):
-            target["_shareholders"] = (target.get("_shareholders") or []) + extracted["_shareholders"]
+            roc_extracted["_shareholders"] = (roc_extracted.get("_shareholders") or []) + extracted["_shareholders"]
 
-    extracted = {**master_extracted, **roc_extracted}
-    if not any(k for k in extracted if not k.startswith("_")):
+    if not any(k for k in roc_extracted if not k.startswith("_")):
         return {
             "extracted": {},
             "results": results,
             "applied": False,
-            "message": "Could not confidently extract fields from this file — please enter details manually.",
+            "errors": errors,
+            "message": errors[0] if errors and len(errors) == len(files) else
+                       "Could not confidently extract fields from these forms — please enter details manually.",
         }
+
     if apply:
-        clean = {k: v for k, v in extracted.items() if not k.startswith("_") and v}
-        if master_extracted.get("_directors"):
+        clean = {k: v for k, v in roc_extracted.items() if not k.startswith("_") and v}
+        if roc_extracted.get("_directors"):
             if company.get("category") == "llp":
-                clean["designated_partners"] = master_extracted["_directors"]
-                clean["partners"] = master_extracted["_directors"]
+                clean["designated_partners"] = roc_extracted["_directors"]
+                clean["partners"] = roc_extracted["_directors"]
             else:
-                clean["directors"] = master_extracted["_directors"]
+                clean["directors"] = roc_extracted["_directors"]
         if roc_extracted.get("_shareholders"):
             clean["shareholders"] = roc_extracted["_shareholders"]
-        if master_extracted:
-            clean["master_data"] = {k: v for k, v in master_extracted.items() if not k.startswith("_")}
-        if roc_extracted:
-            clean["mgt_shareholder_data"] = {k: v for k, v in roc_extracted.items() if not k.startswith("_")}
+        clean["mgt_shareholder_data"] = {k: v for k, v in roc_extracted.items() if not k.startswith("_")}
         clean["roc_form_uploads"] = (company.get("roc_form_uploads") or []) + [
             {"filename": r["filename"], "form_type": r["source_type"], "uploaded_at": _now().isoformat()}
             for r in results
@@ -669,13 +702,339 @@ async def upload_master_data(
         clean["updated_at"] = _now()
         await COMPANIES.update_one({"id": company_id}, {"$set": clean})
         await _sync_company_to_client({**company, **clean})
-    # Private parser keys are useful to the apply step but not to the UI.
-    visible = {k: v for k, v in extracted.items() if not k.startswith("_")}
-    if extracted.get("_directors"):
-        visible["directors"] = extracted["_directors"]
-    if extracted.get("_shareholders"):
-        visible["shareholders"] = extracted["_shareholders"]
-    return {"extracted": visible, "results": results, "applied": bool(apply)}
+
+    visible = {k: v for k, v in roc_extracted.items() if not k.startswith("_")}
+    if roc_extracted.get("_directors"):
+        visible["directors"] = roc_extracted["_directors"]
+    if roc_extracted.get("_shareholders"):
+        visible["shareholders"] = roc_extracted["_shareholders"]
+    return {"extracted": visible, "results": results, "applied": bool(apply), "errors": errors}
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# MASTER DATA IMPORTER — separate extraction path from Upload ROC Forms
+# ─────────────────────────────────────────────────────────────────────────
+# Reads the MCA "View Company/LLP Master Data" export (the printable PDF
+# from the MCA portal's Master Data service, or an MCA master-data
+# XLSX/CSV). Own text-reading strategy (PDF text-flow order, since the
+# Master Data PDF is a two-column label/value layout that default PDF text
+# extraction jumbles), own label dictionary, own field mapper. Deliberately
+# does not share parse_master_data()/upload_master_data() above — a change
+# to ROC filing parsing must never silently change Master Data parsing.
+#
+# Behaviour mirrors "Smart Import" on the Clients page: upload → fields are
+# fetched and applied to the Company Master automatically, no manual
+# per-field Apply step.
+
+MASTER_DATA_ALLOWED_EXT = (".pdf", ".xlsx", ".xls", ".csv")
+
+# (internal field name, label phrases as they appear on the MCA export)
+MASTER_DATA_LABELS: List[tuple] = [
+    ("cin", ("cin", "llpin")),
+    ("company_name", ("company name", "name of the company", "llp name")),
+    ("roc_name", ("roc name",)),
+    ("registration_number", ("registration number",)),
+    ("date_of_incorporation", ("date of incorporation",)),
+    ("email", ("email id", "email")),
+    ("registered_office_address", ("registered address", "registered office address")),
+    ("listed", ("listed in stock exchange",)),
+    ("company_category_raw", ("category of company",)),
+    ("company_subcategory_raw", ("subcategory of the company",)),
+    ("class_of_company_raw", ("class of company",)),
+    ("active_compliance_raw", ("active compliance",)),
+    ("authorized_capital", ("authorised capital", "authorized capital")),
+    ("paid_up_capital", ("paid up capital", "paid-up capital")),
+    ("last_agm_date", ("date of last agm",)),
+    ("date_of_balance_sheet", ("date of balance sheet",)),
+    ("company_status", ("company status",)),
+    ("roc_office", ("roc (name and office)", "roc name and office")),
+    ("rd_region", ("rd (name and region)", "rd name and region")),
+    ("pan", ("pan", "permanent account number")),
+    # stop-only markers — never stored, just tell the collector where a
+    # multi-line value (e.g. the wrapped registered address) ends
+    ("_stop_books_address", ("address at which the books of account",)),
+    ("_stop_index_of_charges", ("index of charges",)),
+    ("_stop_jurisdiction", ("jurisdiction",)),
+    ("_stop_director_block", ("director/signatory details", "director / signatory details")),
+]
+
+
+def _match_master_label(line_lower: str):
+    for field, phrases in MASTER_DATA_LABELS:
+        for p in phrases:
+            if line_lower == p or line_lower.startswith(p + " ") or line_lower.startswith(p + ":"):
+                return field, p
+    return None, None
+
+
+def _read_master_data_text(filename: str, raw: bytes) -> str:
+    """Own file→text reader for Master Data uploads. PDFs use text-flow
+    ordering (reading order by position rather than raw stream order) so
+    the label/value pairs on the MCA export don't get scrambled — the
+    default extraction used for ROC forms gets this layout wrong."""
+    name = (filename or "").lower()
+    try:
+        if name.endswith(".pdf"):
+            import pdfplumber
+            parts = []
+            with pdfplumber.open(io.BytesIO(raw)) as pdf:
+                for page in pdf.pages[:8]:
+                    t = None
+                    try:
+                        t = page.extract_text(use_text_flow=True)
+                    except Exception:
+                        t = None
+                    parts.append(t or page.extract_text() or "")
+            return "\n".join(parts)
+        if name.endswith((".xlsx", ".xls")):
+            import openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(raw), data_only=True)
+            lines = []
+            for ws in wb.worksheets:
+                for row in ws.iter_rows(values_only=True):
+                    cells = [str(c).strip() for c in row if c is not None and str(c).strip()]
+                    if cells:
+                        lines.append(" ".join(cells))
+            return "\n".join(lines)
+        if name.endswith(".csv"):
+            return raw.decode("utf-8-sig", errors="ignore")
+        return raw.decode("utf-8", errors="ignore")
+    except Exception as e:  # pragma: no cover
+        logger.warning("roc_sphere master-data: text extraction failed for %s: %s", filename, e)
+        return ""
+
+
+def _parse_master_director_tables(raw: bytes) -> List[Dict[str, Any]]:
+    """Read the Director/Signatory table straight from the PDF's table
+    grid (bordered on the MCA Master Data export) rather than scanning
+    text lines — far more reliable than regex here since the table's
+    column count varies (older exports omit the 'Category' column) but
+    the last three columns are always Date of Appointment / Cessation
+    Date / Signatory, letting position alone locate every field."""
+    directors: List[Dict[str, Any]] = []
+    try:
+        import pdfplumber
+        with pdfplumber.open(io.BytesIO(raw)) as pdf:
+            for page in pdf.pages:
+                for table in (page.extract_tables() or []):
+                    if not table or len(table) < 2:
+                        continue
+                    header_line = " ".join(str(c or "") for c in table[0]).lower()
+                    if "din" not in header_line:
+                        continue
+                    for row in table[1:]:
+                        if not row or len(row) < 4 or not any(row):
+                            continue
+                        name = str(row[2] or "").replace("\n", " ").strip()
+                        din = str(row[1] or "").replace("\n", " ").strip()
+                        if not name or not din or not re.search(r"[A-Za-z]", name) or not re.search(r"\d", din):
+                            continue
+                        appt_i, cess_i = len(row) - 3, len(row) - 2
+                        directors.append({
+                            "name": re.sub(r"\s+", " ", name),
+                            "din": din,
+                            "designation": (str(row[3] or "").replace("\n", " ").strip() or "Director"),
+                            "date_of_appointment": str(row[appt_i] or "").strip() or None if appt_i > 0 else None,
+                            "date_of_cessation": (str(row[cess_i] or "").strip() or None) if 0 <= cess_i < len(row) and str(row[cess_i] or "").strip() not in ("", "-") else None,
+                        })
+    except Exception as e:  # pragma: no cover
+        logger.warning("roc_sphere master-data: director table extraction failed: %s", e)
+    return directors
+
+
+def _map_master_category(class_of_company_raw: Optional[str], category_raw: Optional[str], is_llp_hint: bool) -> Optional[str]:
+    if is_llp_hint:
+        return "llp"
+    c = (class_of_company_raw or "").strip().lower()
+    cat = (category_raw or "").strip().lower()
+    if "one person" in cat:
+        return "opc"
+    if "section 8" in cat or "section-8" in cat or "u/s 8" in cat:
+        return "section_8"
+    if "public" in c:
+        return "public"
+    if "private" in c:
+        return "private"
+    return None
+
+
+def extract_mca_master_data(filename: str, raw: bytes) -> Dict[str, Any]:
+    """Parse an MCA Master Data export (PDF/XLSX/CSV) into Company Master
+    fields. Separate parser/algorithm from parse_master_data() above —
+    walks the document as an ordered label→value sequence (handling both
+    same-line values like 'CIN U80900GJ...' and MCA's multi-line wrapped
+    values like the registered address) rather than regex-scanning the
+    whole blob."""
+    text = _read_master_data_text(filename, raw)
+    lines = [re.sub(r"\s+", " ", x).strip() for x in text.splitlines()]
+    lines = [x for x in lines if x]
+
+    extracted: Dict[str, Any] = {}
+    i, n = 0, len(lines)
+    while i < n:
+        line = lines[i]
+        low = line.lower().rstrip(":")
+        field, phrase = _match_master_label(low)
+        if not field:
+            i += 1
+            continue
+        if field.startswith("_stop_"):
+            i += 1
+            continue
+        remainder = line[len(phrase):].strip(" :\t-")
+        if remainder:
+            value_parts, j = [remainder], i + 1
+        else:
+            value_parts, j = [], i + 1
+            while j < n:
+                nxt_field, _ = _match_master_label(lines[j].lower().rstrip(":"))
+                if nxt_field:
+                    break
+                value_parts.append(lines[j])
+                j += 1
+        value = " ".join(p for p in value_parts if p).strip(" ,")
+        if value and value not in ("-", "—", "NA", "N/A") and field not in extracted:
+            extracted[field] = value
+        i = j if j > i else i + 1
+
+    for f in ("authorized_capital", "paid_up_capital"):
+        if f in extracted:
+            digits = re.sub(r"[^\d.]", "", str(extracted[f]))
+            extracted[f] = _num(digits) if digits else 0.0
+
+    if "listed" in extracted:
+        extracted["listed"] = str(extracted["listed"]).strip().lower().startswith("y")
+
+    is_llp_hint = bool(re.search(r"\bLLPIN\b", text, re.I))
+    mapped_category = _map_master_category(
+        extracted.pop("class_of_company_raw", None), extracted.get("company_category_raw"), is_llp_hint)
+    if mapped_category:
+        extracted["category"] = mapped_category
+
+    # Table-grid extraction (PDF only) is far more reliable than the
+    # regex line-scan, so prefer it and only fall back for XLSX/CSV or a
+    # PDF whose director table has no visible borders.
+    people = _parse_master_director_tables(raw) if (filename or "").lower().endswith(".pdf") else []
+    if not people:
+        people = _parse_people(text)["people"]
+    if people:
+        extracted["_directors"] = people
+
+    extracted["_source_type"] = "master-data"
+    extracted["_source_file"] = filename
+    extracted["_chars_scanned"] = len(text)
+    return extracted
+
+
+@router.post("/companies/{company_id}/master-data/fetch")
+async def fetch_master_data(
+    company_id: str,
+    files: List[UploadFile] = File(...),
+    current_user: User = Depends(CREATE),
+):
+    """Master Data tab — upload the MCA 'View Company/LLP Master Data' PDF
+    (or an MCA master-data XLSX/CSV) and the Company Master + Director/
+    Signatory register are fetched and applied automatically, the same way
+    Smart Import on the Clients page auto-fills a client from an uploaded
+    document. Always applies (no manual per-field Apply step); returns
+    exactly which fields changed so the UI can summarise it."""
+    company = await COMPANIES.find_one({"id": company_id})
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not files:
+        raise HTTPException(400, "Choose at least one Master Data file")
+
+    merged: Dict[str, Any] = {}
+    directors: List[Dict[str, Any]] = []
+    results, errors = [], []
+    total_size = 0
+
+    for uploaded in files:
+        filename = uploaded.filename or "master-data-file"
+        if not filename.lower().endswith(MASTER_DATA_ALLOWED_EXT):
+            errors.append(f"{filename}: unsupported file type — use PDF, XLSX or CSV")
+            continue
+        raw = await uploaded.read()
+        total_size += len(raw)
+        if total_size > 25 * 1024 * 1024:
+            errors.append(f"{filename}: skipped — combined upload exceeds the 25MB limit")
+            continue
+        if not raw:
+            errors.append(f"{filename}: skipped — empty file")
+            continue
+        try:
+            extracted = extract_mca_master_data(filename, raw)
+        except Exception as e:
+            logger.warning("roc_sphere master-data: failed to parse %s: %s", filename, e)
+            errors.append(f"{filename}: could not be read — file may be corrupted or password-protected")
+            continue
+
+        fields = {k: v for k, v in extracted.items() if not k.startswith("_")}
+        results.append({"filename": filename, "fields_found": len(fields)})
+        for k, v in fields.items():
+            if v not in (None, "", 0):
+                merged[k] = v
+        for d in extracted.get("_directors") or []:
+            if not any((existing.get("din") or "").upper() == (d.get("din") or "").upper() and d.get("din") for existing in directors):
+                directors.append(d)
+
+    if not merged and not directors:
+        return {
+            "applied": False,
+            "fields_applied": [],
+            "results": results,
+            "errors": errors or ["Could not confidently extract Master Data fields from this file — please check it's the MCA Master Data export, or enter details manually."],
+        }
+
+    clean: Dict[str, Any] = {}
+    for f in ("cin", "company_name", "registered_office_address", "date_of_incorporation",
+              "authorized_capital", "paid_up_capital", "last_agm_date", "pan", "category", "listed"):
+        if merged.get(f) not in (None, ""):
+            clean[f] = merged[f]
+
+    effective_category = clean.get("category") or company.get("category")
+    if directors:
+        if effective_category == "llp":
+            clean["designated_partners"] = directors
+            clean["partners"] = directors
+        else:
+            clean["directors"] = directors
+
+    existing_master = dict(company.get("master_data") or {})
+    existing_master.update({k: v for k, v in {
+        "roc_name": merged.get("roc_name"),
+        "registration_number": merged.get("registration_number"),
+        "email": merged.get("email"),
+        "company_status": merged.get("company_status"),
+        "roc_office": merged.get("roc_office"),
+        "rd_region": merged.get("rd_region"),
+        "date_of_balance_sheet": merged.get("date_of_balance_sheet"),
+        "active_compliance": merged.get("active_compliance_raw"),
+        "company_subcategory": merged.get("company_subcategory_raw"),
+    }.items() if v not in (None, "")})
+    existing_master["last_fetched_at"] = _now().isoformat()
+    existing_master["last_fetched_by"] = _who(current_user)
+    existing_master["source_files"] = [r["filename"] for r in results]
+    clean["master_data"] = existing_master
+
+    clean["roc_form_uploads"] = (company.get("roc_form_uploads") or []) + [
+        {"filename": r["filename"], "form_type": "master-data", "uploaded_at": _now().isoformat()}
+        for r in results
+    ]
+    clean["updated_at"] = _now()
+
+    await COMPANIES.update_one({"id": company_id}, {"$set": clean})
+    await _sync_company_to_client({**company, **clean})
+    updated = await COMPANIES.find_one({"id": company_id})
+    updated.pop("_id", None)
+
+    return {
+        "applied": True,
+        "fields_applied": sorted(k for k in clean.keys() if k not in ("master_data", "roc_form_uploads", "updated_at")),
+        "company": updated,
+        "results": results,
+        "errors": errors,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -830,6 +1189,60 @@ async def get_compliance_checklist(company_id: str, current_user: User = Depends
             "Generated from company category/capital/turnover using current "
             "Companies Act 2013 thresholds as configured in the app. Verify "
             "against the latest MCA notifications before relying on it for filing."
+        ),
+    }
+
+
+FREQUENCY_GROUP_ORDER = [
+    "Annual", "Half-Yearly", "Quarterly", "Periodic", "Event-based",
+    "As applicable", "Ongoing", "As per LLP Agreement",
+]
+
+
+@router.get("/companies/{company_id}/applicable-compliances")
+async def get_applicable_compliances(company_id: str, current_user: User = Depends(VIEW)):
+    """Full list of ROC compliances currently applicable to this company —
+    a dashboard view driven by the *same* checklist engine as the
+    Compliance Checklist tab, but only the items that apply, grouped by
+    frequency. Because Upload ROC Forms and the Master Data importer both
+    write straight into the Company Master fields this reads (capital,
+    turnover, director/partner count, category), applicability here always
+    reflects the latest uploaded data with no separate wiring needed."""
+    company = await COMPANIES.find_one({"id": company_id})
+    if not company:
+        raise HTTPException(404, "Company not found")
+    checklist = build_compliance_checklist(company)
+    applicable = [item for item in checklist if item.get("applicable")]
+
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for item in applicable:
+        groups.setdefault(item.get("frequency") or "Other", []).append(item)
+    ordered_groups = [{"frequency": g, "items": groups[g]} for g in FREQUENCY_GROUP_ORDER if g in groups]
+    ordered_groups += [{"frequency": g, "items": items} for g, items in groups.items() if g not in FREQUENCY_GROUP_ORDER]
+
+    is_llp = _is_llp(company)
+    master_data = company.get("master_data") or {}
+    return {
+        "company_name": company.get("company_name"),
+        "category": company.get("category"),
+        "cin": company.get("cin"),
+        "is_small_company": None if is_llp else _is_small_company(company),
+        "total_forms_tracked": len(checklist),
+        "total_applicable": len(applicable),
+        "not_applicable": len(checklist) - len(applicable),
+        "groups": ordered_groups,
+        "master_data_last_fetched": master_data.get("last_fetched_at"),
+        "roc_forms_uploaded": len(company.get("roc_form_uploads") or []),
+        "generated_at": _now().isoformat(),
+        "disclaimer": (
+            "Reflects the LLP Act, 2008 / LLP Rules obligations currently applicable to this LLP, "
+            "computed live from its category/turnover/contribution. Verify against the latest MCA "
+            "notifications before relying on it for filing."
+            if is_llp else
+            "Reflects the Companies Act, 2013 obligations currently applicable to this company, "
+            "computed live from its category/capital/turnover/director count — including any values "
+            "fetched from uploaded Master Data or ROC Forms. Verify against the latest MCA "
+            "notifications before relying on it for filing."
         ),
     }
 
