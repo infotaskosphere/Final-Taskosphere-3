@@ -8,7 +8,7 @@ import {
   Landmark, Plus, X, Loader2, Trash2, Building2, Users as UsersIcon,
   Download, FileText, Search, RefreshCw, Save, CheckCircle2, Upload,
   ClipboardList, Gavel, NotebookPen, ChevronRight, AlertTriangle, Info,
-  ScrollText, Pencil,
+  ScrollText, Pencil, DatabaseZap, ListChecks, FileSpreadsheet, FileUp,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '@/lib/api';
@@ -65,11 +65,13 @@ const emptyCompanyForm = () => ({
 
 const TABS = [
   { key: 'master', label: 'Company Master', icon: Building2 },
+  { key: 'masterdata', label: 'Master Data', icon: DatabaseZap },
   { key: 'directors', label: 'Directors & Shareholders', icon: UsersIcon },
   { key: 'resolution', label: 'Board Resolution', icon: Gavel },
   { key: 'notice', label: 'Notice of Meeting', icon: ScrollText },
   { key: 'minutes', label: 'Minutes of Meeting', icon: NotebookPen },
   { key: 'checklist', label: 'Compliance Checklist', icon: ClipboardList },
+  { key: 'applicable', label: 'Applicable Compliances', icon: ListChecks },
 ];
 
 export default function ROCSpherePage() {
@@ -281,11 +283,13 @@ export default function ROCSpherePage() {
                 </div>
                 <div className="p-4">
                   {tab === 'master' && <MasterTab company={company} isDark={isDark} onSave={saveCompany} input={input} text={text} muted={muted} />}
+                  {tab === 'masterdata' && <MasterDataTab company={company} isDark={isDark} text={text} muted={muted} onApplied={() => loadOne(company.id)} />}
                   {tab === 'directors' && <DirectorsTab company={company} isDark={isDark} onSave={saveCompany} input={input} text={text} muted={muted} />}
                   {tab === 'resolution' && <ResolutionTab company={company} isDark={isDark} input={input} text={text} muted={muted} />}
                   {tab === 'notice' && <NoticeTab company={company} isDark={isDark} input={input} text={text} muted={muted} />}
                   {tab === 'minutes' && <MinutesTab company={company} isDark={isDark} input={input} text={text} muted={muted} />}
                   {tab === 'checklist' && <ChecklistTab company={company} isDark={isDark} text={text} muted={muted} />}
+                  {tab === 'applicable' && <ApplicableCompliancesTab company={company} isDark={isDark} text={text} muted={muted} />}
                   {tab === 'upload' && <UploadTab company={company} isDark={isDark} input={input} text={text} muted={muted} onApplied={() => loadOne(company.id)} />}
                 </div>
               </div>
@@ -468,6 +472,142 @@ function MasterTab({ company, isDark, onSave, input, text, muted }) {
       <button onClick={() => onSave(form)} className="px-4 py-2 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1.5">
         <Save size={14} /> Save Company Master
       </button>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * Master Data tab — dedicated MCA Master Data importer, separate code
+ * path from the Upload ROC Forms tab (own endpoint, own component). Sits
+ * right next to Company Master since it's the fastest way to fill it:
+ * upload the MCA "Company/LLP Master Data" PDF/XLSX/CSV and fields are
+ * fetched and applied automatically, mirroring Smart Import on Clients.
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+function MasterDataTab({ company, isDark, text, muted, onApplied }) {
+  const [files, setFiles] = useState([]);
+  const [fetching, setFetching] = useState(false);
+  const [lastResult, setLastResult] = useState(null);
+  const boxRef = React.useRef(null);
+  const master = company.master_data || {};
+
+  const pickFiles = (list) => {
+    const picked = Array.from(list || []);
+    if (!picked.length) return;
+    setFiles((prev) => [...prev, ...picked]);
+  };
+
+  const removeFile = (i) => setFiles((prev) => prev.filter((_, x) => x !== i));
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    boxRef.current?.classList.remove('ring-2', 'ring-blue-500');
+    pickFiles(e.dataTransfer.files);
+  };
+
+  const fetchAndApply = async () => {
+    if (!files.length) { toast.error('Choose the MCA Master Data file (PDF, XLSX or CSV) first'); return; }
+    setFetching(true);
+    try {
+      const fd = new FormData();
+      files.forEach((f) => fd.append('files', f));
+      const { data } = await api.post(`/roc-sphere/companies/${company.id}/master-data/fetch`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setLastResult(data);
+      if (data.applied) {
+        setFiles([]);
+        onApplied();
+        toast.success(`Master Data fetched — ${data.fields_applied.length} field${data.fields_applied.length === 1 ? '' : 's'} updated on Company Master`, { duration: 5000 });
+      } else {
+        toast.error((data.errors && data.errors[0]) || 'Could not extract Master Data — please check the file');
+      }
+      if (data.errors?.length && data.applied) {
+        data.errors.forEach((e) => toast.warning(e));
+      }
+    } catch (e) {
+      toast.error(await parseBlobError(e) || 'Master Data fetch failed');
+    } finally {
+      setFetching(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <h3 className={`text-sm font-semibold ${text}`}>Master Data</h3>
+      <p className={`text-xs ${muted}`}>
+        Upload the MCA "View Company/LLP Master Data" export (PDF, or an MCA master-data XLSX/CSV). Company Master
+        fields and the Director/Signatory register are fetched and applied automatically — no manual review step,
+        just like Smart Import on the Clients page. This uses its own extraction path, kept separate from
+        Upload ROC Forms so a filing PDF never affects Master Data accuracy.
+      </p>
+
+      <div
+        ref={boxRef}
+        onDragOver={(e) => { e.preventDefault(); boxRef.current?.classList.add('ring-2', 'ring-blue-500'); }}
+        onDragLeave={() => boxRef.current?.classList.remove('ring-2', 'ring-blue-500')}
+        onDrop={onDrop}
+        onClick={() => document.getElementById('_master_data_input')?.click()}
+        className={`rounded-lg border-2 border-dashed p-6 text-center cursor-pointer transition ${isDark ? 'border-slate-700 hover:border-blue-500/60' : 'border-slate-300 hover:border-blue-400'}`}
+      >
+        <DatabaseZap size={22} className={`mx-auto mb-2 ${muted}`} />
+        <p className={`text-xs font-semibold ${text}`}>Drop the MCA Master Data file here, or click to browse</p>
+        <p className={`text-[11px] ${muted} mt-1`}>PDF, XLSX or CSV — multiple files are merged into one fetch</p>
+        <input id="_master_data_input" type="file" multiple accept=".pdf,.xlsx,.xls,.csv"
+          className="hidden" onChange={(e) => { pickFiles(e.target.files); e.target.value = ''; }} />
+      </div>
+
+      {!!files.length && (
+        <div className={`rounded-lg border p-3 space-y-1.5 ${isDark ? 'border-slate-700 bg-slate-900/40' : 'border-slate-200 bg-slate-50'}`}>
+          {files.map((f, i) => (
+            <div key={i} className="flex items-center justify-between text-xs">
+              <span className={`flex items-center gap-1.5 ${text}`}><FileSpreadsheet size={13} /> {f.name}</span>
+              <button onClick={() => removeFile(i)} className="text-red-500"><X size={13} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <button onClick={fetchAndApply} disabled={fetching || !files.length}
+        className="px-4 py-2 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1.5 disabled:opacity-60">
+        {fetching ? <Loader2 size={14} className="animate-spin" /> : <DatabaseZap size={14} />}
+        Fetch &amp; Apply Master Data
+      </button>
+
+      {lastResult?.applied && (
+        <div className={`rounded-lg border p-3 ${isDark ? 'border-emerald-700/40 bg-emerald-900/10' : 'border-emerald-200 bg-emerald-50'}`}>
+          <p className={`text-xs font-semibold flex items-center gap-1.5 ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>
+            <CheckCircle2 size={13} /> Applied to Company Master
+          </p>
+          <p className={`text-[11px] ${muted} mt-1`}>{lastResult.fields_applied.join(', ') || '—'}</p>
+        </div>
+      )}
+      {!!lastResult?.errors?.length && (
+        <div className={`rounded-lg border p-3 ${isDark ? 'border-amber-700/40 bg-amber-900/10' : 'border-amber-200 bg-amber-50'}`}>
+          {lastResult.errors.map((e, i) => (
+            <p key={i} className={`text-[11px] flex items-start gap-1.5 ${isDark ? 'text-amber-400' : 'text-amber-700'}`}>
+              <AlertTriangle size={12} className="shrink-0 mt-0.5" /> {e}
+            </p>
+          ))}
+        </div>
+      )}
+
+      {(master.last_fetched_at || Object.keys(master).length > 0) && (
+        <div className={`rounded-lg border p-3 text-xs space-y-1 ${isDark ? 'border-slate-700 bg-slate-900/40' : 'border-slate-200 bg-slate-50'}`}>
+          <p className={`font-semibold ${muted} mb-1`}>Last fetched Master Data</p>
+          {master.last_fetched_at && <p className={muted}>Fetched {new Date(master.last_fetched_at).toLocaleString('en-IN')}{master.last_fetched_by ? ` by ${master.last_fetched_by}` : ''}</p>}
+          <div className="grid sm:grid-cols-2 gap-x-4 gap-y-1 mt-2">
+            {['roc_name', 'registration_number', 'email', 'company_status', 'roc_office', 'rd_region', 'date_of_balance_sheet', 'active_compliance'].map((k) => (
+              master[k] ? (
+                <div key={k} className="flex justify-between gap-2">
+                  <span className={muted}>{k.replace(/_/g, ' ')}</span>
+                  <span className={text}>{master[k]}</span>
+                </div>
+              ) : null
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -881,37 +1021,120 @@ function ChecklistTab({ company, isDark, text, muted }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+ * Applicable Compliances tab — dashboard view next to Compliance
+ * Checklist. Same checklist engine, but only the applicable items,
+ * grouped by frequency. Reads live off whatever Upload ROC Forms /
+ * Master Data have applied to the Company Master, so it always reflects
+ * the latest uploaded data with no extra wiring.
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+function ApplicableCompliancesTab({ company, isDark, text, muted }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const { data: d } = await api.get(`/roc-sphere/companies/${company.id}/applicable-compliances`);
+        setData(d);
+      } catch {
+        toast.error('Failed to load applicable compliances');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [company.id]);
+
+  if (loading) return <div className="flex justify-center py-10"><Loader2 className="animate-spin" size={20} /></div>;
+  if (!data) return null;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className={`rounded-lg border px-3 py-2 ${isDark ? 'border-slate-700 bg-slate-900/40' : 'border-slate-200 bg-slate-50'}`}>
+          <p className={`text-lg font-bold ${text}`}>{data.total_applicable}</p>
+          <p className={`text-[10px] ${muted}`}>Applicable Forms</p>
+        </div>
+        <div className={`rounded-lg border px-3 py-2 ${isDark ? 'border-slate-700 bg-slate-900/40' : 'border-slate-200 bg-slate-50'}`}>
+          <p className={`text-lg font-bold ${text}`}>{data.total_forms_tracked}</p>
+          <p className={`text-[10px] ${muted}`}>Total Forms Tracked</p>
+        </div>
+        {data.master_data_last_fetched && (
+          <div className={`text-xs ${muted} flex items-center gap-1.5`}>
+            <DatabaseZap size={13} /> Master Data last fetched {new Date(data.master_data_last_fetched).toLocaleDateString('en-IN')}
+          </div>
+        )}
+        {!!data.roc_forms_uploaded && (
+          <div className={`text-xs ${muted} flex items-center gap-1.5`}>
+            <FileUp size={13} /> {data.roc_forms_uploaded} ROC form{data.roc_forms_uploaded === 1 ? '' : 's'} uploaded
+          </div>
+        )}
+      </div>
+
+      {data.groups.map((g) => (
+        <div key={g.frequency} className={`rounded-lg border ${isDark ? 'border-slate-700' : 'border-slate-200'} overflow-hidden`}>
+          <div className={`px-3 py-2 text-xs font-semibold ${isDark ? 'bg-slate-900/60 text-slate-200' : 'bg-slate-100 text-slate-700'}`}>
+            {g.frequency} <span className={muted}>({g.items.length})</span>
+          </div>
+          <div className={`divide-y ${isDark ? 'divide-slate-800' : 'divide-slate-200'}`}>
+            {g.items.map((item, i) => (
+              <div key={i} className="px-3 py-2 flex items-start gap-2">
+                <CheckCircle2 size={14} className="text-emerald-500 shrink-0 mt-0.5" />
+                <div>
+                  <p className={`text-xs font-medium ${text}`}>{item.form} <span className={`font-normal ${muted}`}>— {item.particulars}</span></p>
+                  <p className={`text-[11px] ${muted}`}>{item.due_date_rule}{item.notes ? ` · ${item.notes}` : ''}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      <p className={`text-[11px] ${muted} flex items-start gap-1.5`}>
+        <AlertTriangle size={13} className="shrink-0 mt-0.5" /> {data.disclaimer}
+      </p>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
  * Upload AOC-4 / MGT-7 tab
  * ═══════════════════════════════════════════════════════════════════════ */
 
 function UploadTab({ company, isDark, input, text, muted, onApplied }) {
-  const [masterFiles, setMasterFiles] = useState([]);
   const [rocFiles, setRocFiles] = useState([]);
   const [extracting, setExtracting] = useState(false);
   const [extracted, setExtracted] = useState(null);
   const [results, setResults] = useState([]);
+  const [errors, setErrors] = useState([]);
 
-  const handleUpload = async (files, sourceType, apply) => {
-    if (!files.length) { toast.error(`Choose ${sourceType === 'master' ? 'master data' : 'ROC form'} files first`); return; }
+  // ROC Forms filing-extraction path — separate endpoint/parser from the
+  // Master Data tab (see MasterDataTab above / /master-data/fetch below).
+  const handleUpload = async (apply) => {
+    if (!rocFiles.length) { toast.error('Choose at least one ROC form (PDF) first'); return; }
     setExtracting(true);
     try {
       const fd = new FormData();
-      files.forEach((file) => fd.append('files', file));
-      fd.append('source_type', sourceType);
+      rocFiles.forEach((file) => fd.append('files', file));
+      fd.append('source_type', 'roc');
       fd.append('apply', apply ? 'true' : 'false');
       const { data } = await api.post(`/roc-sphere/companies/${company.id}/upload-master-data`, fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setExtracted(data.extracted);
       setResults(data.results || []);
+      setErrors(data.errors || []);
+      const hasFields = Object.keys(data.extracted || {}).some((k) => !k.startsWith('_'));
       if (apply && data.applied) {
-        toast.success('Company master updated from upload');
+        toast.success('Company master updated from uploaded ROC forms');
         onApplied();
-      } else if (!Object.keys(data.extracted || {}).some((k) => !k.startsWith('_'))) {
+      } else if (!hasFields) {
         toast.error(data.message || 'Could not extract fields — please enter manually');
       } else {
         toast.success('Fields extracted — review below, then Apply');
       }
+      if (data.errors?.length) data.errors.forEach((e) => toast.warning(e));
     } catch (e) {
       toast.error(await parseBlobError(e) || 'Upload failed');
     } finally {
@@ -923,46 +1146,40 @@ function UploadTab({ company, isDark, input, text, muted, onApplied }) {
     <div className="space-y-4">
       <h3 className={`text-sm font-semibold ${text}`}>Upload ROC Forms</h3>
       <p className={`text-xs ${muted}`}>
-        Upload MCA master data, AOC-4, MGT-7, MGT-7A, DIR-12 or other ROC forms. Company details and directors are
-        read from master data; MGT-7/MGT-7A and shareholder attachments are merged into the shareholder register.
-        Applied details are saved in both ROC Company Master and the linked Client record.
+        Upload AOC-4, MGT-7, MGT-7A, DIR-12, ADT-1, INC-22, PAS-3, MGT-14 or DPT-3 acknowledgement PDFs — multiple
+        files are merged into one extraction. MGT-7/MGT-7A shareholder attachments are merged into the shareholder
+        register. Applied details are saved in both ROC Company Master and the linked Client record, and feed
+        straight into the Compliance Checklist and Applicable Compliances tabs.{' '}
+        For the MCA Company/LLP Master Data export (PDF/XLSX/CSV), use the <strong>Master Data</strong> tab instead —
+        that's a separate, dedicated extraction path.
       </p>
-      <div className="grid md:grid-cols-2 gap-3">
-        <div className={`rounded-lg border-2 border-dashed p-4 ${isDark ? 'border-slate-700' : 'border-slate-300'}`}>
-          <p className={`text-xs font-semibold ${text} mb-1`}>Master Data (separate extraction)</p>
-          <p className={`text-[11px] ${muted} mb-3`}>Upload MCA master-data XLSX, XLS or CSV files.</p>
-          <input type="file" multiple accept=".xlsx,.xls,.csv" onChange={(e) => setMasterFiles(Array.from(e.target.files || []))}
-            className={`text-xs ${muted}`} />
-          {!!masterFiles.length && <p className={`text-xs mt-2 ${text}`}>{masterFiles.length} master file(s) selected</p>}
-          <div className="flex gap-2 mt-3">
-            <button onClick={() => handleUpload(masterFiles, 'master', false)} disabled={extracting || !masterFiles.length}
-              className={`px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 disabled:opacity-60 ${isDark ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-700'}`}>
-              <FileText size={13} /> Preview Master Data
-            </button>
-            <button onClick={() => handleUpload(masterFiles, 'master', true)} disabled={extracting || !masterFiles.length}
-              className="px-3 py-1.5 rounded-lg text-xs bg-blue-600 text-white flex items-center gap-1 disabled:opacity-60">
-              <CheckCircle2 size={13} /> Apply
-            </button>
-          </div>
-        </div>
-        <div className={`rounded-lg border-2 border-dashed p-4 ${isDark ? 'border-slate-700' : 'border-slate-300'}`}>
-          <p className={`text-xs font-semibold ${text} mb-1`}>ROC Forms (filing extraction)</p>
-          <p className={`text-[11px] ${muted} mb-3`}>Upload multiple AOC-4, MGT-7, MGT-7A, DIR-12 or other ROC PDFs.</p>
-          <input type="file" multiple accept=".pdf" onChange={(e) => setRocFiles(Array.from(e.target.files || []))}
-            className={`text-xs ${muted}`} />
-          {!!rocFiles.length && <p className={`text-xs mt-2 ${text}`}>{rocFiles.length} ROC form(s) selected</p>}
-          <div className="flex gap-2 mt-3">
-            <button onClick={() => handleUpload(rocFiles, 'roc', false)} disabled={extracting || !rocFiles.length}
-              className={`px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 disabled:opacity-60 ${isDark ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-700'}`}>
-              <FileText size={13} /> Preview ROC Forms
-            </button>
-            <button onClick={() => handleUpload(rocFiles, 'roc', true)} disabled={extracting || !rocFiles.length}
-              className="px-3 py-1.5 rounded-lg text-xs bg-blue-600 text-white flex items-center gap-1 disabled:opacity-60">
-              <CheckCircle2 size={13} /> Apply
-            </button>
-          </div>
+      <div className={`rounded-lg border-2 border-dashed p-4 ${isDark ? 'border-slate-700' : 'border-slate-300'}`}>
+        <p className={`text-xs font-semibold ${text} mb-1`}>ROC Forms (filing extraction)</p>
+        <p className={`text-[11px] ${muted} mb-3`}>PDF only — one bad/scanned file no longer blocks the rest of the batch.</p>
+        <input type="file" multiple accept=".pdf" onChange={(e) => setRocFiles(Array.from(e.target.files || []))}
+          className={`text-xs ${muted}`} />
+        {!!rocFiles.length && <p className={`text-xs mt-2 ${text}`}>{rocFiles.length} ROC form(s) selected</p>}
+        <div className="flex gap-2 mt-3">
+          <button onClick={() => handleUpload(false)} disabled={extracting || !rocFiles.length}
+            className={`px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 disabled:opacity-60 ${isDark ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-700'}`}>
+            {extracting ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />} Preview ROC Forms
+          </button>
+          <button onClick={() => handleUpload(true)} disabled={extracting || !rocFiles.length}
+            className="px-3 py-1.5 rounded-lg text-xs bg-blue-600 text-white flex items-center gap-1 disabled:opacity-60">
+            {extracting ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />} Apply
+          </button>
         </div>
       </div>
+
+      {!!errors.length && (
+        <div className={`rounded-lg border p-3 ${isDark ? 'border-amber-700/40 bg-amber-900/10' : 'border-amber-200 bg-amber-50'}`}>
+          {errors.map((e, i) => (
+            <p key={i} className={`text-[11px] flex items-start gap-1.5 ${isDark ? 'text-amber-400' : 'text-amber-700'}`}>
+              <AlertTriangle size={12} className="shrink-0 mt-0.5" /> {e}
+            </p>
+          ))}
+        </div>
+      )}
 
       {extracted && (
         <div className={`rounded-lg border p-3 ${isDark ? 'border-slate-700 bg-slate-900/40' : 'border-slate-200 bg-slate-50'}`}>
