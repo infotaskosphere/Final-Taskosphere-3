@@ -85,7 +85,7 @@ def _gemini_model() -> str:
     return (
         os.environ.get("GEMINI_TEXT_MODEL")
         or os.environ.get("GEMINI_MODEL")
-        or "gemini-2.5-flash"
+        or "gemini-3.6-flash"
     ).strip()
 
 
@@ -275,44 +275,77 @@ async def _call_gemini(prompt: str) -> str:
             detail="Gemini API key is not configured on the server.",
         )
 
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/"
-        f"models/{_gemini_model()}:generateContent"
+    configured_model = _gemini_model()
+    models_to_try = [configured_model]
+    if configured_model != "gemini-3.6-flash":
+        models_to_try.append("gemini-3.6-flash")
+
+    last_error: Optional[HTTPException] = None
+
+    for model in models_to_try:
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/"
+            f"models/{model}:generateContent"
+        )
+
+        payload = {
+            "contents": [{
+                "role": "user",
+                "parts": [{"text": prompt}],
+            }],
+            "generationConfig": {
+                "maxOutputTokens": 1024,
+                "responseMimeType": "application/json",
+            },
+        }
+
+        async with httpx.AsyncClient(timeout=45) as client:
+            response = await client.post(
+                url,
+                params={"key": key},
+                headers={"Content-Type": "application/json"},
+                json=payload,
+            )
+
+        if response.status_code == 429:
+            raise HTTPException(status_code=429, detail="Gemini quota exceeded.")
+
+        if response.status_code == 404 and model != "gemini-3.6-flash":
+            logger.warning(
+                "Configured Gemini model %s is unavailable; retrying with gemini-3.6-flash.",
+                model,
+            )
+            last_error = HTTPException(
+                status_code=422,
+                detail=f"Gemini model {model} is unavailable.",
+            )
+            continue
+
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Gemini API error {response.status_code}: {response.text[:300]}",
+            )
+
+        data = response.json()
+        try:
+            parts = data["candidates"][0]["content"]["parts"]
+            return "".join(
+                p.get("text", "") for p in parts if isinstance(p, dict)
+            )
+        except (KeyError, IndexError, TypeError):
+            raise HTTPException(
+                status_code=422,
+                detail="Gemini returned an empty response.",
+            )
+
+    if last_error:
+        raise last_error
+
+    raise HTTPException(
+        status_code=422,
+        detail="Gemini provider did not return a usable response.",
     )
-    payload = {
-        "contents": [{
-            "role": "user",
-            "parts": [{"text": prompt}],
-        }],
-        "generationConfig": {
-            "temperature": 0.0,
-            "maxOutputTokens": 1024,
-            "responseMimeType": "application/json",
-        },
-    }
-
-    async with httpx.AsyncClient(timeout=45) as client:
-        response = await client.post(
-            url,
-            params={"key": key},
-            headers={"Content-Type": "application/json"},
-            json=payload,
-        )
-
-    if response.status_code == 429:
-        raise HTTPException(status_code=429, detail="Gemini quota exceeded.")
-    if response.status_code != 200:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Gemini API error {response.status_code}: {response.text[:300]}",
-        )
-
-    data = response.json()
-    try:
-        parts = data["candidates"][0]["content"]["parts"]
-        return "".join(p.get("text", "") for p in parts if isinstance(p, dict))
-    except (KeyError, IndexError, TypeError):
-        raise HTTPException(status_code=422, detail="Gemini returned an empty response.")
 
 
 async def _call_groq(prompt: str) -> str:
@@ -323,40 +356,74 @@ async def _call_groq(prompt: str) -> str:
             detail="Groq API key is not configured on the server.",
         )
 
-    payload = {
-        "model": _groq_model(),
-        "messages": [{
-            "role": "user",
-            "content": prompt,
-        }],
-        "temperature": 0,
-        "max_tokens": 1024,
-        "response_format": {"type": "json_object"},
-    }
+    configured_model = _groq_model()
+    models_to_try = [configured_model]
 
-    async with httpx.AsyncClient(timeout=45) as client:
-        response = await client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-        )
+    # Keep the configured model first. If the Groq project/key does not have
+    # access to it, use a currently supported production text model.
+    if configured_model != "llama-3.1-8b-instant":
+        models_to_try.append("llama-3.1-8b-instant")
 
-    if response.status_code == 429:
-        raise HTTPException(status_code=429, detail="Groq quota exceeded.")
-    if response.status_code != 200:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Groq API error {response.status_code}: {response.text[:300]}",
-        )
+    last_error: Optional[HTTPException] = None
 
-    data = response.json()
-    try:
-        return data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError):
-        raise HTTPException(status_code=422, detail="Groq returned an empty response.")
+    for model in models_to_try:
+        payload = {
+            "model": model,
+            "messages": [{
+                "role": "user",
+                "content": prompt,
+            }],
+            "temperature": 0,
+            "max_tokens": 1024,
+            "response_format": {"type": "json_object"},
+        }
+
+        async with httpx.AsyncClient(timeout=45) as client:
+            response = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+
+        if response.status_code == 429:
+            raise HTTPException(status_code=429, detail="Groq quota exceeded.")
+
+        if response.status_code == 404 and model != "llama-3.1-8b-instant":
+            logger.warning(
+                "Configured Groq model %s is unavailable; retrying with llama-3.1-8b-instant.",
+                model,
+            )
+            last_error = HTTPException(
+                status_code=422,
+                detail=f"Groq model {model} is unavailable.",
+            )
+            continue
+
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Groq API error {response.status_code}: {response.text[:300]}",
+            )
+
+        data = response.json()
+        try:
+            return data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError):
+            raise HTTPException(
+                status_code=422,
+                detail="Groq returned an empty response.",
+            )
+
+    if last_error:
+        raise last_error
+
+    raise HTTPException(
+        status_code=422,
+        detail="Groq provider did not return a usable response.",
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -543,23 +610,22 @@ async def process_lead_message(
     source_sender_id: Optional[str] = None,
     source_sender_name: Optional[str] = None,
     **kwargs: Any,
-) -> Dict[str, Any]:
-    """Backward-compatible natural-language lead detector.
+):
+    """Backward-friendly generic AI-only alias.
 
-    This remains AI-only and does not create a MongoDB record.
-    Existing WhatsApp lead creation through create_lead_from_message()
-    remains unchanged.
+    The extra metadata is accepted for Telegram/WhatsApp callers but this
+    function remains AI-only and does not write to MongoDB.
     """
     result = await detect_and_extract_whatsapp_lead(message)
-
-    result["source"] = source
-    result["source_chat_id"] = (
-        str(source_chat_id) if source_chat_id is not None else None
-    )
-    result["source_sender_id"] = (
-        str(source_sender_id) if source_sender_id is not None else None
-    )
-    result["source_sender_name"] = source_sender_name
-    result["original_message"] = message
-
+    result.update({
+        "source": source,
+        "source_chat_id": (
+            str(source_chat_id) if source_chat_id is not None else None
+        ),
+        "source_sender_id": (
+            str(source_sender_id) if source_sender_id is not None else None
+        ),
+        "source_sender_name": source_sender_name,
+        "original_message": message,
+    })
     return result
