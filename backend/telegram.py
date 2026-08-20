@@ -898,19 +898,42 @@ async def telegram_webhook(request: Request):  # noqa: C901  (complex but intent
         # reach this detector.
         # ═══════════════════════════════════════════════════════════
         try:
-            lead_result = await process_lead_message(
-                text,
-                source="telegram",
-                source_chat_id=str(chat_id),
-                source_sender_id=str(message.get("from", {}).get("id", "")),
-                source_sender_name=(
-                    message.get("from", {}).get("first_name", "")
-                    + (
-                        " " + message.get("from", {}).get("last_name", "")
-                        if message.get("from", {}).get("last_name")
-                        else ""
-                    )
-                ).strip() or None,
+            sender_id = str(message.get("from", {}).get("id", ""))
+            sender_name = (
+                message.get("from", {}).get("first_name", "")
+                + (
+                    " " + message.get("from", {}).get("last_name", "")
+                    if message.get("from", {}).get("last_name")
+                    else ""
+                )
+            ).strip() or None
+
+            # Keep compatibility with older lead_ai.py deployments that still
+            # expose process_lead_message(message) without channel metadata.
+            try:
+                lead_result = await process_lead_message(
+                    text,
+                    source="telegram",
+                    source_chat_id=str(chat_id),
+                    source_sender_id=sender_id,
+                    source_sender_name=sender_name,
+                )
+            except TypeError as compatibility_error:
+                if "unexpected keyword" not in str(compatibility_error).lower():
+                    raise
+                print(
+                    "[Telegram Lead AI] Retrying with legacy "
+                    "process_lead_message(message) signature."
+                )
+                lead_result = await process_lead_message(text)
+
+            print(
+                "[Telegram Lead AI] Detection result:",
+                {
+                    "is_lead": bool(lead_result and lead_result.get("is_lead")),
+                    "confidence": lead_result.get("confidence") if lead_result else None,
+                    "source": lead_result.get("source") if lead_result else None,
+                },
             )
 
             if lead_result and lead_result.get("is_lead"):
@@ -1012,8 +1035,22 @@ async def telegram_webhook(request: Request):  # noqa: C901  (complex but intent
                 return {"status": "lead_created", "lead_id": lead_id}
 
         except Exception as lead_ai_error:
-            # Lead AI must never break the existing Telegram bot.
+            # Do not silently fall through to the Welcome message when lead AI
+            # fails. Existing Telegram commands/conversations remain unaffected.
+            import traceback
+            traceback.print_exc()
             print(f"[Telegram Lead AI] Error: {lead_ai_error}")
+            await send_message(
+                chat_id,
+                "⚠️ I received your message, but the lead reader could not "
+                "process it right now.\n\n"
+                "Please check the Lead AI configuration/API settings in the "
+                "backend logs."
+            )
+            return {
+                "status": "lead_ai_error",
+                "detail": str(lead_ai_error),
+            }
 
         # ── Load existing conversation ────────────────────────────
         convo = await db.telegram_conversations.find_one({"telegram_id": chat_id})
