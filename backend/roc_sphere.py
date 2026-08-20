@@ -159,6 +159,7 @@ class RocCompanyIn(BaseModel):
     shareholders: List[Shareholder] = Field(default_factory=list)
     master_data: Dict[str, Any] = Field(default_factory=dict)
     mgt_shareholder_data: Dict[str, Any] = Field(default_factory=dict)
+    financial_data: Dict[str, Any] = Field(default_factory=dict)  # key figures pulled from AOC-4 (see FINANCIAL_DATA_FIELDS)
     roc_form_uploads: List[Dict[str, Any]] = Field(default_factory=list)
     auditor: Optional[Auditor] = None
     notes: Optional[str] = None
@@ -444,34 +445,128 @@ async def delete_company(company_id: str, current_user: User = Depends(DELETE)):
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# AOC-4 / MGT-7 UPLOAD → BEST-EFFORT EXTRACTION
+# AOC-4 / MGT-7 / MGT-7A / AOC-2 / Board & Auditor report UPLOAD → EXTRACTION
 # ─────────────────────────────────────────────────────────────────────────
-# MCA AOC-4/MGT-7 acknowledgement PDFs and the pre-fill XLSX ("master
-# data") export all have fairly consistent label:value layouts. This is a
-# heuristic text-scrape (same approach as backend/compliance.py's
-# parse_compliance_dates), not an XBRL parser — it prefills the form,
-# the user always reviews before saving.
+# Every MCA acknowledgement PDF is a different form with a different
+# purpose, and each field extracted here is only ever pulled from the form
+# that actually carries that data on the MCA record:
+#
+#   Company Master fields  (CIN, name, address, authorised capital,
+#                            AGM date, board meeting date)
+#                             — read from whichever recognised ROC form
+#                               states them (present on most of AOC-4,
+#                               AOC-2, MGT-7/7A, Board's/Auditor's Report)
+#   Directors / KMP register — ONLY from MGT-7 / MGT-7A (the Annual Return
+#                               is the filing that carries the statutory
+#                               Director/Signatory register; AOC-4, AOC-2,
+#                               and the Board's/Auditor's Report extracts
+#                               do not, and must never populate it)
+#   Shareholders register    — ONLY from MGT-7 / MGT-7A, same reasoning
+#   Financial data            — ONLY from AOC-4 (Balance Sheet / P&L /
+#                               Net Worth figures; AOC-2 and the Board's/
+#                               Auditor's Report extracts carry no
+#                               standardised financial figures worth
+#                               trusting for this)
+#   Statutory Auditor details — ONLY from AOC-4 (Auditor Details block)
+#
+# This routing is enforced by _identify_roc_form_type() below and the
+# per-form-type dispatch in upload_master_data(): a field is never applied
+# from a form that isn't its statutory source, so one wrong/unusual PDF in
+# a batch can no longer pollute Directors & Shareholders (this replaced an
+# earlier version that scanned the full text of every uploaded form for
+# anything DIN/PAN-shaped, which produced garbage director rows out of
+# AOC-4/AOC-2/Board & Auditor report boilerplate — see CHANGELOG below).
+#
+# This is a heuristic text-scrape (same approach as backend/compliance.py's
+# parse_compliance_dates), not an XBRL parser — every applied field is
+# still shown to the user in the "Extracted fields" preview and can be
+# corrected on the Company Master / Directors & Shareholders tabs.
 
-FIELD_PATTERNS = {
-    "cin": r"CIN[:\s]*([A-Z0-9]{21})",
-    "company_name": r"(?:Name of (?:the )?[Cc]ompany|Company Name)[:\s]*([A-Za-z0-9 &.,'\-]{3,120})",
-    "date_of_incorporation": r"Date of [Ii]ncorporation[:\s]*([0-3]?\d[-/][01]?\d[-/]\d{2,4})",
-    "registered_office_address": r"Registered [Oo]ffice [Aa]ddress[:\s]*([A-Za-z0-9,./\- ]{10,200})",
-    "authorized_capital": r"Authoris?ed [Cc]apital[:\s(Rs\.)]*([\d,]+)",
-    "paid_up_capital": r"Paid[- ]up [Cc]apital[:\s(Rs\.)]*([\d,]+)",
-    "last_year_turnover": r"Turnover[:\s(Rs\.)]*([\d,]+)",
-    "last_agm_date": r"Date of [Aa][Gg][Mm][:\s]*([0-3]?\d[-/][01]?\d[-/]\d{2,4})",
-    "last_board_meeting_date": r"Date of [Bb]oard [Mm]eeting[:\s]*([0-3]?\d[-/][01]?\d[-/]\d{2,4})",
-    "pan": r"PAN[:\s]*([A-Z]{5}\d{4}[A-Z])",
-}
+ROC_FORM_ALLOWED_EXT = (".pdf",)
+ROC_FORM_RECOGNIZED = (
+    # order matters: more specific labels (mgt-7a) must be checked before
+    # their substrings (mgt-7)
+    ("mgt-7a", r"mgt[- ]?7a"),
+    ("mgt-7", r"mgt[- ]?7\b"),
+    ("aoc-4", r"\baoc[- ]?4\b"),
+    ("aoc-2", r"\baoc[- ]?2\b"),
+    ("board-report", r"extract of board.?s report|board.?s report"),
+    ("auditor-report", r"extract of auditor.?s report|auditor.?s report"),
+    ("dir-12", r"dir[- ]?12"),
+    ("adt-1", r"adt[- ]?1"),
+    ("inc-22", r"inc[- ]?22"),
+    ("pas-3", r"pas[- ]?3"),
+    ("mgt-14", r"mgt[- ]?14"),
+    ("dpt-3", r"dpt[- ]?3"),
+)
 
+# Forms whose MCA-prescribed content includes the statutory Director/
+# Signatory register and the shareholder/member register.
+DIRECTOR_SHAREHOLDER_SOURCE_TYPES = {"mgt-7", "mgt-7a"}
+# Form whose MCA-prescribed content includes the audited Balance Sheet,
+# Statement of Profit & Loss and Auditor Details block.
+FINANCIAL_SOURCE_TYPE = "aoc-4"
+
+# Keys populated on company.financial_data by an AOC-4 upload — kept as a
+# named set so the frontend/UI and this parser stay in sync.
+FINANCIAL_DATA_FIELDS = (
+    "period_from", "period_to", "total_income", "total_expenses",
+    "profit_before_tax", "profit_after_tax", "net_worth", "share_capital",
+    "reserves_and_surplus", "balance_sheet_total",
+)
+
+
+def _identify_roc_form_type(filename: str, text: str) -> str:
+    """Best-effort filing-type label — checked against both the filename
+    and the extracted text, since MCA acknowledgement PDFs are sometimes
+    downloaded/renamed generically. This label is load-bearing: it decides
+    which fields (if any) a given upload is allowed to touch, not just an
+    audit-trail cosmetic."""
+    hay = f"{filename}\n{text[:2000]}".lower()
+    for label, pattern in ROC_FORM_RECOGNIZED:
+        if re.search(pattern, hay):
+            return label
+    return "roc-form"
+
+
+def _extract_text_from_upload(filename: str, raw: bytes) -> str:
+    name = (filename or "").lower()
+    try:
+        if name.endswith(".pdf"):
+            import pdfplumber
+            text_parts = []
+            with pdfplumber.open(io.BytesIO(raw)) as pdf:
+                for page in pdf.pages[:20]:
+                    text_parts.append(page.extract_text() or "")
+            return "\n".join(text_parts)
+        if name.endswith((".xlsx", ".xls")):
+            import openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(raw), data_only=True)
+            lines = []
+            for ws in wb.worksheets:
+                for row in ws.iter_rows(values_only=True):
+                    lines.append(" ".join(str(c) for c in row if c is not None))
+            return "\n".join(lines)
+        if name.endswith(".csv"):
+            return raw.decode("utf-8", errors="ignore")
+        return raw.decode("utf-8", errors="ignore")
+    except Exception as e:  # pragma: no cover
+        logger.warning("roc_sphere: text extraction failed for %s: %s", filename, e)
+        return ""
+
+
+# ── director / shareholder register (MGT-7 / MGT-7A only) ─────────────────
 
 def _parse_people(text: str) -> Dict[str, List[Dict[str, Any]]]:
-    """Read the tabular director/signatory block in MCA master exports.
+    """Read the tabular director/signatory block in MCA MGT-7/MGT-7A text.
 
-    MCA exports are inconsistent between PDF, XLSX and copied text. This
-    intentionally only creates a person when a DIN/PAN and a plausible name
-    occur together; it never invents shareholder names from a count.
+    A director "id" line must be a real DIN (8 digits) or a PAN
+    (5 letters + 4 digits + 1 letter) — the previous version accepted any
+    6-20 character alphanumeric line, which matched pincodes, page
+    footers, dropdown option text and other boilerplate found on AOC-4/
+    AOC-2/Board & Auditor report pages and produced garbage director rows.
+    Callers must only invoke this for form_type in
+    DIRECTOR_SHAREHOLDER_SOURCE_TYPES.
     """
     people: List[Dict[str, Any]] = []
     block_match = re.search(
@@ -480,12 +575,10 @@ def _parse_people(text: str) -> Dict[str, List[Dict[str, Any]]]:
     )
     block = block_match.group(1) if block_match else text
     lines = [re.sub(r"\s+", " ", x).strip(" -:\t") for x in block.splitlines()]
-    din_re = re.compile(r"^[A-Z0-9]{6,20}$", re.I)
+    din_or_pan_re = re.compile(r"^\d{8}$|^[A-Z]{5}\d{4}[A-Z]$", re.I)
     for i, line in enumerate(lines):
-        if not din_re.fullmatch(line.replace(" ", "")):
+        if not din_or_pan_re.fullmatch(line.replace(" ", "")):
             continue
-        # In XLSX rows the DIN, name, designation are adjacent. In PDFs the
-        # columns may be vertical, so inspect a small forward window.
         candidates = [x for x in lines[i + 1:i + 5] if x]
         name = next((x for x in candidates if re.search(r"[A-Za-z]", x) and len(x) >= 5
                      and not re.fullmatch(r"(Director|Promoter|Signatory|Active|Yes|No)", x, re.I)), None)
@@ -506,9 +599,11 @@ def _parse_people(text: str) -> Dict[str, List[Dict[str, Any]]]:
 def _parse_mgt_shareholders(text: str) -> List[Dict[str, Any]]:
     """Parse shareholder rows when the attached MGT-7/MGT-7A includes them.
 
-    The filed MGT-7A often references a separate XLSM attachment and therefore
-    contains only the shareholder count. In that case returning [] is correct
-    and preserves existing master data instead of fabricating names.
+    The filed MGT-7A often references a separate XLSM attachment and
+    therefore contains only the shareholder count. In that case returning
+    [] is correct and preserves the existing shareholder register instead
+    of fabricating names. Callers must only invoke this for form_type in
+    DIRECTOR_SHAREHOLDER_SOURCE_TYPES.
     """
     rows = []
     for line in text.splitlines():
@@ -519,96 +614,189 @@ def _parse_mgt_shareholders(text: str) -> List[Dict[str, Any]]:
     return rows
 
 
-def _extract_text_from_upload(filename: str, raw: bytes) -> str:
-    name = (filename or "").lower()
-    try:
-        if name.endswith(".pdf"):
-            import pdfplumber
-            text_parts = []
-            with pdfplumber.open(io.BytesIO(raw)) as pdf:
-                for page in pdf.pages[:10]:
-                    text_parts.append(page.extract_text() or "")
-            return "\n".join(text_parts)
-        if name.endswith((".xlsx", ".xls")):
-            import openpyxl
-            wb = openpyxl.load_workbook(io.BytesIO(raw), data_only=True)
-            lines = []
-            for ws in wb.worksheets:
-                for row in ws.iter_rows(values_only=True):
-                    lines.append(" ".join(str(c) for c in row if c is not None))
-            return "\n".join(lines)
-        if name.endswith(".csv"):
-            return raw.decode("utf-8", errors="ignore")
-        # last resort — try utf-8 text
-        return raw.decode("utf-8", errors="ignore")
-    except Exception as e:  # pragma: no cover
-        logger.warning("roc_sphere: text extraction failed for %s: %s", filename, e)
-        return ""
+def _parse_directors_for_form(form_type: str, filename: str, raw: bytes, text: str) -> List[Dict[str, Any]]:
+    """Directors register — gated to MGT-7/MGT-7A. Prefers the bordered
+    table-grid reader (far more reliable than a text-line scan) and only
+    falls back to the text-regex scan above when no bordered table is
+    found, e.g. an MGT-7A that was flattened/scanned oddly."""
+    if form_type not in DIRECTOR_SHAREHOLDER_SOURCE_TYPES:
+        return []
+    people = _parse_master_director_tables(raw) if (filename or "").lower().endswith(".pdf") else []
+    if not people:
+        people = _parse_people(text)["people"]
+    return people
 
 
-def parse_master_data(filename: str, raw: bytes) -> Dict[str, Any]:
-    text = _extract_text_from_upload(filename, raw)
-    extracted: Dict[str, Any] = {}
-    for field, pattern in FIELD_PATTERNS.items():
-        m = re.search(pattern, text)
-        if not m:
-            continue
-        val = m.group(1).strip().rstrip(",")
-        if field in ("authorized_capital", "paid_up_capital", "last_year_turnover"):
-            val = _num(val.replace(",", ""))
-        extracted[field] = val
-    # Label/value parsing covers MCA's XLSX export where values are in the
-    # next cell and not on the same line as the label.
-    lines = [re.sub(r"\s+", " ", x).strip() for x in text.splitlines() if str(x).strip()]
-    labels = {
-        "cin": ("cin", "llpin"),
-        "company_name": ("company name", "name of the company"),
-        "registered_office_address": ("registered address", "registered office address"),
-        "date_of_incorporation": ("date of incorporation",),
-        "authorized_capital": ("authorised capital", "authorized capital"),
-        "paid_up_capital": ("paid up capital", "paid-up capital"),
-        "last_agm_date": ("date of last agm",),
-        "last_board_meeting_date": ("date of last board meeting",),
-        "pan": ("pan", "permanent account number"),
-    }
-    for field, names in labels.items():
-        if field in extracted:
-            continue
-        for i, line in enumerate(lines[:-1]):
-            if any(line.lower().rstrip(":") == n or line.lower().startswith(n + ":") for n in names):
-                value = line.split(":", 1)[1].strip() if ":" in line else lines[i + 1]
-                if value and value != "-":
-                    extracted[field] = _num(value.replace(",", "")) if field in ("authorized_capital", "paid_up_capital") else value
+def _parse_shareholders_for_form(form_type: str, text: str) -> List[Dict[str, Any]]:
+    """Shareholder register — gated to MGT-7/MGT-7A."""
+    if form_type not in DIRECTOR_SHAREHOLDER_SOURCE_TYPES:
+        return []
+    return _parse_mgt_shareholders(text)
+
+
+# ── general Company Master fields (any recognised ROC form) ───────────────
+# MCA e-form PDFs render each field as a label followed by its value —
+# sometimes on the same line ("*Name of the Company PRODIGIST … LIMITED"
+# on AOC-2/Board's/Auditor's Report), sometimes with the value in the box
+# below the label ("*Corporate identity number (CIN)" / value on the next
+# line, as on AOC-4). _extract_labeled_value() below tries the same-line
+# remainder first and only falls back to scanning forward when that
+# remainder doesn't validate — this is what keeps e.g. a bare label like
+# "Address of the registered office of the company" (nothing left over
+# after stripping the label text) from being read as its own value.
+
+STOP_MARKER_RE = re.compile(r"^\(?[a-hj-vx-z]\)\s|^\(?[ivx]{1,4}\)\s", re.I)
+_TRUNC_ENDING_WORDS = ("private", "pvt", "the", "of", "and", "&", "-")
+
+_DATE_VALUE_RE = re.compile(r"^[0-3]?\d[/\-][01]?\d[/\-]\d{2,4}$")
+_NUM_VALUE_RE = re.compile(r"^[\d,]+(\.\d+)?$")
+_CIN_VALUE_RE = re.compile(r"^[A-Z0-9]{21}$")
+_NAME_VALUE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 &.,'\-]{1,90}$")
+_ANY_TEXT_VALUE_RE = re.compile(r"^.{4,150}$")
+_ALNUM_ID_VALUE_RE = re.compile(r"^[A-Za-z0-9]{4,20}$")
+
+
+def _find_label_line(lines: List[str], phrases: List[str], start: int = 0):
+    """First line at/after `start` containing any phrase (longer phrases
+    should be listed first so a more specific label wins over a shorter
+    one that happens to be a substring of it)."""
+    low = [p.lower() for p in phrases]
+    for i in range(start, len(lines)):
+        ll = lines[i].lower()
+        for p in low:
+            if p in ll:
+                return i, p
+    return -1, None
+
+
+def _extract_labeled_value(lines: List[str], label_idx: int, phrase: str, validator, join_multiline: bool = False, max_lookahead: int = 6) -> Optional[str]:
+    line = lines[label_idx]
+    ll = line.lower()
+    p_idx = ll.find(phrase)
+    remainder = line[p_idx + len(phrase):].strip(" :()-\t*") if p_idx != -1 else ""
+    if remainder and validator(remainder):
+        collected = [remainder]
+        # a same-line value that trails off mid-word ("… PRIVATE") is
+        # completed from the immediate next line ("LIMITED"); a complete
+        # value is left alone so the next label's text is never pulled in.
+        if join_multiline and remainder.strip().lower().split(" ")[-1] in _TRUNC_ENDING_WORDS:
+            for j in range(label_idx + 1, min(label_idx + 3, len(lines))):
+                cand = lines[j].strip()
+                if not cand or STOP_MARKER_RE.match(cand):
                     break
-    people = _parse_people(text)["people"]
-    if people:
-        extracted["_directors"] = people
-    mgt_people = _parse_mgt_shareholders(text) if re.search(r"mgt[- ]?7", filename or "", re.I) else []
-    if mgt_people:
-        extracted["_shareholders"] = mgt_people
-    extracted["_source_type"] = "mgt-7/mgt-7a" if re.search(r"mgt[- ]?7", filename or "", re.I) else "master-data"
-    extracted["_source_file"] = filename
-    extracted["_chars_scanned"] = len(text)
+                if validator(cand):
+                    collected.append(cand)
+                break
+        return " ".join(collected)
+    collected: List[str] = []
+    for j in range(label_idx + 1, min(label_idx + 1 + max_lookahead, len(lines))):
+        cand = lines[j].strip()
+        if not cand:
+            continue
+        is_stop = bool(STOP_MARKER_RE.match(cand))
+        ok = bool(validator(cand))
+        if is_stop and (collected or not ok):
+            break
+        if ok:
+            collected.append(cand)
+            if not join_multiline:
+                break
+        elif collected:
+            break
+    return " ".join(collected) if collected else None
+
+
+# (field, label phrases — longest/most specific first, validator, join multi-line?, lookahead)
+ROC_GENERAL_FIELD_SPECS = [
+    ("cin", ["corporate identity number", "llpin"], lambda s: bool(_CIN_VALUE_RE.match(s)), False, 3),
+    ("company_name", ["name of the company", "name of company", "llp name"], lambda s: bool(_NAME_VALUE_RE.match(s)), True, 3),
+    ("registered_office_address",
+     ["address of the registered office of the company", "address of the registered office", "registered office address"],
+     lambda s: bool(_ANY_TEXT_VALUE_RE.match(s)), True, 6),
+    ("authorized_capital", ["authorised capital of the company", "authorized capital of the company"], lambda s: bool(_NUM_VALUE_RE.match(s)), False, 3),
+    ("last_agm_date", ["date of agm"], lambda s: bool(_DATE_VALUE_RE.match(s)), False, 3),
+    ("last_board_meeting_date", ["date of board of directors", "date of board meeting"], lambda s: bool(_DATE_VALUE_RE.match(s)), False, 3),
+]
+
+
+def parse_roc_general_fields(text: str) -> Dict[str, Any]:
+    """Company Master fields common to (most) ROC forms — safe to apply
+    regardless of which recognised form type the upload turned out to be,
+    since none of these are director/shareholder/financial data."""
+    lines = [re.sub(r"\s+", " ", x).strip() for x in text.splitlines()]
+    extracted: Dict[str, Any] = {}
+    for field, phrases, validator, join_multi, lookahead in ROC_GENERAL_FIELD_SPECS:
+        idx, phrase = _find_label_line(lines, phrases)
+        if idx == -1:
+            continue
+        val = _extract_labeled_value(lines, idx, phrase, validator, join_multi, lookahead)
+        if val:
+            extracted[field] = _num(val) if field == "authorized_capital" else val
     return extracted
 
 
-ROC_FORM_ALLOWED_EXT = (".pdf",)
-ROC_FORM_RECOGNIZED = (
-    ("aoc-4", r"aoc[- ]?4"), ("mgt-7a", r"mgt[- ]?7a"), ("mgt-7", r"mgt[- ]?7\b"),
-    ("dir-12", r"dir[- ]?12"), ("adt-1", r"adt[- ]?1"), ("inc-22", r"inc[- ]?22"),
-    ("pas-3", r"pas[- ]?3"), ("mgt-14", r"mgt[- ]?14"), ("dpt-3", r"dpt[- ]?3"),
-)
+# ── financial data + auditor (AOC-4 only) ──────────────────────────────────
+# AOC-4's Balance Sheet / P&L segments print each line item and its
+# current/previous-period figures on one line ("(IX) Profit before tax
+# (VII-VIII) -94343.00 -132689.00"), so these are simple same-line regexes
+# rather than the label/value scan used for the general fields above.
+
+AOC4_FINANCIAL_PATTERNS = {
+    "total_income": r"\(III\)\s*Total Income.*?(-?[\d,]+\.\d{2})",
+    "total_expenses": r"Total expenses\s+(-?[\d,]+\.\d{2})",
+    "profit_before_tax": r"\(IX\)\s*Profit before tax.*?(-?[\d,]+\.\d{2})",
+    "profit_after_tax": r"\(XV\)\s*Profit\s*/\(Loss\).*?(-?[\d,]+\.\d{2})",
+    "net_worth": r"Net Worth of the company\s+(-?[\d,]+(?:\.\d+)?)",
+    "share_capital": r"\(a\)\s*Share capital\s+(-?[\d,]+)",
+    "reserves_and_surplus": r"\(b\)\s*Reserves and surplus\s+(-?[\d,]+)",
+}
 
 
-def _identify_roc_form_type(filename: str, text: str) -> str:
-    """Best-effort filing-type label for the audit trail — checked against
-    both the filename and the extracted text since MCA acknowledgement
-    PDFs are sometimes downloaded with generic names."""
-    hay = f"{filename}\n{text[:1500]}".lower()
-    for label, pattern in ROC_FORM_RECOGNIZED:
-        if re.search(pattern, hay):
-            return label
-    return "roc-form"
+def parse_aoc4_financials(text: str) -> Dict[str, Any]:
+    """Balance Sheet / P&L key figures — only meaningful for form_type ==
+    'aoc-4'; callers must gate on that before calling this."""
+    out: Dict[str, Any] = {}
+    for field, pattern in AOC4_FINANCIAL_PATTERNS.items():
+        m = re.search(pattern, text)
+        if m:
+            out[field] = _num(m.group(1))
+    # the Balance Sheet's grand total is printed twice (Equity & Liabilities
+    # total, then Assets total) with identical figures — take the first.
+    m = re.search(r"^Total\s+(-?[\d,]+\.\d{2})\s+(-?[\d,]+\.\d{2})\s*$", text, re.M)
+    if m:
+        out["balance_sheet_total"] = _num(m.group(1))
+    lines = [re.sub(r"\s+", " ", x).strip() for x in text.splitlines()]
+    idx, _ = _find_label_line(lines, ["financial year to which financial statements relates"])
+    if idx != -1:
+        idx_from, p1 = _find_label_line(lines, ["from (dd/mm/yyyy)"], idx)
+        if idx_from != -1:
+            v = _extract_labeled_value(lines, idx_from, p1, lambda s: bool(_DATE_VALUE_RE.match(s)), False, 2)
+            if v:
+                out["period_from"] = v
+            idx_to, p2 = _find_label_line(lines, ["to (dd/mm/yyyy)"], idx_from + 1)
+            if idx_to != -1:
+                v = _extract_labeled_value(lines, idx_to, p2, lambda s: bool(_DATE_VALUE_RE.match(s)), False, 2)
+                if v:
+                    out["period_to"] = v
+    return out
+
+
+def parse_aoc4_auditor(text: str) -> Dict[str, Any]:
+    """Statutory Auditor name + firm registration/membership number —
+    only meaningful for form_type == 'aoc-4'; callers must gate on that."""
+    lines = [re.sub(r"\s+", " ", x).strip() for x in text.splitlines()]
+    out: Dict[str, Any] = {}
+    idx, p = _find_label_line(lines, ["name of the auditor or auditor's firm", "name of the auditor"])
+    if idx != -1:
+        v = _extract_labeled_value(lines, idx, p, lambda s: bool(_NAME_VALUE_RE.match(s)) and "address" not in s.lower(), True, 2)
+        if v:
+            out["name"] = v
+    idx, p = _find_label_line(lines, ["auditor's firm's registration number", "membership number of auditor"])
+    if idx != -1:
+        v = _extract_labeled_value(lines, idx, p, lambda s: bool(_ALNUM_ID_VALUE_RE.match(s)), False, 2)
+        if v:
+            out["firm_reg_no"] = v
+    return out
 
 
 @router.post("/companies/{company_id}/upload-master-data")
@@ -619,16 +807,20 @@ async def upload_master_data(
     source_type: str = Form("roc"),
     current_user: User = Depends(CREATE),
 ):
-    """Upload ROC Forms — AOC-4, MGT-7, MGT-7A, DIR-12, ADT-1, INC-22, PAS-3,
-    MGT-14, DPT-3 acknowledgement PDFs — and best-effort extract filing data
-    (financials, shareholders) to prefill the company master.
+    """Upload ROC Forms — AOC-4, AOC-2, MGT-7, MGT-7A, Board's/Auditor's
+    Report extracts, DIR-12, ADT-1, INC-22, PAS-3, MGT-14, DPT-3
+    acknowledgement PDFs — and best-effort extract filing data to prefill
+    the company master. Each field is only ever taken from its statutory
+    source form (see the block comment above this section): Company
+    Master fields from any recognised form, the Director/Signatory
+    register and Shareholder register only from MGT-7/MGT-7A, and
+    financial data + Auditor details only from AOC-4.
 
-    This is the *filing extraction* path and is intentionally separate from
-    the Master Data importer below (`/companies/{id}/master-data/fetch`),
-    which reads the MCA "Company/LLP Master Data" export instead. Keeping
-    them on separate endpoints/parsers means a bad or unusual ROC form
-    never affects Master Data accuracy and vice versa. Robust to partial
-    batch failures: one unreadable file no longer aborts the whole upload.
+    This is the *filing extraction* path and is intentionally separate
+    from the Master Data importer below (`/companies/{id}/master-data/
+    fetch`), which reads the MCA "Company/LLP Master Data" export
+    instead. Robust to partial batch failures: one unreadable file no
+    longer aborts the whole upload.
     """
     company = await COMPANIES.find_one({"id": company_id})
     if not company:
@@ -655,13 +847,33 @@ async def upload_master_data(
             errors.append(f"{filename}: skipped — empty file")
             continue
         try:
-            extracted = parse_master_data(filename, raw)
+            text = _extract_text_from_upload(filename, raw)
         except Exception as e:  # a single corrupt/scanned PDF must not kill the batch
             logger.warning("roc_sphere upload-roc-form: failed to parse %s: %s", filename, e)
             errors.append(f"{filename}: could not be read — it may be scanned/image-only or password-protected")
             continue
+        if not text.strip():
+            errors.append(f"{filename}: could not be read — it may be scanned/image-only or password-protected")
+            continue
 
-        form_type = _identify_roc_form_type(filename, "")
+        form_type = _identify_roc_form_type(filename, text)
+        extracted: Dict[str, Any] = parse_roc_general_fields(text)
+
+        directors = _parse_directors_for_form(form_type, filename, raw, text)
+        if directors:
+            extracted["_directors"] = directors
+        shareholders = _parse_shareholders_for_form(form_type, text)
+        if shareholders:
+            extracted["_shareholders"] = shareholders
+
+        if form_type == FINANCIAL_SOURCE_TYPE:
+            financials = parse_aoc4_financials(text)
+            if financials:
+                extracted["_financials"] = financials
+            auditor = parse_aoc4_auditor(text)
+            if auditor:
+                extracted["_auditor"] = auditor
+
         extracted["_source_type"] = form_type
         fields_found = {k: v for k, v in extracted.items() if not k.startswith("_")}
         results.append({"filename": filename, "source_type": form_type, "extracted": fields_found,
@@ -673,6 +885,10 @@ async def upload_master_data(
             roc_extracted["_directors"] = (roc_extracted.get("_directors") or []) + extracted["_directors"]
         if extracted.get("_shareholders"):
             roc_extracted["_shareholders"] = (roc_extracted.get("_shareholders") or []) + extracted["_shareholders"]
+        if extracted.get("_financials"):
+            roc_extracted["_financials"] = {**(roc_extracted.get("_financials") or {}), **extracted["_financials"]}
+        if extracted.get("_auditor"):
+            roc_extracted["_auditor"] = {**(roc_extracted.get("_auditor") or {}), **extracted["_auditor"]}
 
     if not any(k for k in roc_extracted if not k.startswith("_")):
         return {
@@ -694,7 +910,13 @@ async def upload_master_data(
                 clean["directors"] = roc_extracted["_directors"]
         if roc_extracted.get("_shareholders"):
             clean["shareholders"] = roc_extracted["_shareholders"]
-        clean["mgt_shareholder_data"] = {k: v for k, v in roc_extracted.items() if not k.startswith("_")}
+        if roc_extracted.get("_financials"):
+            clean["financial_data"] = {**(company.get("financial_data") or {}), **roc_extracted["_financials"]}
+        if roc_extracted.get("_auditor"):
+            existing_auditor = dict(company.get("auditor") or {})
+            existing_auditor.update({k: v for k, v in roc_extracted["_auditor"].items() if v})
+            clean["auditor"] = existing_auditor
+        clean["mgt_shareholder_data"] = {k: v for k, v in roc_extracted.items() if not k.startswith("_") and k not in ("directors", "shareholders", "financial_data", "auditor")}
         clean["roc_form_uploads"] = (company.get("roc_form_uploads") or []) + [
             {"filename": r["filename"], "form_type": r["source_type"], "uploaded_at": _now().isoformat()}
             for r in results
@@ -708,6 +930,10 @@ async def upload_master_data(
         visible["directors"] = roc_extracted["_directors"]
     if roc_extracted.get("_shareholders"):
         visible["shareholders"] = roc_extracted["_shareholders"]
+    if roc_extracted.get("_financials"):
+        visible["financial_data"] = roc_extracted["_financials"]
+    if roc_extracted.get("_auditor"):
+        visible["auditor"] = roc_extracted["_auditor"]
     return {"extracted": visible, "results": results, "applied": bool(apply), "errors": errors}
 
 
@@ -719,7 +945,7 @@ async def upload_master_data(
 # XLSX/CSV). Own text-reading strategy (PDF text-flow order, since the
 # Master Data PDF is a two-column label/value layout that default PDF text
 # extraction jumbles), own label dictionary, own field mapper. Deliberately
-# does not share parse_master_data()/upload_master_data() above — a change
+# does not share the ROC-form parsers/upload_master_data() above — a change
 # to ROC filing parsing must never silently change Master Data parsing.
 #
 # Behaviour mirrors "Smart Import" on the Clients page: upload → fields are
@@ -860,7 +1086,7 @@ def _map_master_category(class_of_company_raw: Optional[str], category_raw: Opti
 
 def extract_mca_master_data(filename: str, raw: bytes) -> Dict[str, Any]:
     """Parse an MCA Master Data export (PDF/XLSX/CSV) into Company Master
-    fields. Separate parser/algorithm from parse_master_data() above —
+    fields. Separate parser/algorithm from the ROC-form parsers above —
     walks the document as an ordered label→value sequence (handling both
     same-line values like 'CIN U80900GJ...' and MCA's multi-line wrapped
     values like the registered address) rather than regex-scanning the
