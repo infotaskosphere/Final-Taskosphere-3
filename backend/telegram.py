@@ -16,12 +16,16 @@ Existing flows preserved exactly:
   • /mt  → My Tasks
   • /cl  → Cancel current action
   • /help → Help menu
+  • Natural language → create/search tasks, leads, clients, invoices, quotations
+  • Natural language reports → tasks, users, attendance, leads and date ranges
 """
 
 import uuid
 import os
 import asyncio
 import httpx
+import json
+import re
 
 from datetime import datetime, timezone, date, timedelta
 from fastapi import APIRouter, Request
@@ -216,6 +220,497 @@ def _build_invoice_summary(data: dict) -> str:
     if data.get("payment_terms"):   summary += f"💳 Terms: {data['payment_terms']}\n"
     if data.get("notes"):           summary += f"📝 Notes: {data['notes']}\n"
     return summary
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NATURAL-LANGUAGE COMMAND / REPORT ENGINE
+# ═══════════════════════════════════════════════════════════════════════════════
+# This is additive. Existing /commands, callback flows and Lead AI remain intact.
+# Plain-language messages are routed here first when there is no active wizard.
+# Missing information is deliberately stored as None/blank; it is never invented.
+
+TG_AI_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+TG_AI_MODEL = os.getenv("TELEGRAM_AI_MODEL", "gemini-3.6-flash")
+
+
+def _tg_clean(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        if not value or value.lower() in {"none", "null", "n/a", "na", "unknown", "not provided", "not available"}:
+            return None
+    return value
+
+
+def _tg_parse_date(value):
+    value = _tg_clean(value)
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except Exception:
+        try:
+            return datetime.strptime(str(value), "%Y-%m-%d")
+        except Exception:
+            return None
+
+
+def _tg_date_filter(date_from=None, date_to=None, field="created_at"):
+    q = {}
+    start = _tg_parse_date(date_from)
+    end = _tg_parse_date(date_to)
+    if start:
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        q["$gte"] = start
+    if end:
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+        # Date-only end dates include the complete day.
+        if str(date_to).strip().endswith("00:00:00") or len(str(date_to).strip()) == 10:
+            end = end + timedelta(days=1) - timedelta(microseconds=1)
+        q["$lte"] = end
+    return {field: q} if q else {}
+
+
+def _tg_display_dt(value):
+    if value is None:
+        return "—"
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).strftime("%d-%m-%Y %H:%M")
+    return str(value)[:32]
+
+
+def _tg_permissions(user, module):
+    if not user:
+        return False
+    if user.get("role") == "admin":
+        return True
+    perms = user.get("permissions") or {}
+    aliases = {
+        "tasks": ["can_view_all_tasks", "view_other_tasks"],
+        "leads": ["can_view_all_leads"],
+        "attendance": ["can_view_attendance"],
+        "clients": ["can_view_all_clients", "can_edit_clients"],
+        "invoices": ["can_view_all_invoices"],
+        "quotations": ["can_view_all_quotations", "can_view_quotations"],
+    }
+    return any(bool(perms.get(k)) for k in aliases.get(module, []))
+
+
+async def _tg_find_user(name=None, user_id=None):
+    if user_id:
+        return await db.users.find_one({"id": str(user_id)}, {"_id": 0, "password": 0})
+    name = _tg_clean(name)
+    if not name:
+        return None
+    regex = {"$regex": re.escape(str(name)), "$options": "i"}
+    return await db.users.find_one(
+        {"$or": [{"full_name": regex}, {"name": regex}, {"email": regex}]},
+        {"_id": 0, "password": 0},
+    )
+
+
+async def _tg_ai_command(text: str):
+    if not TG_AI_KEY or not httpx:
+        return None
+    today = date.today().isoformat()
+    prompt = f"""
+You are Taskosphere's Telegram command parser for a CA/CS ERP.
+Today is {today}.
+Read the user's natural-language request and return ONLY valid JSON.
+Never invent missing values. Missing fields MUST be null, empty string, or [].
+Resolve relative dates into ISO dates when possible.
+
+Allowed actions:
+create_task, create_lead, create_client, create_invoice, create_quotation,
+get_tasks, get_leads, get_attendance, get_clients, get_invoices, get_quotations,
+get_task, get_lead, get_client, get_invoice, get_quotation, help, none.
+
+For reports, understand phrases such as:
+- pending/overdue/completed/all tasks
+- pending tasks of a named user / tasks assigned to a named user
+- my tasks / tasks assigned by me
+- attendance / attendance of a named user / attendance between two dates
+- new leads / leads between two dates / leads of a company/contact
+- clients / clients added between dates / a particular client
+- pending invoices / invoices of a client / invoice PDF of a client or invoice number
+- quotations / quotation of a client / quotation PDF
+
+For creation, extract every explicitly stated field but leave unspecified fields blank.
+For task assignment, assignee_name is the person the task is assigned to; if absent leave null.
+For a PDF request, set output_format to "pdf".
+
+Return this shape:
+{{
+  "action": "none",
+  "confidence": 0.0,
+  "output_format": "text",
+  "status": null,
+  "date_from": null,
+  "date_to": null,
+  "user_name": null,
+  "assignee_name": null,
+  "search": null,
+  "task": {{"title": null,"description": null,"due_date": null,"priority": null,"category": null,"client_name": null}},
+  "lead": {{"contact_name": null,"company_name": null,"phone": null,"email": null,"services": [],"trademark_name": null,"quotation_amount": null,"next_follow_up": null,"notes": null}},
+  "client": {{"company_name": null,"client_type": null,"email": null,"phone": null,"gstin": null,"pan": null,"cin": null,"llpin": null,"address": null,"city": null,"state": null,"services": [],"notes": null}},
+  "invoice": {{"invoice_no": null,"client_name": null}},
+  "quotation": {{"quotation_no": null,"client_name": null}},
+  "limit": 30
+}}
+
+USER MESSAGE:
+{text}
+""".strip()
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{TG_AI_MODEL}:generateContent?key={TG_AI_KEY}"
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0, "responseMimeType": "application/json"},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.post(url, json=payload)
+            r.raise_for_status()
+            data = r.json()
+        raw = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.I)
+            raw = re.sub(r"\s*```$", "", raw)
+        try:
+            return json.loads(raw)
+        except Exception:
+            match = re.search(r"\{.*\}", raw, flags=re.S)
+            return json.loads(match.group(0)) if match else None
+    except Exception as exc:
+        print(f"[Telegram NL AI] parser unavailable: {exc}")
+        return None
+
+
+def _tg_scope_query(user, module):
+    if user and user.get("role") == "admin":
+        return {}
+    if _tg_permissions(user, module):
+        return {}
+    uid = user.get("id") if user else None
+    if not uid:
+        return {"__never__": "telegram_unlinked"}
+    if module == "tasks":
+        return {"$or": [{"assigned_to": uid}, {"sub_assignees": uid}, {"created_by": uid}]}
+    if module == "leads":
+        return {"$or": [{"assigned_to": uid}, {"created_by": uid}]}
+    if module == "clients":
+        return {"$or": [{"assigned_to": uid}, {"created_by": uid}]}
+    if module == "invoices":
+        return {"created_by": uid}
+    if module == "quotations":
+        return {"created_by": uid}
+    if module == "attendance":
+        return {"user_id": uid}
+    return {}
+
+
+def _tg_merge_query(*parts):
+    parts = [p for p in parts if p]
+    if not parts:
+        return {}
+    if len(parts) == 1:
+        return parts[0]
+    return {"$and": parts}
+
+
+async def _tg_natural_language_handler(chat_id: int, text: str, message: dict) -> bool:
+    """Handle plain-language create/report requests. Returns True if consumed."""
+    convo = await db.telegram_conversations.find_one({"telegram_id": chat_id})
+    # Never interrupt an existing multi-step wizard.
+    if convo:
+        return False
+
+    intent = await _tg_ai_command(text)
+    if not intent:
+        return False
+    action = str(intent.get("action") or "none").lower().strip()
+    if action in {"none", "help"}:
+        if action == "help":
+            await send_message(chat_id, "🤖 You can ask me to create or find tasks, leads, clients, invoices and quotations, or share attendance and date-range reports.\n\nExamples:\n• Share pending tasks\n• Share pending tasks of Rahul\n• Share attendance from 1 August to 20 August\n• Share new leads from 1 August to 20 August\n• Add ABC Pvt Ltd as client\n• Assign Priya to call ABC tomorrow")
+            return True
+        return False
+
+    user = await db.users.find_one({"telegram_id": chat_id}, {"_id": 0, "password": 0})
+    if not user:
+        await send_message(chat_id, "❌ Your Telegram account is not linked to a Taskosphere user account.")
+        return True
+
+    # ───────────────────────────────────────────────────────────────────────
+    # CREATE TASK
+    # ───────────────────────────────────────────────────────────────────────
+    if action == "create_task":
+        task = intent.get("task") or {}
+        title = _tg_clean(task.get("title"))
+        if not title:
+            await send_message(chat_id, "❌ Please provide a task title.")
+            return True
+        assignee = await _tg_find_user(intent.get("assignee_name"))
+        if intent.get("assignee_name") and not assignee:
+            await send_message(chat_id, f"❌ I could not find user *{intent.get('assignee_name')}*.")
+            return True
+        now = datetime.now(timezone.utc)
+        client = None
+        if _tg_clean(task.get("client_name")):
+            client = await db.clients.find_one({"company_name": {"$regex": re.escape(task["client_name"]), "$options": "i"}}, {"_id": 0})
+        new_task = {
+            "id": str(uuid.uuid4()),
+            "title": title,
+            "description": _tg_clean(task.get("description")),
+            "assigned_to": assignee.get("id") if assignee else None,
+            "sub_assignees": [],
+            "priority": _tg_clean(task.get("priority")),
+            "status": "pending",
+            "category": _tg_clean(task.get("category")),
+            "client_id": client.get("id") if client else None,
+            "is_recurring": False,
+            "recurrence_pattern": None,
+            "recurrence_interval": None,
+            "created_by": user["id"],
+            "created_at": now,
+            "updated_at": now,
+            "due_date": _tg_clean(task.get("due_date")),
+            "type": "task",
+        }
+        await db.tasks.insert_one(new_task)
+        if assignee:
+            await create_notification(user_id=assignee["id"], title="New Task Assigned", message=f"Task '{title}' assigned via Telegram", type="assignment")
+        await send_message(chat_id, f"✅ *Task created*\n\n📝 {title}\n👤 Assigned to: {assignee.get('full_name') if assignee else '—'}\n📅 Due: {task.get('due_date') or '—'}\n⚡ Priority: {task.get('priority') or '—'}")
+        return True
+
+    # ───────────────────────────────────────────────────────────────────────
+    # CREATE LEAD
+    # ───────────────────────────────────────────────────────────────────────
+    if action == "create_lead":
+        if not _tg_permissions(user, "leads") and user.get("role") != "admin":
+            await send_message(chat_id, "🚫 You do not have permission to add leads.")
+            return True
+        lead = intent.get("lead") or {}
+        now = datetime.now(timezone.utc)
+        services = lead.get("services") or []
+        if isinstance(services, str):
+            services = [x.strip() for x in re.split(r"[,;]+", services) if x.strip()]
+        company_name = _tg_clean(lead.get("company_name"))
+        contact_name = _tg_clean(lead.get("contact_name"))
+        phone = _tg_clean(lead.get("phone"))
+        duplicate = await db.leads.find_one({"phone": phone}, {"_id": 0}) if phone else None
+        if not duplicate and company_name:
+            duplicate = await db.leads.find_one({"company_name": {"$regex": re.escape(company_name), "$options": "i"}, "status": {"$ne": "closed"}}, {"_id": 0})
+        if duplicate:
+            await send_message(chat_id, f"ℹ️ Lead already exists for *{company_name or contact_name or phone}*.")
+            return True
+        doc = {
+            "id": str(uuid.uuid4()), "company_name": company_name, "contact_name": contact_name,
+            "email": _tg_clean(lead.get("email")), "phone": phone, "services": services,
+            "quotation_amount": lead.get("quotation_amount"), "status": "new", "source": "telegram",
+            "next_follow_up": _tg_clean(lead.get("next_follow_up")), "notes": _tg_clean(lead.get("notes")),
+            "assigned_to": None, "created_by": user["id"], "created_at": now, "updated_at": now,
+            "trademark_name": _tg_clean(lead.get("trademark_name")),
+            "company_name_requested": None, "telegram_chat_id": str(chat_id),
+            "telegram_sender_id": str(message.get("from", {}).get("id", "")),
+            "telegram_original_message": text, "ai_captured": True,
+            "ai_confidence": float(intent.get("confidence") or 0),
+        }
+        await db.leads.insert_one(doc)
+        await send_message(chat_id, f"✅ *Lead added*\n\n👤 Contact: {contact_name or '—'}\n🏢 Company: {company_name or '—'}\n📂 Services: {', '.join(services) if services else '—'}\n📞 Phone: {phone or '—'}\n✉️ Email: {lead.get('email') or '—'}")
+        return True
+
+    # ───────────────────────────────────────────────────────────────────────
+    # CREATE CLIENT
+    # ───────────────────────────────────────────────────────────────────────
+    if action == "create_client":
+        if user.get("role") not in ("admin", "manager") and not (user.get("permissions") or {}).get("can_edit_clients"):
+            await send_message(chat_id, "🚫 You do not have permission to add clients.")
+            return True
+        c = intent.get("client") or {}
+        company_name = _tg_clean(c.get("company_name"))
+        if not company_name:
+            await send_message(chat_id, "❌ Please provide the client/company name.")
+            return True
+        existing = await db.clients.find_one({"company_name": {"$regex": f"^{re.escape(company_name)}$", "$options": "i"}}, {"_id": 0})
+        if existing:
+            await send_message(chat_id, f"ℹ️ Client *{existing.get('company_name', company_name)}* already exists.")
+            return True
+        doc = {
+            "id": str(uuid.uuid4()), "company_name": company_name,
+            "client_type": _tg_clean(c.get("client_type")) or "",
+            "contact_persons": [], "email": _tg_clean(c.get("email")) or "",
+            "phone": _tg_clean(c.get("phone")) or "", "birthday": None,
+            "services": c.get("services") or [], "dsc_details": [],
+            "assigned_to": None, "notes": _tg_clean(c.get("notes")),
+            "gstin": _tg_clean(c.get("gstin")) or "", "pan": _tg_clean(c.get("pan")) or "",
+            "cin": _tg_clean(c.get("cin")) or "", "llpin": _tg_clean(c.get("llpin")) or "",
+            "address": _tg_clean(c.get("address")) or "", "city": _tg_clean(c.get("city")) or "",
+            "state": _tg_clean(c.get("state")) or "", "created_by": user["id"],
+            "created_at": datetime.now(timezone.utc), "status": "active",
+        }
+        await db.clients.insert_one(doc)
+        await send_message(chat_id, f"✅ *Client added*\n\n🏢 {company_name}\n📞 {doc['phone'] or '—'}\n✉️ {doc['email'] or '—'}\n🏷 GSTIN: {doc['gstin'] or '—'}")
+        return True
+
+    # ───────────────────────────────────────────────────────────────────────
+    # REPORT / SEARCH QUERIES
+    # ───────────────────────────────────────────────────────────────────────
+    date_from = intent.get("date_from")
+    date_to = intent.get("date_to")
+    search = _tg_clean(intent.get("search"))
+    user_name = _tg_clean(intent.get("user_name"))
+    target_user = await _tg_find_user(user_name) if user_name else None
+    if user_name and not target_user:
+        await send_message(chat_id, f"❌ I could not find user *{user_name}*.")
+        return True
+
+    if action in {"get_tasks", "get_task"}:
+        if target_user and not _tg_permissions(user, "tasks") and user.get("id") != target_user.get("id"):
+            await send_message(chat_id, "🚫 You do not have permission to view another user's tasks.")
+            return True
+        base = _tg_scope_query(user, "tasks")
+        if target_user:
+            base = {"$or": [{"assigned_to": target_user["id"]}, {"sub_assignees": target_user["id"]}, {"created_by": target_user["id"]}]}
+        filters = []
+        status = _tg_clean(intent.get("status"))
+        if status:
+            filters.append({"status": {"$regex": f"^{re.escape(status)}$", "$options": "i"}})
+        if search:
+            filters.append({"$or": [{"title": {"$regex": re.escape(search), "$options": "i"}}, {"description": {"$regex": re.escape(search), "$options": "i"}}]})
+        dq = _tg_date_filter(date_from, date_to, "due_date")
+        if dq: filters.append(dq)
+        q = _tg_merge_query(base, *filters)
+        tasks = await db.tasks.find(q, {"_id": 0}).sort("due_date", 1).limit(min(int(intent.get("limit") or 30), 100)).to_list(min(int(intent.get("limit") or 30), 100))
+        if not tasks:
+            await send_message(chat_id, "📋 No matching tasks found.")
+            return True
+        ids = {x.get("assigned_to") for x in tasks if x.get("assigned_to")} | {x.get("created_by") for x in tasks if x.get("created_by")}
+        users = await db.users.find({"id": {"$in": list(ids)}}, {"_id": 0, "password": 0}).to_list(100)
+        um = {x["id"]: x.get("full_name", x.get("email", "")) for x in users}
+        lines = [f"📋 *Tasks ({len(tasks)})*"]
+        for t in tasks:
+            lines.append(f"\n• *{t.get('title') or '—'}*\n  👤 {um.get(t.get('assigned_to'), '—')}\n  📅 {t.get('due_date') or '—'}\n  🔹 {t.get('status') or '—'} | ⚡ {t.get('priority') or '—'}")
+        await send_message(chat_id, "\n".join(lines))
+        return True
+
+    if action == "get_leads":
+        if target_user and not _tg_permissions(user, "leads") and user.get("id") != target_user.get("id"):
+            await send_message(chat_id, "🚫 You do not have permission to view another user's leads.")
+            return True
+        base = _tg_scope_query(user, "leads")
+        filters = []
+        if target_user: filters.append({"assigned_to": target_user["id"]})
+        if search:
+            rx = {"$regex": re.escape(search), "$options": "i"}
+            filters.append({"$or": [{"company_name": rx}, {"contact_name": rx}, {"phone": rx}, {"email": rx}]})
+        if _tg_clean(intent.get("status")): filters.append({"status": {"$regex": f"^{re.escape(intent['status'])}$", "$options": "i"}})
+        dq = _tg_date_filter(date_from, date_to, "created_at")
+        if dq: filters.append(dq)
+        leads = await db.leads.find(_tg_merge_query(base, *filters), {"_id": 0}).sort("created_at", -1).limit(min(int(intent.get("limit") or 30), 100)).to_list(min(int(intent.get("limit") or 30), 100))
+        if not leads:
+            await send_message(chat_id, "📈 No matching leads found.")
+            return True
+        lines = [f"📈 *Leads ({len(leads)})*"]
+        for x in leads:
+            lines.append(f"\n• *{x.get('company_name') or '—'}*\n  👤 {x.get('contact_name') or '—'}\n  📞 {x.get('phone') or '—'}\n  📂 {', '.join(x.get('services') or []) or '—'}\n  📅 {_tg_display_dt(x.get('created_at'))} | {x.get('status') or '—'}")
+        await send_message(chat_id, "\n".join(lines))
+        return True
+
+    if action == "get_attendance":
+        if target_user and not _tg_permissions(user, "attendance") and user.get("id") != target_user.get("id"):
+            await send_message(chat_id, "🚫 You do not have permission to view another user's attendance.")
+            return True
+        base = _tg_scope_query(user, "attendance")
+        if target_user: base = {"user_id": target_user["id"]}
+        dq = _tg_date_filter(date_from, date_to, "date")
+        # attendance.date is YYYY-MM-DD string, so use string bounds for reliability.
+        q = base
+        if date_from or date_to:
+            dfilter = {}
+            if date_from: dfilter["$gte"] = str(date_from)[:10]
+            if date_to: dfilter["$lte"] = str(date_to)[:10]
+            q = _tg_merge_query(base, {"date": dfilter})
+        rows = await db.attendance.find(q, {"_id": 0}).sort("date", -1).limit(1000).to_list(1000)
+        if not rows:
+            await send_message(chat_id, "🕘 No attendance records found for that period.")
+            return True
+        ids = {r.get("user_id") for r in rows if r.get("user_id")}
+        users = await db.users.find({"id": {"$in": list(ids)}}, {"_id": 0, "password": 0}).to_list(1000)
+        um = {u["id"]: u.get("full_name", "") for u in users}
+        lines = [f"🕘 *Attendance ({len(rows)})*"]
+        for r in rows:
+            duration = r.get("duration_minutes")
+            dur = f"{int(duration)//60}h {int(duration)%60}m" if isinstance(duration, (int, float)) else "—"
+            lines.append(f"\n• *{r.get('date') or '—'}* — {um.get(r.get('user_id'), '—')}\n  IN: {_tg_display_dt(r.get('punch_in'))}\n  OUT: {_tg_display_dt(r.get('punch_out'))}\n  Total: {dur}")
+        await send_message(chat_id, "\n".join(lines))
+        return True
+
+    if action in {"get_clients", "get_client"}:
+        base = _tg_scope_query(user, "clients")
+        filters = []
+        if search:
+            rx = {"$regex": re.escape(search), "$options": "i"}
+            filters.append({"$or": [{"company_name": rx}, {"phone": rx}, {"email": rx}, {"gstin": rx}]})
+        dq = _tg_date_filter(date_from, date_to, "created_at")
+        if dq: filters.append(dq)
+        clients = await db.clients.find(_tg_merge_query(base, *filters), {"_id": 0}).sort("company_name", 1).limit(min(int(intent.get("limit") or 30), 100)).to_list(min(int(intent.get("limit") or 30), 100))
+        if not clients:
+            await send_message(chat_id, "🏢 No matching clients found.")
+            return True
+        lines = [f"🏢 *Clients ({len(clients)})*"]
+        for c in clients:
+            lines.append(f"\n• *{c.get('company_name') or '—'}*\n  📞 {c.get('phone') or '—'}\n  ✉️ {c.get('email') or '—'}\n  🏷 {c.get('gstin') or '—'}")
+        await send_message(chat_id, "\n".join(lines))
+        return True
+
+    if action in {"get_invoices", "get_invoice"}:
+        base = _tg_scope_query(user, "invoices")
+        inv = intent.get("invoice") or {}
+        filters = []
+        if _tg_clean(inv.get("invoice_no")): filters.append({"invoice_no": {"$regex": re.escape(inv["invoice_no"]), "$options": "i"}})
+        if _tg_clean(inv.get("client_name")): filters.append({"client_name": {"$regex": re.escape(inv["client_name"]), "$options": "i"}})
+        if search: filters.append({"$or": [{"invoice_no": {"$regex": re.escape(search), "$options": "i"}}, {"client_name": {"$regex": re.escape(search), "$options": "i"}}]})
+        if _tg_clean(intent.get("status")): filters.append({"status": {"$regex": f"^{re.escape(intent['status'])}$", "$options": "i"}})
+        dq = _tg_date_filter(date_from, date_to, "invoice_date")
+        if dq: filters.append(dq)
+        invoices = await db.invoices.find(_tg_merge_query(base, *filters), {"_id": 0}).sort("invoice_date", -1).limit(min(int(intent.get("limit") or 20), 50)).to_list(min(int(intent.get("limit") or 20), 50))
+        if not invoices:
+            await send_message(chat_id, "🧾 No matching invoices found.")
+            return True
+        if intent.get("output_format") == "pdf" and len(invoices) == 1:
+            return bool(await _send_invoice_pdf_by_id(chat_id, invoices[0].get("id")))
+        lines = [f"🧾 *Invoices ({len(invoices)})*"]
+        for x in invoices:
+            lines.append(f"\n• *{x.get('invoice_no') or '—'}* — {x.get('client_name') or '—'}\n  💎 {_fmt_inr(x.get('grand_total', 0))}\n  📅 {x.get('invoice_date') or '—'} | {x.get('status') or '—'}")
+        await send_message(chat_id, "\n".join(lines))
+        return True
+
+    if action in {"get_quotations", "get_quotation"}:
+        base = _tg_scope_query(user, "quotations")
+        qdata = intent.get("quotation") or {}
+        filters = []
+        if _tg_clean(qdata.get("quotation_no")): filters.append({"quotation_no": {"$regex": re.escape(qdata["quotation_no"]), "$options": "i"}})
+        if _tg_clean(qdata.get("client_name")): filters.append({"client_name": {"$regex": re.escape(qdata["client_name"]), "$options": "i"}})
+        if search: filters.append({"$or": [{"quotation_no": {"$regex": re.escape(search), "$options": "i"}}, {"client_name": {"$regex": re.escape(search), "$options": "i"}}]})
+        if _tg_clean(intent.get("status")): filters.append({"status": {"$regex": f"^{re.escape(intent['status'])}$", "$options": "i"}})
+        dq = _tg_date_filter(date_from, date_to, "created_at")
+        if dq: filters.append(dq)
+        quotations = await db.quotations.find(_tg_merge_query(base, *filters), {"_id": 0}).sort("created_at", -1).limit(min(int(intent.get("limit") or 20), 50)).to_list(min(int(intent.get("limit") or 20), 50))
+        if not quotations:
+            await send_message(chat_id, "📄 No matching quotations found.")
+            return True
+        lines = [f"📄 *Quotations ({len(quotations)})*"]
+        for x in quotations:
+            lines.append(f"\n• *{x.get('quotation_no') or x.get('number') or x.get('id','—')}* — {x.get('client_name') or '—'}\n  💎 {_fmt_inr(x.get('total_amount') or x.get('amount') or 0)}\n  📅 {_tg_display_dt(x.get('created_at'))} | {x.get('status') or '—'}")
+        await send_message(chat_id, "\n".join(lines))
+        return True
+
+    return False
 
 
 # ═══════════════════════════════════════════════════════════
@@ -892,25 +1387,57 @@ async def telegram_webhook(request: Request):  # noqa: C901  (complex but intent
                 return await _cmd_invlist(chat_id, action="email")
 
         # ═══════════════════════════════════════════════════════════
+        # NATURAL-LANGUAGE COMMANDS / REPORTS (ADDITIVE)
+        # This runs before Lead AI so requests such as “share pending tasks”
+        # are treated as commands rather than being misclassified as leads.
+        # Existing active wizards return False and continue unchanged.
+        # ═══════════════════════════════════════════════════════════
+        if await _tg_natural_language_handler(chat_id, text, message):
+            return {"status": "natural_language_handled"}
+
+        # ═══════════════════════════════════════════════════════════
         # AI NATURAL-LANGUAGE LEAD CAPTURE (ADDITIVE)
         # Existing Telegram Q&A/commands/conversation flows remain unchanged.
         # Only messages that are not an active conversation/known command
         # reach this detector.
         # ═══════════════════════════════════════════════════════════
         try:
-            lead_result = await process_lead_message(
-                text,
-                source="telegram",
-                source_chat_id=str(chat_id),
-                source_sender_id=str(message.get("from", {}).get("id", "")),
-                source_sender_name=(
-                    message.get("from", {}).get("first_name", "")
-                    + (
-                        " " + message.get("from", {}).get("last_name", "")
-                        if message.get("from", {}).get("last_name")
-                        else ""
-                    )
-                ).strip() or None,
+            sender_id = str(message.get("from", {}).get("id", ""))
+            sender_name = (
+                message.get("from", {}).get("first_name", "")
+                + (
+                    " " + message.get("from", {}).get("last_name", "")
+                    if message.get("from", {}).get("last_name")
+                    else ""
+                )
+            ).strip() or None
+
+            # Keep compatibility with older lead_ai.py deployments that still
+            # expose process_lead_message(message) without channel metadata.
+            try:
+                lead_result = await process_lead_message(
+                    text,
+                    source="telegram",
+                    source_chat_id=str(chat_id),
+                    source_sender_id=sender_id,
+                    source_sender_name=sender_name,
+                )
+            except TypeError as compatibility_error:
+                if "unexpected keyword" not in str(compatibility_error).lower():
+                    raise
+                print(
+                    "[Telegram Lead AI] Retrying with legacy "
+                    "process_lead_message(message) signature."
+                )
+                lead_result = await process_lead_message(text)
+
+            print(
+                "[Telegram Lead AI] Detection result:",
+                {
+                    "is_lead": bool(lead_result and lead_result.get("is_lead")),
+                    "confidence": lead_result.get("confidence") if lead_result else None,
+                    "source": lead_result.get("source") if lead_result else None,
+                },
             )
 
             if lead_result and lead_result.get("is_lead"):
@@ -1012,8 +1539,22 @@ async def telegram_webhook(request: Request):  # noqa: C901  (complex but intent
                 return {"status": "lead_created", "lead_id": lead_id}
 
         except Exception as lead_ai_error:
-            # Lead AI must never break the existing Telegram bot.
+            # Do not silently fall through to the Welcome message when lead AI
+            # fails. Existing Telegram commands/conversations remain unaffected.
+            import traceback
+            traceback.print_exc()
             print(f"[Telegram Lead AI] Error: {lead_ai_error}")
+            await send_message(
+                chat_id,
+                "⚠️ I received your message, but the lead reader could not "
+                "process it right now.\n\n"
+                "Please check the Lead AI configuration/API settings in the "
+                "backend logs."
+            )
+            return {
+                "status": "lead_ai_error",
+                "detail": str(lead_ai_error),
+            }
 
         # ── Load existing conversation ────────────────────────────
         convo = await db.telegram_conversations.find_one({"telegram_id": chat_id})
