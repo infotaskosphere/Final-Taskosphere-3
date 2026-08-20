@@ -44,6 +44,22 @@ const CATEGORY_LABELS = {
   private: 'Private Limited', public: 'Public Limited', opc: 'One Person Company', section_8: 'Section 8 Company', llp: 'LLP',
 };
 
+// financial_data is filled only from AOC-4 uploads (see backend/roc_sphere.py
+// FINANCIAL_DATA_FIELDS) — kept read-only here since it's a filing extract,
+// not something the user hand-edits on this tab.
+const FINANCIAL_DATA_LABELS = [
+  ['period_from', 'Period From'],
+  ['period_to', 'Period To'],
+  ['total_income', 'Total Income (Rs.)'],
+  ['total_expenses', 'Total Expenses (Rs.)'],
+  ['profit_before_tax', 'Profit Before Tax (Rs.)'],
+  ['profit_after_tax', 'Profit / (Loss) After Tax (Rs.)'],
+  ['net_worth', 'Net Worth (Rs.)'],
+  ['share_capital', 'Share Capital (Rs.)'],
+  ['reserves_and_surplus', 'Reserves & Surplus (Rs.)'],
+  ['balance_sheet_total', 'Balance Sheet Total (Rs.)'],
+];
+
 const emptyCompanyForm = () => ({
   client_id: null,
   company_name: '',
@@ -463,6 +479,27 @@ function MasterTab({ company, isDark, onSave, input, text, muted }) {
           ))}
         </div>
       </div>
+
+      {company.financial_data && Object.keys(company.financial_data).length > 0 && (
+        <div className={`rounded-lg border p-3 ${isDark ? 'border-slate-700 bg-slate-900/40' : 'border-slate-200 bg-slate-50'}`}>
+          <p className={`text-xs font-semibold ${muted} mb-2`}>Financial Summary (from AOC-4)</p>
+          <div className="grid sm:grid-cols-3 gap-3">
+            {FINANCIAL_DATA_LABELS.map(([k, label]) => (
+              company.financial_data[k] !== undefined && company.financial_data[k] !== null && company.financial_data[k] !== '' ? (
+                <div key={k}>
+                  <p className={`text-xs ${muted}`}>{label}</p>
+                  <p className={`text-sm ${text}`}>
+                    {typeof company.financial_data[k] === 'number'
+                      ? company.financial_data[k].toLocaleString('en-IN')
+                      : company.financial_data[k]}
+                  </p>
+                </div>
+              ) : null
+            ))}
+          </div>
+          <p className={`text-[11px] ${muted} mt-2`}>Auto-filled from the latest AOC-4 upload on the Upload ROC Forms tab — read-only here.</p>
+        </div>
+      )}
 
       <div>
         <label className={`text-xs font-medium ${muted} mb-1 block`}>Notes</label>
@@ -1146,10 +1183,14 @@ function UploadTab({ company, isDark, input, text, muted, onApplied }) {
     <div className="space-y-4">
       <h3 className={`text-sm font-semibold ${text}`}>Upload ROC Forms</h3>
       <p className={`text-xs ${muted}`}>
-        Upload AOC-4, MGT-7, MGT-7A, DIR-12, ADT-1, INC-22, PAS-3, MGT-14 or DPT-3 acknowledgement PDFs — multiple
-        files are merged into one extraction. MGT-7/MGT-7A shareholder attachments are merged into the shareholder
-        register. Applied details are saved in both ROC Company Master and the linked Client record, and feed
-        straight into the Compliance Checklist and Applicable Compliances tabs.{' '}
+        Upload AOC-4, AOC-2, MGT-7, MGT-7A, Board's/Auditor's Report extracts, DIR-12, ADT-1, INC-22, PAS-3, MGT-14 or
+        DPT-3 acknowledgement PDFs — multiple files are merged into one extraction, and each field is only ever
+        pulled from its statutory source form: the <strong>Directors &amp; Shareholders register comes only from
+        MGT-7 / MGT-7A</strong>, <strong>financial data and the Statutory Auditor come only from AOC-4</strong>, and
+        general Company Master fields (CIN, name, address, capital, AGM/board meeting dates) are read from whichever
+        recognised form states them. A non-MGT-7/7A form can never add or change a director or shareholder row.
+        Applied details are saved in both ROC Company Master and the linked Client record, and feed straight into
+        the Compliance Checklist and Applicable Compliances tabs.{' '}
         For the MCA Company/LLP Master Data export (PDF/XLSX/CSV), use the <strong>Master Data</strong> tab instead —
         that's a separate, dedicated extraction path.
       </p>
