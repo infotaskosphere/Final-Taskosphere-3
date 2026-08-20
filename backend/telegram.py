@@ -24,7 +24,6 @@ import asyncio
 import httpx
 
 from datetime import datetime, timezone, date, timedelta
-from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Request
 from backend.dependencies import db
 from backend.notifications import create_notification
@@ -217,304 +216,6 @@ def _build_invoice_summary(data: dict) -> str:
     if data.get("payment_terms"):   summary += f"💳 Terms: {data['payment_terms']}\n"
     if data.get("notes"):           summary += f"📝 Notes: {data['notes']}\n"
     return summary
-
-
-# ═══════════════════════════════════════════════════════════
-# AI NATURAL-LANGUAGE TASK EXTRACTION
-# Creates a task directly from an ordinary Telegram message.
-# Existing /ts, /mt and guided task conversation remain unchanged.
-# ═══════════════════════════════════════════════════════════
-
-async def _extract_natural_language_task(message_text: str) -> dict | None:
-    """Extract a task from a normal message using the configured Gemini model.
-
-    Missing information is returned as null/blank; the function never invents
-    task fields. It only decides whether the message is actually a task.
-    """
-    if not message_text or not message_text.strip():
-        return None
-
-    api_key = (
-        os.getenv("GEMINI_API_KEY")
-        or os.getenv("GOOGLE_API_KEY")
-        or os.getenv("GOOGLE_AI_STUDIO_API_KEY")
-        or ""
-    ).strip()
-    if not api_key:
-        return None
-
-    model = (
-        os.getenv("GEMINI_TEXT_MODEL")
-        or os.getenv("GEMINI_MODEL")
-        or "gemini-3.6-flash"
-    ).strip()
-
-    today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
-    prompt = f"""
-You are Taskosphere's natural-language task extractor.
-Today is {today}. The user is in India (Asia/Kolkata).
-
-Read the Telegram message and determine whether it is asking to CREATE a
-Taskosphere task. A normal greeting, question, lead, client inquiry, invoice
-request, quotation request, or casual conversation is NOT a task unless it
-clearly asks someone to perform/complete a task.
-
-The user may write in English, Hinglish, or informal language. Understand phrases
-such as "create a task", "remind Rahul to", "Rahul ko ... karna hai", "assign
-this to Rahul", "please follow up tomorrow", etc.
-
-NEVER invent missing values. If a field is not stated, return null.
-Do not infer priority, category, client, assignee, recurrence, or description.
-The task title should be a concise description of the requested work.
-If the message explicitly names an assignee, return the person's name exactly as
-written. If no assignee is named, assignee_name must be null.
-Resolve relative dates such as tomorrow/next Monday using today's date.
-Return due_date as ISO datetime or ISO date when explicitly stated/inferred from
-a relative date.
-
-Return ONLY JSON:
-{{
-  "is_task": false,
-  "confidence": 0.0,
-  "task": null
-}}
-
-For a task:
-{{
-  "is_task": true,
-  "confidence": 0.95,
-  "task": {{
-    "title": "...",
-    "description": null,
-    "due_date": null,
-    "priority": null,
-    "status": null,
-    "category": null,
-    "assignee_name": null,
-    "sub_assignee_names": [],
-    "client_name": null,
-    "is_recurring": null,
-    "recurrence_pattern": null,
-    "recurrence_interval": null
-  }}
-}}
-
-MESSAGE:
-{message_text.strip()}
-""".strip()
-
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{model}:generateContent?key={api_key}"
-    )
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0,
-            "responseMimeType": "application/json",
-        },
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=25.0) as client:
-            response = await client.post(url, json=payload)
-            response.raise_for_status()
-            body = response.json()
-        raw = (
-            body.get("candidates", [{}])[0]
-            .get("content", {})
-            .get("parts", [{}])[0]
-            .get("text", "")
-        )
-        if not raw:
-            return None
-        raw = raw.strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[1] if "\n" in raw else raw
-            if raw.endswith("```"):
-                raw = raw[:-3]
-        import json as _json
-        parsed = _json.loads(raw.strip())
-        if not isinstance(parsed, dict) or not parsed.get("is_task"):
-            return None
-        try:
-            confidence = float(parsed.get("confidence") or 0)
-        except (TypeError, ValueError):
-            confidence = 0.0
-        if confidence < 0.80:
-            return None
-        task = parsed.get("task")
-        return task if isinstance(task, dict) else None
-    except Exception as exc:
-        print(f"[Telegram Task AI] Extraction error: {exc}")
-        return None
-
-
-def _normalise_task_date(value):
-    if value is None:
-        return None
-    value = str(value).strip()
-    if not value:
-        return None
-    try:
-        if "T" in value:
-            return datetime.fromisoformat(value).isoformat()
-        return datetime.fromisoformat(value + "T00:00:00").isoformat()
-    except Exception:
-        return None
-
-
-def _clean_task_value(value):
-    if value is None:
-        return None
-    value = str(value).strip()
-    if not value or value.lower() in {"null", "none", "n/a", "na", "not provided", "unknown"}:
-        return None
-    return value
-
-
-def _user_can_assign_to_other(user: dict, target_id: str) -> bool:
-    if not user:
-        return False
-    if target_id == user.get("id"):
-        return True
-    if str(user.get("role", "")).lower() == "admin":
-        return True
-    perms = user.get("permissions") or {}
-    if perms.get("can_assign_tasks"):
-        return True
-    return target_id in (perms.get("view_other_tasks") or [])
-
-
-async def _resolve_telegram_assignee(db, name: str):
-    """Resolve a mentioned assignee against Taskosphere users without guessing."""
-    name = _clean_task_value(name)
-    if not name:
-        return None
-    users = await db.users.find(
-        {"is_active": {"$ne": False}},
-        {"_id": 0, "id": 1, "full_name": 1, "email": 1, "telegram_id": 1},
-    ).to_list(500)
-    needle = name.casefold()
-    exact = [u for u in users if str(u.get("full_name", "")).strip().casefold() == needle]
-    if len(exact) == 1:
-        return exact[0]
-    email_matches = [u for u in users if str(u.get("email", "")).strip().casefold() == needle]
-    if len(email_matches) == 1:
-        return email_matches[0]
-    partial = [u for u in users if needle in str(u.get("full_name", "")).casefold()]
-    if len(partial) == 1:
-        return partial[0]
-    return None
-
-
-async def _resolve_task_client(db, name: str):
-    name = _clean_task_value(name)
-    if not name:
-        return None
-    clients = await db.clients.find({}, {"_id": 0, "id": 1, "company_name": 1}).to_list(500)
-    needle = name.casefold()
-    exact = [c for c in clients if str(c.get("company_name", "")).strip().casefold() == needle]
-    if len(exact) == 1:
-        return exact[0]
-    partial = [c for c in clients if needle in str(c.get("company_name", "")).casefold()]
-    return partial[0] if len(partial) == 1 else None
-
-
-async def _create_task_from_message(db, chat_id: int, message: dict, text: str) -> dict | None:
-    # Never intercept an active guided conversation. Existing /inv, /ld, /ts,
-    # /qo and other Q&A steps must continue to receive the user's next answer.
-    active_convo = await db.telegram_conversations.find_one({"telegram_id": chat_id})
-    if active_convo:
-        return None
-
-    extracted = await _extract_natural_language_task(text)
-    if not extracted:
-        return None
-
-    user = await db.users.find_one({"telegram_id": chat_id})
-    if not user:
-        await send_message(chat_id, "❌ Your Telegram is not linked to a Taskosphere user account.")
-        return {"status": "task_user_not_linked"}
-
-    title = _clean_task_value(extracted.get("title"))
-    if not title:
-        return None
-
-    assignee = await _resolve_telegram_assignee(db, extracted.get("assignee_name"))
-    assignee_id = assignee.get("id") if assignee else user.get("id")
-
-    mentioned_assignee = _clean_task_value(extracted.get("assignee_name"))
-    if mentioned_assignee and not assignee:
-        await send_message(
-            chat_id,
-            f"⚠️ I could not uniquely find Taskosphere user *{mentioned_assignee}*. "
-            "Please use the user's full name or email."
-        )
-        return {"status": "task_assignee_not_found"}
-
-    if assignee_id != user.get("id") and not _user_can_assign_to_other(user, assignee_id):
-        await send_message(chat_id, "🚫 You do not have permission to assign tasks to other users.")
-        return {"status": "task_assignment_unauthorized"}
-
-    client = await _resolve_task_client(db, extracted.get("client_name"))
-    client_id = client.get("id") if client else None
-
-    sub_assignee_ids = []
-    for sub_name in extracted.get("sub_assignee_names") or []:
-        sub = await _resolve_telegram_assignee(db, sub_name)
-        if sub and sub.get("id") != assignee_id:
-            if not _user_can_assign_to_other(user, sub.get("id")):
-                await send_message(chat_id, f"🚫 You do not have permission to assign a sub-task to *{sub_name}*.")
-                return {"status": "sub_assignment_unauthorized"}
-            sub_assignee_ids.append(sub.get("id"))
-
-    now = datetime.now(timezone.utc)
-    new_task = {
-        "id": str(uuid.uuid4()),
-        "title": title,
-        "description": _clean_task_value(extracted.get("description")),
-        "assigned_to": assignee_id,
-        "sub_assignees": sub_assignee_ids,
-        "priority": _clean_task_value(extracted.get("priority")),
-        "status": _clean_task_value(extracted.get("status")),
-        "category": _clean_task_value(extracted.get("category")),
-        "client_id": client_id,
-        "is_recurring": extracted.get("is_recurring") if extracted.get("is_recurring") is not None else False,
-        "recurrence_pattern": _clean_task_value(extracted.get("recurrence_pattern")),
-        "recurrence_interval": extracted.get("recurrence_interval"),
-        "created_by": user.get("id"),
-        "created_at": now,
-        "updated_at": now,
-        "due_date": _normalise_task_date(extracted.get("due_date")),
-        "type": "task",
-    }
-
-    await db.tasks.insert_one(new_task)
-
-    if assignee_id and assignee_id != user.get("id"):
-        await create_notification(
-            user_id=assignee_id,
-            title="New Task Assigned",
-            message=f"Task '{title}' assigned via Telegram",
-            type="assignment",
-        )
-
-    assignee_name = (assignee or {}).get("full_name") or user.get("full_name") or "—"
-    due_display = new_task.get("due_date") or "—"
-    priority_display = new_task.get("priority") or "—"
-    category_display = new_task.get("category") or "—"
-
-    await send_message(
-        chat_id,
-        "✅ *Task Created Successfully!*\n\n"
-        f"📝 *Task:* {title}\n"
-        f"👤 *Assigned To:* {assignee_name}\n"
-        f"📅 *Due Date:* {due_display}\n"
-        f"⚡ *Priority:* {priority_display}\n"
-        f"📂 *Category:* {category_display}"
-    )
-    return {"status": "task_created_natural_language", "task_id": new_task["id"]}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1197,42 +898,19 @@ async def telegram_webhook(request: Request):  # noqa: C901  (complex but intent
         # reach this detector.
         # ═══════════════════════════════════════════════════════════
         try:
-            sender_id = str(message.get("from", {}).get("id", ""))
-            sender_name = (
-                message.get("from", {}).get("first_name", "")
-                + (
-                    " " + message.get("from", {}).get("last_name", "")
-                    if message.get("from", {}).get("last_name")
-                    else ""
-                )
-            ).strip() or None
-
-            # Keep compatibility with older lead_ai.py deployments that still
-            # expose process_lead_message(message) without channel metadata.
-            try:
-                lead_result = await process_lead_message(
-                    text,
-                    source="telegram",
-                    source_chat_id=str(chat_id),
-                    source_sender_id=sender_id,
-                    source_sender_name=sender_name,
-                )
-            except TypeError as compatibility_error:
-                if "unexpected keyword" not in str(compatibility_error).lower():
-                    raise
-                print(
-                    "[Telegram Lead AI] Retrying with legacy "
-                    "process_lead_message(message) signature."
-                )
-                lead_result = await process_lead_message(text)
-
-            print(
-                "[Telegram Lead AI] Detection result:",
-                {
-                    "is_lead": bool(lead_result and lead_result.get("is_lead")),
-                    "confidence": lead_result.get("confidence") if lead_result else None,
-                    "source": lead_result.get("source") if lead_result else None,
-                },
+            lead_result = await process_lead_message(
+                text,
+                source="telegram",
+                source_chat_id=str(chat_id),
+                source_sender_id=str(message.get("from", {}).get("id", "")),
+                source_sender_name=(
+                    message.get("from", {}).get("first_name", "")
+                    + (
+                        " " + message.get("from", {}).get("last_name", "")
+                        if message.get("from", {}).get("last_name")
+                        else ""
+                    )
+                ).strip() or None,
             )
 
             if lead_result and lead_result.get("is_lead"):
@@ -1334,37 +1012,8 @@ async def telegram_webhook(request: Request):  # noqa: C901  (complex but intent
                 return {"status": "lead_created", "lead_id": lead_id}
 
         except Exception as lead_ai_error:
-            # Do not silently fall through to the Welcome message when lead AI
-            # fails. Existing Telegram commands/conversations remain unaffected.
-            import traceback
-            traceback.print_exc()
+            # Lead AI must never break the existing Telegram bot.
             print(f"[Telegram Lead AI] Error: {lead_ai_error}")
-            await send_message(
-                chat_id,
-                "⚠️ I received your message, but the lead reader could not "
-                "process it right now.\n\n"
-                "Please check the Lead AI configuration/API settings in the "
-                "backend logs."
-            )
-            return {
-                "status": "lead_ai_error",
-                "detail": str(lead_ai_error),
-            }
-
-        # ═══════════════════════════════════════════════════════════
-        # AI NATURAL-LANGUAGE TASK CAPTURE (ADDITIVE)
-        # Runs only after known commands and lead detection.
-        # A normal message can create a task without /ts or /mt.
-        # ═══════════════════════════════════════════════════════════
-        try:
-            task_result = await _create_task_from_message(db, chat_id, message, text)
-            if task_result:
-                return task_result
-        except Exception as task_ai_error:
-            import traceback
-            traceback.print_exc()
-            print(f"[Telegram Task AI] Error: {task_ai_error}")
-            # Never break the existing Telegram Q&A/command flows.
 
         # ── Load existing conversation ────────────────────────────
         convo = await db.telegram_conversations.find_one({"telegram_id": chat_id})
