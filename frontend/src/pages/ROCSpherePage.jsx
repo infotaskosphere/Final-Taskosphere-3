@@ -41,7 +41,7 @@ function triggerBlobDownload(blob, filename) {
 }
 
 const CATEGORY_LABELS = {
-  private: 'Private Limited', public: 'Public Limited', opc: 'One Person Company', section_8: 'Section 8 Company',
+  private: 'Private Limited', public: 'Public Limited', opc: 'One Person Company', section_8: 'Section 8 Company', llp: 'LLP',
 };
 
 const emptyCompanyForm = () => ({
@@ -178,20 +178,26 @@ export default function ROCSpherePage() {
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
-      <HubBanner
-        icon={Landmark}
-        eyebrow="Compliance"
-        title="ROC Sphere"
-        subtitle="Company master, Companies Act filings & ready-to-file drafts"
-        isDark={isDark}
-        stats={[
-          { label: 'Companies', value: companies.length },
-          { label: 'Private Ltd', value: companies.filter((c) => c.category === 'private').length },
-          { label: 'Public Ltd', value: companies.filter((c) => c.category === 'public').length },
-        ]}
-      />
+      {/* Banner and the card grid below now share the same horizontal
+          padding (px-4 sm:px-6) and no max-width cap, so their left/right
+          edges line up and the cards use the full width available. */}
+      <div className="px-4 sm:px-6 pt-6">
+        <HubBanner
+          icon={Landmark}
+          eyebrow="Compliance"
+          title="ROC Sphere"
+          subtitle="Company master, Companies Act filings & ready-to-file drafts"
+          isDark={isDark}
+          stats={[
+            { label: 'Companies', value: companies.length },
+            { label: 'Private Ltd', value: companies.filter((c) => c.category === 'private').length },
+            { label: 'Public Ltd', value: companies.filter((c) => c.category === 'public').length },
+            { label: 'LLP', value: companies.filter((c) => c.category === 'llp').length },
+          ]}
+        />
+      </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 grid grid-cols-1 lg:grid-cols-4 gap-6">
+      <div className="px-4 sm:px-6 py-6 grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* ── Company list / picker ───────────────────────────────────── */}
         <div className={`lg:col-span-1 rounded-xl border ${card} p-4 h-fit`}>
           <div className="flex items-center justify-between mb-3">
@@ -314,7 +320,7 @@ function NewCompanyModal({ isDark, input, text, muted, eligibleClients, onClose,
     if (!clientId) { setForm(emptyCompanyForm()); return; }
     const c = eligibleClients.find((x) => x.client_id === clientId);
     if (!c) return;
-    const catMap = { pvt_ltd: 'private', PVT_LTD: 'private', public_ltd: 'public', section_8: 'section_8', llp: 'private', LLP: 'private', opc: 'opc' };
+    const catMap = { pvt_ltd: 'private', PVT_LTD: 'private', public_ltd: 'public', section_8: 'section_8', llp: 'llp', LLP: 'llp', opc: 'opc' };
     setForm((f) => ({
       ...f,
       client_id: c.client_id,
