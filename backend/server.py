@@ -5194,47 +5194,6 @@ async def patch_task(
         updates["completed_at"] = datetime.now(IST).isoformat()
     await db.tasks.update_one({"id": task_id}, {"$set": updates})
     updated_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
-
-    # ── DESKTOP-REMINDER HOUSEKEEPING ──────────────────────────────────
-    # Task-o-sphere reminder popups (db.reminders + popup=True db.notifications
-    # docs) are keyed off the task at the moment they were created. If the
-    # task is completed/cancelled or reassigned to someone else afterwards,
-    # any still-pending (not yet fired/read) reminder for it must be
-    # dismissed so it never surfaces a desktop toast — see
-    # ReminderPopupManager.jsx / GET /reminders/due-popups.
-    now_iso_housekeeping = datetime.now(timezone.utc).isoformat()
-    became_completed = (
-        "status" in updates and updates.get("status") in ("completed", "cancelled")
-    )
-    reassigned_to = (
-        updates.get("assigned_to")
-        if "assigned_to" in updates and updates.get("assigned_to") != old_data.get("assigned_to")
-        else None
-    )
-    if became_completed or reassigned_to:
-        await db.reminders.update_many(
-            {
-                "related_task_id": task_id,
-                "is_dismissed": False,
-                "is_fired": False,
-            },
-            {"$set": {"is_dismissed": True, "updated_at": now_iso_housekeeping}},
-        )
-        await db.notifications.update_many(
-            {"task_id": task_id, "popup": True, "is_read": False},
-            {"$set": {"is_read": True}},
-        )
-        # On reassignment (task still active), let the new assignee know —
-        # mirrors the same task-assigned popup used when a task is first
-        # created (see create_task above).
-        if reassigned_to and not became_completed and reassigned_to != current_user.id:
-            await create_notification(
-                user_id=reassigned_to,
-                title="Task Reassigned To You",
-                message=f"Task '{updated_task.get('title', '')}' has been assigned to you.",
-                type="assignment",
-            )
-            await create_task_assigned_popup(reassigned_to, updated_task.get("title", ""))
     action_type = (
         "TASK_STATUS_CHANGED"
         if "status" in updates and old_data.get("status") != updates.get("status")
@@ -11257,7 +11216,6 @@ async def create_client(
             "gst_pin",
             "cin",
             "llpin",
-            "proprietor_name",
             "mca_fetch_date",
             "is_itr_client",
             "itr_data",
@@ -11754,7 +11712,6 @@ async def update_client(
         # MCA / ROC
         "cin",
         "llpin",
-        "proprietor_name",
         "mca_fetch_date",
         # ITR Client
         "is_itr_client",
@@ -12731,6 +12688,17 @@ async def get_due_reminder_popups(current_user: User = Depends(get_current_user)
             {"$set": {"is_fired": True, "updated_at": now_iso}},
         )
 
+    results = [
+        {
+            "id": str(doc.get("_id")),
+            "type": doc.get("reminder_type", "reminder"),
+            "title": doc.get("title", "Reminder"),
+            "message": doc.get("description", ""),
+            "task_id": doc.get("related_task_id"),
+        }
+        for doc in due_docs
+    ]
+
     popup_cursor = db.notifications.find({
         "user_id": str(current_user.id),
         "popup": True,
@@ -12744,57 +12712,16 @@ async def get_due_reminder_popups(current_user: User = Depends(get_current_user)
                 {"id": {"$in": popup_ids}},
                 {"$set": {"is_read": True}},
             )
-
-    # ── COMPLETED / REASSIGNED TASK GUARD (backend, defense-in-depth) ──
-    # A reminder or popup-notification tied to a task (related_task_id /
-    # task_id) must not fire if, by the time it becomes due, the task has
-    # since been completed/cancelled, or reassigned away from this user.
-    # This is a safety net on top of the proactive dismissal that happens
-    # in patch_task() below when a task is completed/reassigned — it
-    # covers reminders that were already "due" in the same instant a task
-    # changed, or any older docs created before that logic existed.
-    referenced_task_ids = {
-        doc.get("related_task_id") for doc in due_docs if doc.get("related_task_id")
-    } | {
-        doc.get("task_id") for doc in popup_docs if doc.get("task_id")
-    }
-    blocked_task_ids = set()
-    if referenced_task_ids:
-        ref_tasks = await db.tasks.find(
-            {"id": {"$in": list(referenced_task_ids)}},
-            {"_id": 0, "id": 1, "status": 1, "assigned_to": 1},
-        ).to_list(length=len(referenced_task_ids))
-        task_by_id = {t["id"]: t for t in ref_tasks}
-        for tid in referenced_task_ids:
-            t = task_by_id.get(tid)
-            if not t or t.get("status") in ("completed", "cancelled") or (
-                t.get("assigned_to") and t.get("assigned_to") != str(current_user.id)
-            ):
-                blocked_task_ids.add(tid)
-
-    results = [
-        {
-            "id": str(doc.get("_id")),
-            "type": doc.get("reminder_type", "reminder"),
-            "title": doc.get("title", "Reminder"),
-            "message": doc.get("description", ""),
-            "task_id": doc.get("related_task_id"),
-        }
-        for doc in due_docs
-        if not doc.get("related_task_id") or doc.get("related_task_id") not in blocked_task_ids
-    ]
-
-    results.extend([
-        {
-            "id": doc.get("id"),
-            "type": doc.get("type") or "task_popup",
-            "title": doc.get("title", "Reminder"),
-            "message": doc.get("message", ""),
-            "task_id": doc.get("task_id"),
-        }
-        for doc in popup_docs
-        if not doc.get("task_id") or doc.get("task_id") not in blocked_task_ids
-    ])
+        results.extend([
+            {
+                "id": doc.get("id"),
+                "type": doc.get("type") or "task_popup",
+                "title": doc.get("title", "Reminder"),
+                "message": doc.get("message", ""),
+                "task_id": doc.get("task_id"),
+            }
+            for doc in popup_docs
+        ])
 
     return results
 
@@ -14567,7 +14494,6 @@ async def merge_clients(payload: dict, current_user: User = Depends(get_current_
         "gst_pin",
         "cin",
         "llpin",
-        "proprietor_name",
         "tally_ledger_name",
         "tally_group",
         "credit_limit",
@@ -14841,140 +14767,95 @@ app.include_router(whatsapp_hub_router, prefix="/api")
 # trailing slash.
 #
 # The app runs with redirect_slashes=False, so Starlette will NOT redirect
-# "/api/notifications/" -> "/api/notifications" (or vice-versa).
+# "/api/notifications/" -> "/api/notifications" (or vice-versa); a one-character
+# difference produced hard 404s on list endpoints such as /api/notifications,
+# /api/visits and /api/leads while their sibling routes (e.g.
+# /api/notifications/unread-count) kept working.
 #
 # This block runs once, after every router is mounted, and registers the
-# missing slash-variant of each already-registered /api route.
+# missing slash-variant of each already-registered /api route so the two forms
+# are always equivalent. It never overwrites an existing route.
 #
-# IMPORTANT:
-# - Existing routes are never overwritten.
-# - Parameterised routes are not aliased.
-# - If only some HTTP methods exist on the variant, only the missing methods
-#   are added.
-# - Existing route handlers, response models and permissions are preserved.
+# _iter_api_routes() walks recursively rather than reading target_app.routes
+# as a flat list: some FastAPI/Starlette versions store a sub-router included
+# via app.include_router(sub_router) as its own wrapper object (with the
+# individual APIRoutes nested one level down inside it) rather than flattening
+# them onto the parent immediately. A flat, non-recursive scan silently sees
+# zero matching routes in that case — the safety net would report "0 aliases
+# registered" and do nothing, with no error, while every bare "/api/x" route
+# quietly stops answering to "/api/x/" (this exact failure mode is what
+# broke /api/quotations and /api/companies — see git history for the
+# incident). Walking recursively makes the aliasing correct regardless of how
+# a given FastAPI/Starlette version happens to store included routers.
 # ═══════════════════════════════════════════════════════════════════════════════
-
-def _register_slash_variants(target_app) -> None:
+def _iter_api_routes(routes):
     from fastapi.routing import APIRoute
 
-    # -----------------------------------------------------------------------
-    # Collect every currently registered API route + HTTP method.
-    # -----------------------------------------------------------------------
-    existing = {
-        (route.path, method)
-        for route in target_app.routes
-        if isinstance(route, APIRoute)
-        for method in (route.methods or set())
-    }
+    seen = set()
+    for r in routes:
+        if isinstance(r, APIRoute) and id(r) not in seen:
+            seen.add(id(r))
+            yield r
+        # Recurse into anything that itself exposes a `.routes` list — this
+        # covers both a plain Starlette Router/Mount and FastAPI's internal
+        # "included router" wrapper, whatever it happens to be called in the
+        # installed version.
+        sub_routes = getattr(r, "routes", None)
+        if sub_routes:
+            yield from _iter_api_routes(sub_routes)
 
+
+def _register_slash_variants(target_app) -> None:
+    all_routes = list(_iter_api_routes(target_app.routes))
+    existing = {(r.path, m) for r in all_routes for m in r.methods}
     aliases = []
-
-    # -----------------------------------------------------------------------
-    # Find every /api route that needs its opposite slash variant.
-    # -----------------------------------------------------------------------
-    for route in list(target_app.routes):
-
-        if not isinstance(route, APIRoute):
-            continue
-
+    for route in all_routes:
         if not route.path.startswith("/api"):
             continue
-
-        # Never create aliases for parameterised routes such as:
-        # /api/leads/{lead_id}
-        if "{" in route.path:
+        if "{" in route.path:          # never alias parameterised paths
             continue
-
-        # Do not create aliases for API root.
-        if route.path in ("", "/api", "/api/"):
-            continue
-
-        # Calculate the opposite slash form.
-        if route.path.endswith("/"):
-            variant = route.path[:-1]
-        else:
-            variant = route.path + "/"
-
+        variant = route.path[:-1] if route.path.endswith("/") else route.path + "/"
         if variant in ("", "/api"):
             continue
-
-        # -------------------------------------------------------------------
-        # Determine exactly which HTTP methods are missing on the variant.
-        # -------------------------------------------------------------------
-        route_methods = route.methods or set()
-
-        missing_methods = [
-            method
-            for method in route_methods
-            if (variant, method) not in existing
-        ]
-
-        if not missing_methods:
+        if any((variant, m) in existing for m in route.methods):
             continue
+        aliases.append((route, variant))
 
-        aliases.append(
-            (
-                route,
-                variant,
-                missing_methods,
-            )
-        )
-
-    # -----------------------------------------------------------------------
-    # Register only the missing slash variants.
-    # -----------------------------------------------------------------------
-    for route, variant, methods in aliases:
-
+    for route, variant in aliases:
         target_app.add_api_route(
             variant,
             route.endpoint,
-            methods=methods,
+            methods=list(route.methods),
             response_model=route.response_model,
             status_code=route.status_code,
             dependencies=route.dependencies,
-            name=f"{route.name}_slash_alias",
+            name=route.name,
             include_in_schema=False,
         )
+        for m in route.methods:
+            existing.add((variant, m))
 
-        # Immediately update our route map so another route does not attempt
-        # to create the same alias again during this pass.
-        for method in methods:
-            existing.add((variant, method))
+    logger.info(f"[routes] slash-variant aliases registered: {len(aliases)}")
 
-    logger.info(
-        f"[routes] slash-variant aliases registered: {len(aliases)}"
-    )
+    # Loud, specific self-check for the collection endpoints that have broken
+    # this way before — if this ever logs a warning again, it means the
+    # aliasing above found nothing to do for these paths and they need
+    # investigating immediately, not silently.
+    critical = ["/api/quotations", "/api/companies"]
+    final_paths = {r.path for r in _iter_api_routes(target_app.routes)}
+    for base in critical:
+        missing = [p for p in (base, base + "/") if p not in final_paths]
+        if missing:
+            logger.warning(f"[routes] SAFETY NET GAP: {missing} not registered — "
+                            f"this endpoint will 404 for some clients")
 
 
-# Register missing trailing-slash variants after ALL routers have been mounted.
 _register_slash_variants(app)
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# DEBUG ROUTE LIST
-#
-# Open:
-# https://api.taskosphere.com/api/__routes
-#
-# This shows all currently registered /api routes and is useful for checking
-# both:
-#
-#   /api/quotations
-#   /api/quotations/
-#
-# without changing any existing application functionality.
-# ═══════════════════════════════════════════════════════════════════════════════
 
 @app.get("/api/__routes", include_in_schema=False)
 async def _debug_list_routes():
     """Quick self-check: confirms which /api paths this process actually serves."""
-    from fastapi.routing import APIRoute
-
     return sorted(
-        {
-            route.path
-            for route in app.routes
-            if isinstance(route, APIRoute)
-            and route.path.startswith("/api")
-        }
+        {r.path for r in _iter_api_routes(app.routes) if r.path.startswith("/api")}
     )
