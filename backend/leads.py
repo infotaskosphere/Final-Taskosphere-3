@@ -145,25 +145,51 @@ class OnboardingTaskRequest(BaseModel):
 # ====================== HELPERS ======================
 
 def normalize_lead_doc(doc: dict) -> dict:
-    """Normalises a raw MongoDB lead document for API response."""
+    """
+    Normalise a raw MongoDB lead document before Pydantic response validation.
+
+    IMPORTANT:
+    - Existing MongoDB records may contain None for company_name or other
+      fields because older/AI-created records did not always have every field.
+    - company_name is required as a string by Lead, so None MUST become an
+      empty string instead of causing FastAPI ResponseValidationError (HTTP 500).
+    - Missing information must remain blank; this function must NEVER invent
+      or derive a value from another field.
+    """
     if not doc:
         return doc
 
     if "_id" in doc:
         doc["id"] = str(doc["_id"])
 
-    for field in ["created_at", "updated_at", "next_follow_up", "date_of_meeting"]:
-        if field in doc and doc[field]:
-            doc[field] = (
-                doc[field].isoformat()
-                if hasattr(doc[field], 'isoformat')
-                else doc[field]
-            )
+    # Lead.company_name is a required string. Older records can contain None.
+    # Convert only the missing value to an empty string; preserve real data.
+    if doc.get("company_name") is None:
+        doc["company_name"] = ""
 
-    # Ensure tracking flags always present
-    if "checklist_sent" not in doc:
+    # Optional string fields may safely remain None in the API model. Do not
+    # manufacture placeholder values such as '-', 'N/A', or 'Unknown'.
+    for field in [
+        "created_at",
+        "updated_at",
+        "contact_name",
+        "phone",
+        "whatsapp_group_jid",
+        "whatsapp_group_name",
+        "whatsapp_message_id",
+        "whatsapp_sender_phone",
+        "whatsapp_sender_name",
+        "whatsapp_original_message",
+        "next_follow_up",
+        "date_of_meeting",
+    ]:
+        if field in doc and doc[field] is not None and hasattr(doc[field], 'isoformat'):
+            doc[field] = doc[field].isoformat()
+
+    # Ensure tracking flags always present.
+    if "checklist_sent" not in doc or doc["checklist_sent"] is None:
         doc["checklist_sent"] = False
-    if "documents_received" not in doc:
+    if "documents_received" not in doc or doc["documents_received"] is None:
         doc["documents_received"] = False
 
     return doc
