@@ -154,7 +154,11 @@ class RocCompanyIn(BaseModel):
     last_agm_date: Optional[str] = None
     last_board_meeting_date: Optional[str] = None
     directors: List[Director] = Field(default_factory=list)
+    designated_partners: List[Director] = Field(default_factory=list)
+    partners: List[Director] = Field(default_factory=list)
     shareholders: List[Shareholder] = Field(default_factory=list)
+    master_data: Dict[str, Any] = Field(default_factory=dict)
+    mgt_shareholder_data: Dict[str, Any] = Field(default_factory=dict)
     auditor: Optional[Auditor] = None
     notes: Optional[str] = None
 
@@ -269,6 +273,8 @@ async def _sync_companies_from_clients() -> int:
         cid = c.get("id")
         if not cid or cid in existing_client_ids:
             continue
+        contact_people = c.get("contact_persons") or []
+        is_llp = c.get("client_type") in ("llp", "LLP")
         new_docs.append({
             "id": _uid(),
             "client_id": cid,
@@ -287,8 +293,12 @@ async def _sync_companies_from_clients() -> int:
             "financial_year_end": "31-03",
             "last_agm_date": None,
             "last_board_meeting_date": None,
-            "directors": [],
+            "directors": [] if is_llp else contact_people,
+            "designated_partners": contact_people if is_llp else [],
+            "partners": contact_people if is_llp else [],
             "shareholders": [],
+            "master_data": {},
+            "mgt_shareholder_data": {},
             "auditor": None,
             "notes": None,
             "created_at": now,
@@ -330,6 +340,21 @@ async def get_company(company_id: str, current_user: User = Depends(VIEW)):
     c = await COMPANIES.find_one({"id": company_id})
     if not c:
         raise HTTPException(404, "Company not found")
+    # Client contact persons are the source for the initial ROC people list.
+    # Preserve any richer ROC edits, but backfill empty registers from Client.
+    if c.get("client_id"):
+        client = await CLIENTS.find_one({"id": c["client_id"]}, {"_id": 0, "contact_persons": 1})
+        contacts = (client or {}).get("contact_persons") or []
+        if contacts:
+            if c.get("category") == "llp":
+                c.setdefault("designated_partners", contacts)
+                c.setdefault("partners", contacts)
+                if not c.get("designated_partners"):
+                    c["designated_partners"] = contacts
+                if not c.get("partners"):
+                    c["partners"] = contacts
+            elif not c.get("directors"):
+                c["directors"] = contacts
     c.pop("_id", None)
     return c
 
@@ -343,6 +368,7 @@ async def create_company(payload: RocCompanyIn, current_user: User = Depends(CRE
     doc["updated_at"] = now
     doc["created_by"] = _who(current_user)
     await COMPANIES.insert_one(doc)
+    await _sync_company_to_client(doc)
     doc.pop("_id", None)
     return doc
 
@@ -355,9 +381,54 @@ async def update_company(company_id: str, payload: RocCompanyIn, current_user: U
     doc = payload.model_dump()
     doc["updated_at"] = _now()
     await COMPANIES.update_one({"id": company_id}, {"$set": doc})
+    await _sync_company_to_client({**existing, **doc})
     merged = {**existing, **doc}
     merged.pop("_id", None)
     return merged
+
+
+async def _sync_company_to_client(company: Dict[str, Any]) -> None:
+    """Keep the linked Client as the searchable source of truth as well.
+
+    ROC has richer role-specific records than Clients, so the compact client
+    contact_persons list is populated from directors or LLP partners while
+    the complete source data is retained in dedicated fields.
+    """
+    client_id = company.get("client_id")
+    if not client_id:
+        return
+    is_llp = company.get("category") == "llp"
+    people = (company.get("designated_partners") or []) + (company.get("partners") or []) if is_llp else (company.get("directors") or [])
+    contacts = []
+    for person in people:
+        if not person or not person.get("name"):
+            continue
+        contacts.append({
+            "name": person.get("name"),
+            "designation": person.get("designation") or ("Designated Partner" if is_llp else "Director"),
+            "din": person.get("din"),
+            "pan": person.get("pan"),
+            "email": person.get("email"),
+            "phone": person.get("phone"),
+        })
+    update = {
+        "company_name": company.get("company_name"),
+        "pan": company.get("pan"),
+        "date_of_incorporation": company.get("date_of_incorporation"),
+        "address": company.get("registered_office_address"),
+        "contact_persons": contacts,
+        "roc_directors": company.get("directors") or [],
+        "roc_designated_partners": company.get("designated_partners") or [],
+        "roc_partners": company.get("partners") or [],
+        "roc_shareholders": company.get("shareholders") or [],
+        "roc_master_data": company.get("master_data") or {},
+        "roc_mgt_shareholder_data": company.get("mgt_shareholder_data") or {},
+    }
+    if is_llp:
+        update["llpin"] = company.get("cin")
+    else:
+        update["cin"] = company.get("cin")
+    await CLIENTS.update_one({"id": client_id}, {"$set": update})
 
 
 @router.delete("/companies/{company_id}")
@@ -390,6 +461,59 @@ FIELD_PATTERNS = {
     "last_board_meeting_date": r"Date of [Bb]oard [Mm]eeting[:\s]*([0-3]?\d[-/][01]?\d[-/]\d{2,4})",
     "pan": r"PAN[:\s]*([A-Z]{5}\d{4}[A-Z])",
 }
+
+
+def _parse_people(text: str) -> Dict[str, List[Dict[str, Any]]]:
+    """Read the tabular director/signatory block in MCA master exports.
+
+    MCA exports are inconsistent between PDF, XLSX and copied text. This
+    intentionally only creates a person when a DIN/PAN and a plausible name
+    occur together; it never invents shareholder names from a count.
+    """
+    people: List[Dict[str, Any]] = []
+    block_match = re.search(
+        r"(?:Directors?/Signatory Details|Director/SignatoryDetails)(.*?)(?:Charges|No Records found|$)",
+        text, re.I | re.S,
+    )
+    block = block_match.group(1) if block_match else text
+    lines = [re.sub(r"\s+", " ", x).strip(" -:\t") for x in block.splitlines()]
+    din_re = re.compile(r"^[A-Z0-9]{6,20}$", re.I)
+    for i, line in enumerate(lines):
+        if not din_re.fullmatch(line.replace(" ", "")):
+            continue
+        # In XLSX rows the DIN, name, designation are adjacent. In PDFs the
+        # columns may be vertical, so inspect a small forward window.
+        candidates = [x for x in lines[i + 1:i + 5] if x]
+        name = next((x for x in candidates if re.search(r"[A-Za-z]", x) and len(x) >= 5
+                     and not re.fullmatch(r"(Director|Promoter|Signatory|Active|Yes|No)", x, re.I)), None)
+        if not name or any(p.get("din") == line for p in people):
+            continue
+        designation = next((x for x in candidates if re.search(
+            r"director|partner|manager|secretary", x, re.I)), "Director")
+        people.append({
+            "name": name,
+            "din": line,
+            "designation": designation.title(),
+            "date_of_appointment": next((x for x in candidates if re.fullmatch(
+                r"\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}", x)), None),
+        })
+    return {"people": people}
+
+
+def _parse_mgt_shareholders(text: str) -> List[Dict[str, Any]]:
+    """Parse shareholder rows when the attached MGT-7/MGT-7A includes them.
+
+    The filed MGT-7A often references a separate XLSM attachment and therefore
+    contains only the shareholder count. In that case returning [] is correct
+    and preserves existing master data instead of fabricating names.
+    """
+    rows = []
+    for line in text.splitlines():
+        line = re.sub(r"\s+", " ", line).strip()
+        m = re.match(r"^\d+\s+([A-Za-z][A-Za-z .,&'-]{3,})\s+([A-Z]{5}\d{4}[A-Z])?\s*(\d[\d,]*)\s*$", line)
+        if m:
+            rows.append({"name": m.group(1).strip(), "pan": m.group(2), "shares_held": _num(m.group(3).replace(",", "")), "class_of_shares": "Equity"})
+    return rows
 
 
 def _extract_text_from_upload(filename: str, raw: bytes) -> str:
@@ -430,6 +554,36 @@ def parse_master_data(filename: str, raw: bytes) -> Dict[str, Any]:
         if field in ("authorized_capital", "paid_up_capital", "last_year_turnover"):
             val = _num(val.replace(",", ""))
         extracted[field] = val
+    # Label/value parsing covers MCA's XLSX export where values are in the
+    # next cell and not on the same line as the label.
+    lines = [re.sub(r"\s+", " ", x).strip() for x in text.splitlines() if str(x).strip()]
+    labels = {
+        "cin": ("cin", "llpin"),
+        "company_name": ("company name", "name of the company"),
+        "registered_office_address": ("registered address", "registered office address"),
+        "date_of_incorporation": ("date of incorporation",),
+        "authorized_capital": ("authorised capital", "authorized capital"),
+        "paid_up_capital": ("paid up capital", "paid-up capital"),
+        "last_agm_date": ("date of last agm",),
+        "last_board_meeting_date": ("date of last board meeting",),
+        "pan": ("pan", "permanent account number"),
+    }
+    for field, names in labels.items():
+        if field in extracted:
+            continue
+        for i, line in enumerate(lines[:-1]):
+            if any(line.lower().rstrip(":") == n or line.lower().startswith(n + ":") for n in names):
+                value = line.split(":", 1)[1].strip() if ":" in line else lines[i + 1]
+                if value and value != "-":
+                    extracted[field] = _num(value.replace(",", "")) if field in ("authorized_capital", "paid_up_capital") else value
+                    break
+    people = _parse_people(text)["people"]
+    if people:
+        extracted["_directors"] = people
+    mgt_people = _parse_mgt_shareholders(text) if re.search(r"mgt[- ]?7", filename or "", re.I) else []
+    if mgt_people:
+        extracted["_shareholders"] = mgt_people
+    extracted["_source_type"] = "mgt-7/mgt-7a" if re.search(r"mgt[- ]?7", filename or "", re.I) else "master-data"
     extracted["_source_file"] = filename
     extracted["_chars_scanned"] = len(text)
     return extracted
@@ -461,9 +615,29 @@ async def upload_master_data(
         }
     if apply:
         clean = {k: v for k, v in extracted.items() if not k.startswith("_") and v}
+        if extracted.get("_directors"):
+            if company.get("category") == "llp":
+                clean["designated_partners"] = extracted["_directors"]
+                clean["partners"] = extracted["_directors"]
+            else:
+                clean["directors"] = extracted["_directors"]
+        if extracted.get("_shareholders"):
+            clean["shareholders"] = extracted["_shareholders"]
+        source_key = "mgt_shareholder_data" if extracted.get("_source_type") == "mgt-7/mgt-7a" else "master_data"
+        clean[source_key] = {
+            k: v for k, v in extracted.items()
+            if not k.startswith("_")
+        }
         clean["updated_at"] = _now()
         await COMPANIES.update_one({"id": company_id}, {"$set": clean})
-    return {"extracted": extracted, "applied": bool(apply)}
+        await _sync_company_to_client({**company, **clean})
+    # Private parser keys are useful to the apply step but not to the UI.
+    visible = {k: v for k, v in extracted.items() if not k.startswith("_")}
+    if extracted.get("_directors"):
+        visible["directors"] = extracted["_directors"]
+    if extracted.get("_shareholders"):
+        visible["shareholders"] = extracted["_shareholders"]
+    return {"extracted": visible, "applied": bool(apply)}
 
 
 # ─────────────────────────────────────────────────────────────────────────
