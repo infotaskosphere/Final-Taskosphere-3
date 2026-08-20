@@ -140,7 +140,7 @@ class RocCompanyIn(BaseModel):
     client_id: Optional[str] = None
     company_name: str
     cin: Optional[str] = None
-    category: str = "private"          # private | public | opc | section_8
+    category: str = "private"          # private | public | opc | section_8 | llp
     is_small_company: Optional[bool] = None   # None = auto-compute from capital/turnover
     listed: bool = False
     roc_office: Optional[str] = None
@@ -241,7 +241,7 @@ CLIENT_CATEGORY_MAP = {
     "pvt_ltd": "private", "PVT_LTD": "private",
     "public_ltd": "public",
     "section_8": "section_8",
-    "llp": "private", "LLP": "private",
+    "llp": "llp", "LLP": "llp",
     "opc": "opc",
 }
 
@@ -478,7 +478,14 @@ SMALL_CO_PAID_UP_LIMIT = 10_00_00_000     # Rs 10 crore
 SMALL_CO_TURNOVER_LIMIT = 100_00_00_000   # Rs 100 crore
 
 
+def _is_llp(company: Dict[str, Any]) -> bool:
+    return company.get("category") == "llp"
+
+
 def _is_small_company(company: Dict[str, Any]) -> bool:
+    # "Small company" is a Companies Act, 2013 concept only — never applies to an LLP.
+    if _is_llp(company):
+        return False
     if company.get("is_small_company") is not None:
         return bool(company["is_small_company"])
     if company.get("category") in ("public", "section_8"):
@@ -488,8 +495,57 @@ def _is_small_company(company: Dict[str, Any]) -> bool:
     return paid_up <= SMALL_CO_PAID_UP_LIMIT and turnover <= SMALL_CO_TURNOVER_LIMIT
 
 
+# LLP Act, 2008 / LLP Rules audit-applicability thresholds
+LLP_AUDIT_TURNOVER_LIMIT = 40_00_000       # Rs. 40 lakh turnover
+LLP_AUDIT_CONTRIBUTION_LIMIT = 25_00_000   # Rs. 25 lakh partners' contribution
+
+
+def build_llp_compliance_checklist(company: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Compliance checklist under the LLP Act, 2008 / LLP Rules — entirely
+    separate from the Companies Act, 2013 checklist below, since an LLP has
+    no share capital, no Board/AGM in the company-law sense, no AOC-4/MGT-7/
+    ADT-1/CSR/MGT-14/PAS-6, etc. Keyed off Designated Partners, not Directors."""
+    items: List[Dict[str, Any]] = []
+    num_dp = len(company.get("directors") or [])  # "directors" list doubles as Designated Partners for LLP records
+    turnover = _num(company.get("last_year_turnover"))
+    contribution = _num(company.get("paid_up_capital"))  # "paid_up_capital" field doubles as total partners' contribution
+    audit_applicable = turnover > LLP_AUDIT_TURNOVER_LIMIT or contribution > LLP_AUDIT_CONTRIBUTION_LIMIT
+
+    def add(form, particulars, due, frequency, applicable=True, notes=None):
+        items.append({
+            "form": form, "particulars": particulars, "due_date_rule": due,
+            "frequency": frequency, "applicable": applicable, "notes": notes,
+        })
+
+    add("Form 11", "Annual Return of the LLP", "Within 60 days of FY close (by 30th May)", "Annual")
+    add("Form 8", "Statement of Account & Solvency (incl. Statement of Solvency by Designated Partners)",
+        "Within 30 days from end of 6 months of FY close (by 30th October)", "Annual")
+    add("Statutory Audit", "Audit of accounts by a Chartered Accountant",
+        "Before filing Form 8", "Annual",
+        applicable=audit_applicable,
+        notes=f"Mandatory only if turnover > ₹{LLP_AUDIT_TURNOVER_LIMIT:,} or partners' contribution > ₹{LLP_AUDIT_CONTRIBUTION_LIMIT:,}; otherwise a self-declaration of solvency suffices.")
+    add("DIR-3 KYC", "KYC of every Designated Partner holding a DIN/DPIN", "By 30th September every year", "Annual", applicable=num_dp > 0)
+    add("Form 3", "Filing of LLP Agreement / any changes to the LLP Agreement", "Within 30 days of execution/change", "Event-based")
+    add("Form 4", "Notice of appointment/cessation/change of a partner or Designated Partner, or change of name/address of a partner",
+        "Within 30 days of the event", "Event-based")
+    add("Form 15", "Notice of change of registered office of the LLP", "Within 30 days of the change", "Event-based")
+    add("Income Tax Return", "Filing of the LLP's income tax return",
+        "31st July (no audit) / 31st October (audit applicable)", "Annual",
+        notes="Due date shifts to 31st Oct if the LLP is subject to tax audit / transfer-pricing audit.")
+    add("GST Returns", "GSTR-1 / GSTR-3B (and annual return GSTR-9) if GST-registered", "Monthly/Quarterly + Annual", "Periodic",
+        applicable=bool(company.get("gst_registered", True)),
+        notes="Applicable only if the LLP holds a GST registration — verify against the client's actual GSTIN status.")
+    add("Meeting of Designated Partners", "Periodic meeting of Designated Partners as required by the LLP Agreement",
+        "As per the LLP Agreement (no statutory AGM/Board Meeting requirement under the LLP Act)", "As per LLP Agreement")
+    add("Register of Partners / Designated Partners", "Internal registers to be maintained & kept updated", "Ongoing", "Ongoing")
+
+    return items
+
+
 def build_compliance_checklist(company: Dict[str, Any]) -> List[Dict[str, Any]]:
     category = company.get("category", "private")
+    if category == "llp":
+        return build_llp_compliance_checklist(company)
     is_opc = category == "opc"
     is_small = _is_small_company(company)
     is_section8 = category == "section_8"
@@ -547,13 +603,18 @@ async def get_compliance_checklist(company_id: str, current_user: User = Depends
     if not company:
         raise HTTPException(404, "Company not found")
     checklist = build_compliance_checklist(company)
+    is_llp = _is_llp(company)
     return {
         "company_name": company.get("company_name"),
         "category": company.get("category"),
-        "is_small_company": _is_small_company(company),
+        "is_small_company": None if is_llp else _is_small_company(company),
         "checklist": checklist,
         "generated_at": _now().isoformat(),
         "disclaimer": (
+            "Generated from the LLP's category/turnover/contribution using current "
+            "LLP Act, 2008 / LLP Rules thresholds as configured in the app. Verify "
+            "against the latest MCA notifications before relying on it for filing."
+            if is_llp else
             "Generated from company category/capital/turnover using current "
             "Companies Act 2013 thresholds as configured in the app. Verify "
             "against the latest MCA notifications before relying on it for filing."
@@ -606,18 +667,23 @@ def build_board_resolution_doc(company: Dict[str, Any], req: BoardResolutionRequ
     d = _base_doc()
     name = company.get("company_name", "").upper()
     cin = company.get("cin") or "—"
+    is_llp = _is_llp(company)
+    body_label = "Designated Partners of the LLP" if is_llp else "Board of Directors of the Company"
+    present_label = "Designated Partners Present" if is_llp else "Directors Present"
+    sign_label = "Designated Partner" if is_llp else "Director / Company Secretary"
+    din_label = "DIN/DPIN" if is_llp else "DIN/Membership No."
     _heading(d, name, size=16)
-    _para(d, f"CIN: {cin}", center=True)
+    _para(d, f"CIN: {cin}" if not is_llp else f"LLPIN: {cin}", center=True)
     _para(d, f"Registered Office: {company.get('registered_office_address') or '—'}", center=True)
     d.add_paragraph()
     _heading(d, "EXTRACT OF MINUTES / CERTIFIED TRUE COPY OF RESOLUTION(S)", size=13)
     _para(
         d,
-        f"Passed at the meeting of the Board of Directors of the Company held on "
+        f"Passed at the meeting of the {body_label} held on "
         f"{_fmt_date(req.meeting_date)} at {req.meeting_time} at {req.venue}."
     )
     if req.directors_present:
-        _para(d, "Directors Present: " + ", ".join(req.directors_present))
+        _para(d, f"{present_label}: " + ", ".join(req.directors_present))
     if req.chairman:
         _para(d, f"Chairman of the Meeting: {req.chairman}")
     d.add_paragraph()
@@ -639,8 +705,8 @@ def build_board_resolution_doc(company: Dict[str, Any], req: BoardResolutionRequ
     _para(d, "For " + name, bold=True)
     d.add_paragraph()
     d.add_paragraph()
-    _para(d, "Director / Company Secretary")
-    _para(d, f"DIN/Membership No.: __________________")
+    _para(d, sign_label)
+    _para(d, f"{din_label}: __________________")
     _para(d, f"Date: {_fmt_date(datetime.now())}", )
     _para(d, f"Prepared by: {prepared_by} (Taskosphere ROC Sphere)", italic=True)
 
@@ -652,19 +718,35 @@ def build_board_resolution_doc(company: Dict[str, Any], req: BoardResolutionRequ
 def build_notice_doc(company: Dict[str, Any], req: MeetingNoticeRequest, prepared_by: str) -> bytes:
     d = _base_doc()
     name = company.get("company_name", "").upper()
-    label = {"board": "NOTICE OF BOARD MEETING", "agm": "NOTICE OF ANNUAL GENERAL MEETING", "egm": "NOTICE OF EXTRA-ORDINARY GENERAL MEETING"}.get(req.meeting_type, "NOTICE OF MEETING")
+    is_llp = _is_llp(company)
+    if is_llp:
+        label = {
+            "board": "NOTICE OF MEETING OF DESIGNATED PARTNERS",
+            "agm": "NOTICE OF MEETING OF PARTNERS",
+            "egm": "NOTICE OF MEETING OF PARTNERS (EXTRA-ORDINARY)",
+        }.get(req.meeting_type, "NOTICE OF MEETING")
+    else:
+        label = {
+            "board": "NOTICE OF BOARD MEETING",
+            "agm": "NOTICE OF ANNUAL GENERAL MEETING",
+            "egm": "NOTICE OF EXTRA-ORDINARY GENERAL MEETING",
+        }.get(req.meeting_type, "NOTICE OF MEETING")
+    sign_label = "Designated Partner" if is_llp else "Director / Company Secretary"
+    order_label = "By Order of the Designated Partners" if is_llp else "By Order of the Board"
     _heading(d, name, size=16)
-    _para(d, f"CIN: {company.get('cin') or '—'}", center=True)
+    _para(d, f"LLPIN: {company.get('cin') or '—'}" if is_llp else f"CIN: {company.get('cin') or '—'}", center=True)
     _para(d, f"Registered Office: {company.get('registered_office_address') or '—'}", center=True)
     d.add_paragraph()
     _heading(d, label, size=13, underline=True)
     _para(d, f"Notice dated: {_fmt_date(req.notice_date or datetime.now())}")
     d.add_paragraph()
     if req.meeting_type == "board":
-        _para(d, f"NOTICE is hereby given that a meeting of the Board of Directors of the Company will be held on "
+        body = "Designated Partners of the LLP" if is_llp else "Board of Directors of the Company"
+        _para(d, f"NOTICE is hereby given that a meeting of the {body} will be held on "
                  f"{_fmt_date(req.meeting_date)} at {req.meeting_time} at {req.venue}, to transact the following business:")
     else:
-        _para(d, f"NOTICE is hereby given that the {label.split('OF ')[-1].title()} of the members of the Company will be held on "
+        body = "Partners of the LLP" if is_llp else "members of the Company"
+        _para(d, f"NOTICE is hereby given that the {label.split('OF ')[-1].title()} of the {body} will be held on "
                  f"{_fmt_date(req.meeting_date)} at {req.meeting_time} at {req.venue}, to transact the following business:")
     d.add_paragraph()
     if req.agenda_items:
@@ -681,15 +763,19 @@ def build_notice_doc(company: Dict[str, Any], req: MeetingNoticeRequest, prepare
 
     if req.meeting_type != "board":
         _para(d, "NOTES:", bold=True)
-        _para(d, "1. A member entitled to attend and vote is entitled to appoint a proxy to attend and vote instead of "
-                 "himself/herself, and such proxy need not be a member of the Company.")
-        _para(d, "2. Proxies, in order to be effective, must be received at the Registered Office not less than 48 hours "
-                 "before the commencement of the meeting.")
+        if is_llp:
+            _para(d, "1. Attendance, quorum and voting shall be governed by the provisions of the LLP Agreement.")
+            _para(d, "2. A Partner may be represented by an authorised representative only if expressly permitted by the LLP Agreement.")
+        else:
+            _para(d, "1. A member entitled to attend and vote is entitled to appoint a proxy to attend and vote instead of "
+                     "himself/herself, and such proxy need not be a member of the Company.")
+            _para(d, "2. Proxies, in order to be effective, must be received at the Registered Office not less than 48 hours "
+                     "before the commencement of the meeting.")
     d.add_paragraph()
-    _para(d, "By Order of the Board")
+    _para(d, order_label)
     _para(d, "For " + name, bold=True)
     d.add_paragraph()
-    _para(d, "Director / Company Secretary")
+    _para(d, sign_label)
     _para(d, f"Prepared by: {prepared_by} (Taskosphere ROC Sphere)", italic=True)
 
     buf = io.BytesIO()
@@ -700,24 +786,45 @@ def build_notice_doc(company: Dict[str, Any], req: MeetingNoticeRequest, prepare
 def build_minutes_doc(company: Dict[str, Any], req: MinutesRequest, prepared_by: str) -> bytes:
     d = _base_doc()
     name = company.get("company_name", "").upper()
-    label = {"board": "MINUTES OF THE MEETING OF THE BOARD OF DIRECTORS", "agm": "MINUTES OF THE ANNUAL GENERAL MEETING", "egm": "MINUTES OF THE EXTRA-ORDINARY GENERAL MEETING"}.get(req.meeting_type, "MINUTES OF MEETING")
+    is_llp = _is_llp(company)
+    if is_llp:
+        label = {
+            "board": "MINUTES OF THE MEETING OF THE DESIGNATED PARTNERS",
+            "agm": "MINUTES OF THE MEETING OF THE PARTNERS",
+            "egm": "MINUTES OF THE MEETING OF THE PARTNERS (EXTRA-ORDINARY)",
+        }.get(req.meeting_type, "MINUTES OF MEETING")
+    else:
+        label = {
+            "board": "MINUTES OF THE MEETING OF THE BOARD OF DIRECTORS",
+            "agm": "MINUTES OF THE ANNUAL GENERAL MEETING",
+            "egm": "MINUTES OF THE EXTRA-ORDINARY GENERAL MEETING",
+        }.get(req.meeting_type, "MINUTES OF MEETING")
+    present_label = "Designated Partners Present" if is_llp else "Directors Present"
+    absent_label = "Designated Partners Absent (Leave of Absence granted)" if is_llp else "Directors Absent (Leave of Absence granted)"
+    other_label = "Other Partners / Attendees Present" if is_llp else "Members / Attendees Present"
     _heading(d, name, size=16)
-    _para(d, f"CIN: {company.get('cin') or '—'}", center=True)
+    _para(d, f"LLPIN: {company.get('cin') or '—'}" if is_llp else f"CIN: {company.get('cin') or '—'}", center=True)
     d.add_paragraph()
     _heading(d, label, size=13, underline=True)
     _para(d, f"Held on {_fmt_date(req.meeting_date)} at {req.meeting_time} at {req.venue}.")
     d.add_paragraph()
     if req.meeting_type == "board":
-        _para(d, "Directors Present: " + (", ".join(req.directors_present) or "—"))
+        _para(d, f"{present_label}: " + (", ".join(req.directors_present) or "—"))
         if req.directors_absent:
-            _para(d, "Directors Absent (Leave of Absence granted): " + ", ".join(req.directors_absent))
+            _para(d, f"{absent_label}: " + ", ".join(req.directors_absent))
     else:
-        _para(d, "Directors Present: " + (", ".join(req.directors_present) or "—"))
+        _para(d, f"{present_label}: " + (", ".join(req.directors_present) or "—"))
         if req.attendees_other:
-            _para(d, "Members / Attendees Present: " + ", ".join(req.attendees_other))
+            _para(d, f"{other_label}: " + ", ".join(req.attendees_other))
     if req.chairman:
         _para(d, f"{req.chairman} chaired the meeting.")
-    _para(d, "Quorum was confirmed to be present." if req.quorum_present else "NOTE: Quorum was NOT present — meeting stands adjourned as per Companies Act / AoA provisions.")
+    _para(
+        d,
+        "Quorum was confirmed to be present."
+        if req.quorum_present else
+        ("NOTE: Quorum was NOT present — meeting stands adjourned as per the LLP Agreement." if is_llp
+         else "NOTE: Quorum was NOT present — meeting stands adjourned as per Companies Act / AoA provisions.")
+    )
     d.add_paragraph()
 
     if req.discussion_notes:
@@ -735,7 +842,7 @@ def build_minutes_doc(company: Dict[str, Any], req: MinutesRequest, prepared_by:
     _para(d, "There being no other business, the meeting concluded with a vote of thanks to the Chair.")
     d.add_paragraph()
     d.add_paragraph()
-    _para(d, "Chairman", bold=True)
+    _para(d, "Designated Partner" if is_llp else "Chairman", bold=True)
     _para(d, f"Prepared by: {prepared_by} (Taskosphere ROC Sphere)", italic=True)
 
     buf = io.BytesIO()
