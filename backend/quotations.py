@@ -1594,6 +1594,7 @@ async def _hydrate_company_bank(company: dict) -> dict:
     return company
 
 
+@router.post("/companies/", include_in_schema=False)
 @router.post("/companies")
 async def create_company(
     data: dict,
@@ -1646,6 +1647,7 @@ async def create_company(
     return doc
 
 
+@router.get("/companies/", include_in_schema=False)
 @router.get("/companies")
 async def get_companies(
     current_user: User = Depends(get_current_user),
@@ -1826,6 +1828,7 @@ async def get_services(
     return {"services": ALL_SERVICES, "checklists": SERVICE_CHECKLISTS}
 
 
+@router.post("/quotations/", include_in_schema=False)
 @router.post("/quotations")
 async def create_quotation(
     data: QuotationCreate,
@@ -1887,6 +1890,8 @@ async def create_quotation(
 
 
 @router.get("/quotations/list", include_in_schema=False)
+@router.get("/quotations/list/", include_in_schema=False)
+@router.get("/quotations/", include_in_schema=False)
 @router.get("/quotations")
 async def list_quotations(
     status: Optional[str] = None,
