@@ -46,6 +46,14 @@ class LeadBase(BaseModel):
     ] = "new"
     source: Optional[str] = "direct"
 
+    # WhatsApp lead provenance (optional; populated only for AI-captured leads)
+    whatsapp_group_jid: Optional[str] = None
+    whatsapp_group_name: Optional[str] = None
+    whatsapp_message_id: Optional[str] = None
+    whatsapp_sender_phone: Optional[str] = None
+    whatsapp_sender_name: Optional[str] = None
+    whatsapp_original_message: Optional[str] = None
+
     date_of_meeting: Optional[datetime] = None
     next_follow_up: Optional[datetime] = None
     notes: Optional[str] = None
@@ -92,8 +100,14 @@ class LeadUpdate(BaseModel):
         "negotiation", "on_hold", "qualified", "won", "lost"
     ]] = None
     source: Optional[Literal[
-        "direct", "website", "referral", "social_media", "event"
+        "direct", "website", "referral", "social_media", "event", "whatsapp"
     ]] = None
+    whatsapp_group_jid: Optional[str] = None
+    whatsapp_group_name: Optional[str] = None
+    whatsapp_message_id: Optional[str] = None
+    whatsapp_sender_phone: Optional[str] = None
+    whatsapp_sender_name: Optional[str] = None
+    whatsapp_original_message: Optional[str] = None
     next_follow_up: Optional[datetime] = None
     notes: Optional[str] = None
     assigned_to: Optional[str] = None
