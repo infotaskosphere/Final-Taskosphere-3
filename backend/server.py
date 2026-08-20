@@ -11216,6 +11216,7 @@ async def create_client(
             "gst_pin",
             "cin",
             "llpin",
+            "proprietor_name",
             "mca_fetch_date",
             "is_itr_client",
             "itr_data",
@@ -11712,6 +11713,7 @@ async def update_client(
         # MCA / ROC
         "cin",
         "llpin",
+        "proprietor_name",
         "mca_fetch_date",
         # ITR Client
         "is_itr_client",
@@ -14494,6 +14496,7 @@ async def merge_clients(payload: dict, current_user: User = Depends(get_current_
         "gst_pin",
         "cin",
         "llpin",
+        "proprietor_name",
         "tally_ledger_name",
         "tally_group",
         "credit_limit",
