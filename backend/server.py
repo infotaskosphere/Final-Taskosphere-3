@@ -14841,58 +14841,129 @@ app.include_router(whatsapp_hub_router, prefix="/api")
 # trailing slash.
 #
 # The app runs with redirect_slashes=False, so Starlette will NOT redirect
-# "/api/notifications/" -> "/api/notifications" (or vice-versa); a one-character
-# difference produced hard 404s on list endpoints such as /api/notifications,
-# /api/visits and /api/leads while their sibling routes (e.g.
-# /api/notifications/unread-count) kept working.
+# "/api/notifications/" -> "/api/notifications" (or vice-versa).
 #
 # This block runs once, after every router is mounted, and registers the
-# missing slash-variant of each already-registered /api route so the two forms
-# are always equivalent. It never overwrites an existing route.
+# missing slash-variant of each already-registered /api route.
+#
+# IMPORTANT:
+# - Existing routes are never overwritten.
+# - Parameterised routes are not aliased.
+# - If only some HTTP methods exist on the variant, only the missing methods
+#   are added.
+# - Existing route handlers, response models and permissions are preserved.
 # ═══════════════════════════════════════════════════════════════════════════════
+
 def _register_slash_variants(target_app) -> None:
     from fastapi.routing import APIRoute
 
+    # -----------------------------------------------------------------------
+    # Collect every currently registered API route + HTTP method.
+    # -----------------------------------------------------------------------
     existing = {
-        (r.path, m)
-        for r in target_app.routes
-        if isinstance(r, APIRoute)
-        for m in r.methods
+        (route.path, method)
+        for route in target_app.routes
+        if isinstance(route, APIRoute)
+        for method in (route.methods or set())
     }
+
     aliases = []
+
+    # -----------------------------------------------------------------------
+    # Find every /api route that needs its opposite slash variant.
+    # -----------------------------------------------------------------------
     for route in list(target_app.routes):
+
         if not isinstance(route, APIRoute):
             continue
+
         if not route.path.startswith("/api"):
             continue
-        if "{" in route.path:          # never alias parameterised paths
+
+        # Never create aliases for parameterised routes such as:
+        # /api/leads/{lead_id}
+        if "{" in route.path:
             continue
-        variant = route.path[:-1] if route.path.endswith("/") else route.path + "/"
+
+        # Do not create aliases for API root.
+        if route.path in ("", "/api", "/api/"):
+            continue
+
+        # Calculate the opposite slash form.
+        if route.path.endswith("/"):
+            variant = route.path[:-1]
+        else:
+            variant = route.path + "/"
+
         if variant in ("", "/api"):
             continue
-        if any((variant, m) in existing for m in route.methods):
-            continue
-        aliases.append((route, variant))
 
-    for route, variant in aliases:
+        # -------------------------------------------------------------------
+        # Determine exactly which HTTP methods are missing on the variant.
+        # -------------------------------------------------------------------
+        route_methods = route.methods or set()
+
+        missing_methods = [
+            method
+            for method in route_methods
+            if (variant, method) not in existing
+        ]
+
+        if not missing_methods:
+            continue
+
+        aliases.append(
+            (
+                route,
+                variant,
+                missing_methods,
+            )
+        )
+
+    # -----------------------------------------------------------------------
+    # Register only the missing slash variants.
+    # -----------------------------------------------------------------------
+    for route, variant, methods in aliases:
+
         target_app.add_api_route(
             variant,
             route.endpoint,
-            methods=list(route.methods),
+            methods=methods,
             response_model=route.response_model,
             status_code=route.status_code,
             dependencies=route.dependencies,
-            name=route.name,
+            name=f"{route.name}_slash_alias",
             include_in_schema=False,
         )
-        for m in route.methods:
-            existing.add((variant, m))
 
-    logger.info(f"[routes] slash-variant aliases registered: {len(aliases)}")
+        # Immediately update our route map so another route does not attempt
+        # to create the same alias again during this pass.
+        for method in methods:
+            existing.add((variant, method))
+
+    logger.info(
+        f"[routes] slash-variant aliases registered: {len(aliases)}"
+    )
 
 
+# Register missing trailing-slash variants after ALL routers have been mounted.
 _register_slash_variants(app)
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DEBUG ROUTE LIST
+#
+# Open:
+# https://api.taskosphere.com/api/__routes
+#
+# This shows all currently registered /api routes and is useful for checking
+# both:
+#
+#   /api/quotations
+#   /api/quotations/
+#
+# without changing any existing application functionality.
+# ═══════════════════════════════════════════════════════════════════════════════
 
 @app.get("/api/__routes", include_in_schema=False)
 async def _debug_list_routes():
@@ -14900,5 +14971,10 @@ async def _debug_list_routes():
     from fastapi.routing import APIRoute
 
     return sorted(
-        {r.path for r in app.routes if isinstance(r, APIRoute) and r.path.startswith("/api")}
+        {
+            route.path
+            for route in app.routes
+            if isinstance(route, APIRoute)
+            and route.path.startswith("/api")
+        }
     )
