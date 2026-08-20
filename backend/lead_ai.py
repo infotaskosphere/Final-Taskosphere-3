@@ -544,17 +544,11 @@ async def process_lead_message(
     source_sender_name: Optional[str] = None,
     **kwargs: Any,
 ) -> Dict[str, Any]:
-    """
-    Shared natural-language lead detector for Telegram and WhatsApp.
+    """Backward-compatible natural-language lead detector.
 
-    This function performs AI detection/extraction only. It does not create
-    MongoDB records. Telegram's existing telegram.py creates the lead after
-    this function confirms that the message is a lead. WhatsApp's existing
-    create_lead_from_message() performs its own detection/creation flow.
-
-    The source arguments are metadata only and are accepted for compatibility
-    with the Telegram integration. **kwargs keeps future channel metadata from
-    breaking this function.
+    This remains AI-only and does not create a MongoDB record.
+    Existing WhatsApp lead creation through create_lead_from_message()
+    remains unchanged.
     """
     result = await detect_and_extract_whatsapp_lead(message)
 
@@ -569,16 +563,3 @@ async def process_lead_message(
     result["original_message"] = message
 
     return result
-
-
-async def detect_and_extract_lead(
-    message: str,
-    source: str = "unknown",
-    **kwargs: Any,
-) -> Dict[str, Any]:
-    """Compatibility alias for integrations using the shorter function name."""
-    return await process_lead_message(
-        message=message,
-        source=source,
-        **kwargs,
-    )
