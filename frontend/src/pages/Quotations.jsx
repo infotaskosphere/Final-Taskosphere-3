@@ -1328,6 +1328,13 @@ export default function Quotations() {
 
   useEffect(() => { setPendingPage(1); setClosedPage(1); }, [filterStatus, filterService]);
 
+  // Shows a non-blocking "server is waking up" hint while api.js is still
+  // retrying a cold-started backend, instead of the page just silently
+  // rendering "0 quotations" / "0 companies" with no explanation. Clears
+  // itself the moment a real (non-degraded) response comes back.
+  const [reconnecting, setReconnecting] = useState(false);
+  const reconnectRetryRef = useRef(null);
+
   // ── Data fetching ──────────────────────────────────────────────────────────
   const fetchQuotations = async () => {
     setLoading(true);
@@ -1337,6 +1344,16 @@ export default function Quotations() {
       // transient 404 no longer shows a scary error toast here.
       const res = await api.get('/quotations');
       setQuotations(Array.isArray(res.data) ? res.data : (res.data?.quotations || []));
+      if (res?._degraded) {
+        // api.js already retried for ~50s and still couldn't reach the
+        // route — keep the reconnecting hint up and quietly try again in
+        // the background rather than leaving the page stuck on 0 records.
+        setReconnecting(true);
+        clearTimeout(reconnectRetryRef.current);
+        reconnectRetryRef.current = setTimeout(() => { fetchQuotations(); fetchMeta(); }, 15000);
+      } else {
+        setReconnecting(false);
+      }
     } catch (err) {
       if (err?.response?.status === 404) {
         try {
@@ -1361,7 +1378,10 @@ export default function Quotations() {
     }
   };
 
-  useEffect(() => { fetchMeta(); fetchQuotations(); }, []);
+  useEffect(() => {
+    fetchMeta(); fetchQuotations();
+    return () => clearTimeout(reconnectRetryRef.current);
+  }, []);
 
   // ── Stats ──────────────────────────────────────────────────────────────────
   const stats = useMemo(() => {
@@ -1734,8 +1754,20 @@ export default function Quotations() {
         </div>
       )}
 
+      {/* ── RECONNECTING HINT ─────────────────────────────────────────────
+          Shown only while api.js is still retrying a cold-started backend
+          (see lib/api.js). Replaces silent "0 quotations / 0 companies"
+          with an explanation, and the page auto-refreshes once the
+          server responds for real — no manual reload needed. ────────── */}
+      {reconnecting && (
+        <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 text-sm text-blue-800 flex items-center gap-2 dark:bg-blue-900/20 dark:border-blue-700/50 dark:text-blue-300">
+          <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin" />
+          <span>Waking up the server — this can take up to a minute on first load. Data will refresh automatically.</span>
+        </div>
+      )}
+
       {/* ── COMPANY MISSING WARNING ───────────────────────────────────────── */}
-      {companies.length === 0 && (
+      {!reconnecting && companies.length === 0 && (
         <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-800 flex items-center gap-2 dark:bg-amber-900/20 dark:border-amber-700/50 dark:text-amber-300">
           <Info className="h-4 w-4 flex-shrink-0" />
           <span>No company profiles yet. <button onClick={() => setIsCompanyListOpen(true)} className="underline font-semibold">Add a company</button> before creating quotations.</span>
