@@ -2056,7 +2056,10 @@ export default function Dashboard() {
 
         {/* CUSTOMIZE BUTTON */}
         <motion.div variants={itemVariants} className="flex justify-end gap-2">
-          {hasPermission('can_edit_tasks') && (
+          {/* GLITCH FIX: creating your own task must always be available — this
+              shortcut used to be hidden behind the universal can_edit_tasks flag,
+              which blocked users from even reaching their own New Task dialog. */}
+          {(
             <button
               onMouseEnter={preloadTasksPage}
               onFocus={preloadTasksPage}
