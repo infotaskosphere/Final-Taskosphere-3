@@ -314,16 +314,164 @@ async def _tg_find_user(name=None, user_id=None):
     )
 
 
-async def _tg_ai_command(text: str):
+# ═══════════════════════════════════════════════════════════════════════════════
+# SELF-LEARNING TELEGRAM MEMORY
+#
+# This is retrieval-based learning, not model retraining. Every successful
+# natural-language interaction is stored as an example. Future messages are
+# parsed with a small set of the user's own previous examples, so Taskosphere
+# gradually learns personal wording such as:
+#   "my pending work" -> get_tasks
+#   "show Rahul's pending" -> get_tasks(user_name=Rahul)
+#   "new enquiries last week" -> get_leads(date range)
+#   "send Abori House bill" -> get_invoice(output_format=pdf)
+#
+# We never use learned memory to invent missing business data. It only helps
+# map language to an action/field structure.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+TG_MEMORY_COLLECTION = "telegram_ai_memory"
+TG_MEMORY_MAX_EXAMPLES = 8
+TG_MEMORY_RETENTION_DAYS = 365
+_TG_LEARNING_INDEXES_READY = False
+
+
+def _tg_memory_safe_text(text: str) -> str:
+    """Remove obvious secrets before a Telegram message is stored as memory."""
+    value = str(text or "")
+    patterns = [
+        r"(?i)(bot\d+:[A-Za-z0-9_-]{20,})",
+        r"(?i)(api[_ -]?key\s*[:=]\s*)\S+",
+        r"(?i)(password\s*[:=]\s*)\S+",
+        r"(?i)(secret\s*[:=]\s*)\S+",
+        r"(?i)(token\s*[:=]\s*)\S+",
+    ]
+    for pattern in patterns:
+        value = re.sub(pattern, r"\1[REDACTED]" if "\\s" in pattern else "[REDACTED]", value)
+    return value[:3000]
+
+
+async def _tg_get_learning_examples(user_id=None, chat_id=None, limit=TG_MEMORY_MAX_EXAMPLES):
+    """Return recent successful examples for this user, plus a few global ones."""
+    try:
+        query = {"active": True}
+        if user_id:
+            query["user_id"] = str(user_id)
+        elif chat_id:
+            query["chat_id"] = str(chat_id)
+        rows = await db[TG_MEMORY_COLLECTION].find(
+            query,
+            {"_id": 0, "message": 1, "intent": 1, "action": 1, "confidence": 1},
+        ).sort("created_at", -1).limit(int(limit)).to_list(int(limit))
+        return rows
+    except Exception as exc:
+        print(f"[Telegram Learning] memory read skipped: {exc}")
+        return []
+
+
+async def _tg_store_learning_example(
+    *, user_id=None, chat_id=None, message=None, intent=None, outcome="parsed"
+):
+    """Persist a language->intent example for future retrieval."""
+    try:
+        action = str((intent or {}).get("action") or "none").strip().lower()
+        confidence = float((intent or {}).get("confidence") or 0)
+        if not message or action in {"none", "help"} or confidence < 0.70:
+            return
+        clean_message = _tg_memory_safe_text(message)
+        if len(clean_message.strip()) < 3:
+            return
+        now = datetime.now(timezone.utc)
+        doc = {
+            "id": str(uuid.uuid4()),
+            "user_id": str(user_id) if user_id else None,
+            "chat_id": str(chat_id) if chat_id else None,
+            "message": clean_message,
+            "intent": intent,
+            "action": action,
+            "confidence": confidence,
+            "outcome": outcome,
+            "active": True,
+            "created_at": now,
+            "updated_at": now,
+        }
+        # Avoid storing the exact same phrase repeatedly.
+        existing = await db[TG_MEMORY_COLLECTION].find_one(
+            {"user_id": doc["user_id"], "message": clean_message, "action": action},
+            {"_id": 1},
+        )
+        if existing:
+            await db[TG_MEMORY_COLLECTION].update_one(
+                {"_id": existing["_id"]},
+                {"$set": {"intent": intent, "confidence": confidence, "outcome": outcome, "updated_at": now}},
+            )
+        else:
+            await db[TG_MEMORY_COLLECTION].insert_one(doc)
+    except Exception as exc:
+        # Learning must NEVER break the actual Telegram command.
+        print(f"[Telegram Learning] memory write skipped: {exc}")
+
+
+async def _tg_learn_from_feedback(chat_id: int, user_id=None, message: str = ""):
+    """Find the most recent example so corrections can be fed back to the parser."""
+    try:
+        previous = await db[TG_MEMORY_COLLECTION].find_one(
+            {"chat_id": str(chat_id), "active": True},
+            {"_id": 0, "message": 1, "intent": 1, "action": 1},
+            sort=[("created_at", -1)],
+        )
+        if not previous:
+            return None
+        return previous
+    except Exception as exc:
+        print(f"[Telegram Learning] feedback lookup skipped: {exc}")
+        return None
+
+
+async def _tg_ensure_learning_indexes():
+    """Safe startup helper; duplicate/index errors are deliberately non-fatal."""
+    try:
+        await db[TG_MEMORY_COLLECTION].create_index([("user_id", 1), ("created_at", -1)])
+        await db[TG_MEMORY_COLLECTION].create_index([("chat_id", 1), ("created_at", -1)])
+        await db[TG_MEMORY_COLLECTION].create_index([("message", 1), ("action", 1)])
+    except Exception as exc:
+        print(f"[Telegram Learning] index creation skipped: {exc}")
+
+
+async def _tg_ai_command(text: str, user_id=None, chat_id=None):
     if not TG_AI_KEY or not httpx:
         return None
     today = date.today().isoformat()
+    learning_examples = await _tg_get_learning_examples(
+        user_id=user_id, chat_id=chat_id, limit=TG_MEMORY_MAX_EXAMPLES
+    )
+    examples_text = "\n".join(
+        f"- User previously said: {ex.get('message')}\n  Learned intent: {json.dumps(ex.get('intent') or {}, ensure_ascii=False)}"
+        for ex in learning_examples
+    ) or "(No previous examples yet. Learn from this message.)"
+    feedback_hint = ""
+    if re.search(r"(?i)\b(no|wrong|incorrect|i meant|not that|that's not|instead)\b", text):
+        previous = await _tg_learn_from_feedback(chat_id, user_id=user_id, message=text)
+        if previous:
+            feedback_hint = (
+                "\nThe user may be correcting a previous request. Previous request was: "
+                + str(previous.get("message") or "")
+                + "\nPrevious intent was: "
+                + json.dumps(previous.get("intent") or {}, ensure_ascii=False)
+            )
     prompt = f"""
 You are Taskosphere's Telegram command parser for a CA/CS ERP.
 Today is {today}.
 Read the user's natural-language request and return ONLY valid JSON.
 Never invent missing values. Missing fields MUST be null, empty string, or [].
 Resolve relative dates into ISO dates when possible.
+
+LEARNED LANGUAGE EXAMPLES:
+{examples_text}
+{feedback_hint}
+
+Use learned examples only to understand wording and intent. Do NOT copy business data from an example into the current request.
+The current message always has priority. If a field is not stated in the current message, return it as null/empty.
 
 Allowed actions:
 create_task, create_lead, create_client, create_invoice, create_quotation,
@@ -425,14 +573,33 @@ def _tg_merge_query(*parts):
 
 async def _tg_natural_language_handler(chat_id: int, text: str, message: dict) -> bool:
     """Handle plain-language create/report requests. Returns True if consumed."""
+    global _TG_LEARNING_INDEXES_READY
+    if not _TG_LEARNING_INDEXES_READY:
+        await _tg_ensure_learning_indexes()
+        _TG_LEARNING_INDEXES_READY = True
+
     convo = await db.telegram_conversations.find_one({"telegram_id": chat_id})
     # Never interrupt an existing multi-step wizard.
     if convo:
         return False
 
-    intent = await _tg_ai_command(text)
+    user = await db.users.find_one({"telegram_id": chat_id}, {"_id": 0, "password": 0})
+    intent = await _tg_ai_command(
+        text,
+        user_id=user.get("id") if user else None,
+        chat_id=chat_id,
+    )
     if not intent:
         return False
+    # Store the language pattern only after the AI parser produced a confident intent.
+    is_feedback = bool(re.search(r"(?i)\b(no|wrong|incorrect|i meant|not that|that's not|instead)\b", text))
+    await _tg_store_learning_example(
+        user_id=user.get("id") if user else None,
+        chat_id=chat_id,
+        message=text,
+        intent=intent,
+        outcome="correction" if is_feedback else "parsed",
+    )
     action = str(intent.get("action") or "none").lower().strip()
     if action in {"none", "help"}:
         if action == "help":
@@ -440,7 +607,6 @@ async def _tg_natural_language_handler(chat_id: int, text: str, message: dict) -
             return True
         return False
 
-    user = await db.users.find_one({"telegram_id": chat_id}, {"_id": 0, "password": 0})
     if not user:
         await send_message(chat_id, "❌ Your Telegram account is not linked to a Taskosphere user account.")
         return True
