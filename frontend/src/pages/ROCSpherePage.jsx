@@ -70,7 +70,7 @@ const TABS = [
   { key: 'notice', label: 'Notice of Meeting', icon: ScrollText },
   { key: 'minutes', label: 'Minutes of Meeting', icon: NotebookPen },
   { key: 'checklist', label: 'Compliance Checklist', icon: ClipboardList },
-  { key: 'upload', label: 'Upload AOC-4 / MGT-7', icon: Upload },
+  { key: 'upload', label: 'Add Master Data', icon: Upload },
 ];
 
 export default function ROCSpherePage() {
@@ -258,6 +258,9 @@ export default function ROCSpherePage() {
                 <button onClick={deleteCompany} className="text-xs flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-red-500 hover:bg-red-500/10">
                   <Trash2 size={13} /> Remove
                 </button>
+                 <button onClick={() => setTab('upload')} className="text-xs flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-blue-600 hover:bg-blue-500/10">
+                   <Upload size={13} /> Add Master Data
+                 </button>
               </div>
 
               {/* Tabs */}
@@ -282,7 +285,7 @@ export default function ROCSpherePage() {
                   {tab === 'notice' && <NoticeTab company={company} isDark={isDark} input={input} text={text} muted={muted} />}
                   {tab === 'minutes' && <MinutesTab company={company} isDark={isDark} input={input} text={text} muted={muted} />}
                   {tab === 'checklist' && <ChecklistTab company={company} isDark={isDark} text={text} muted={muted} />}
-                  {tab === 'upload' && <UploadTab company={company} isDark={isDark} input={input} text={text} muted={muted} onApplied={() => loadOne(company.id)} />}
+                   {tab === 'upload' && <UploadTab company={company} isDark={isDark} input={input} text={text} muted={muted} onApplied={() => loadOne(company.id)} />}
                 </div>
               </div>
             </>
@@ -474,17 +477,48 @@ function MasterTab({ company, isDark, onSave, input, text, muted }) {
 
 function DirectorsTab({ company, isDark, onSave, input, text, muted }) {
   const [directors, setDirectors] = useState(company.directors || []);
+  const [designatedPartners, setDesignatedPartners] = useState(company.designated_partners || []);
+  const [partners, setPartners] = useState(company.partners || []);
   const [shareholders, setShareholders] = useState(company.shareholders || []);
-  useEffect(() => { setDirectors(company.directors || []); setShareholders(company.shareholders || []); }, [company]);
+  const isLLP = company.category === 'llp';
+  useEffect(() => {
+    setDirectors(company.directors || []);
+    setDesignatedPartners(company.designated_partners || []);
+    setPartners(company.partners || []);
+    setShareholders(company.shareholders || []);
+  }, [company]);
 
   const addDirector = () => setDirectors([...directors, { name: '', din: '', designation: 'Director', date_of_appointment: '' }]);
+  const addPerson = (setter, list, designation) => setter([...list, { name: '', din: '', designation, date_of_appointment: '' }]);
   const addShareholder = () => setShareholders([...shareholders, { name: '', folio_no: '', shares_held: 0, class_of_shares: 'Equity' }]);
 
   const totalShares = shareholders.reduce((s, sh) => s + (parseFloat(sh.shares_held) || 0), 0);
+  const renderPeople = (title, list, setList, designationOptions) => (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <h4 className={`text-sm font-semibold ${text}`}>{title}</h4>
+        <button onClick={() => addPerson(setList, list, designationOptions[0])} className="text-xs flex items-center gap-1 text-blue-500"><Plus size={13} /> Add {title.replace(/s$/, '')}</button>
+      </div>
+      <div className="space-y-2">
+        {list.map((d, i) => (
+          <div key={i} className={`grid grid-cols-12 gap-2 items-center p-2 rounded-lg ${isDark ? 'bg-slate-900/40' : 'bg-slate-50'}`}>
+            <input className={`${input} col-span-3`} placeholder="Name" value={d.name || ''} onChange={(e) => { const c = [...list]; c[i] = { ...c[i], name: e.target.value }; setList(c); }} />
+            <input className={`${input} col-span-2`} placeholder="DIN / PAN" value={d.din || d.pan || ''} onChange={(e) => { const c = [...list]; c[i] = { ...c[i], din: e.target.value }; setList(c); }} />
+            <select className={`${input} col-span-3`} value={d.designation || designationOptions[0]} onChange={(e) => { const c = [...list]; c[i] = { ...c[i], designation: e.target.value }; setList(c); }}>
+              {designationOptions.map((x) => <option key={x}>{x}</option>)}
+            </select>
+            <input type="date" className={`${input} col-span-3`} value={(d.date_of_appointment || '').slice(0, 10)} onChange={(e) => { const c = [...list]; c[i] = { ...c[i], date_of_appointment: e.target.value }; setList(c); }} />
+            <button onClick={() => setList(list.filter((_, x) => x !== i))} className="col-span-1 text-red-500"><Trash2 size={14} /></button>
+          </div>
+        ))}
+        {list.length === 0 && <p className={`text-xs ${muted}`}>No {title.toLowerCase()} added yet.</p>}
+      </div>
+    </div>
+  );
 
   return (
     <div className="space-y-6">
-      <div>
+      {!isLLP && <div>
         <div className="flex items-center justify-between mb-2">
           <h4 className={`text-sm font-semibold ${text}`}>Directors</h4>
           <button onClick={addDirector} className="text-xs flex items-center gap-1 text-blue-500"><Plus size={13} /> Add Director</button>
@@ -503,7 +537,10 @@ function DirectorsTab({ company, isDark, onSave, input, text, muted }) {
           ))}
           {directors.length === 0 && <p className={`text-xs ${muted}`}>No directors added yet.</p>}
         </div>
-      </div>
+      </div>}
+
+      {isLLP && renderPeople('Designated Partners', designatedPartners, setDesignatedPartners, ['Designated Partner', 'Designated Partner (Managing)'])}
+      {isLLP && renderPeople('Partners', partners, setPartners, ['Partner', 'Nominee Partner'])}
 
       <div>
         <div className="flex items-center justify-between mb-2">
@@ -524,8 +561,8 @@ function DirectorsTab({ company, isDark, onSave, input, text, muted }) {
         </div>
       </div>
 
-      <button onClick={() => onSave({ directors, shareholders })} className="px-4 py-2 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1.5">
-        <Save size={14} /> Save Directors & Shareholders
+      <button onClick={() => onSave({ directors, designated_partners: designatedPartners, partners, shareholders })} className="px-4 py-2 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1.5">
+        <Save size={14} /> Save {isLLP ? 'Partners' : 'Directors'} & Shareholders
       </button>
     </div>
   );
@@ -880,10 +917,9 @@ function UploadTab({ company, isDark, input, text, muted, onApplied }) {
   return (
     <div className="space-y-4">
       <p className={`text-xs ${muted}`}>
-        Upload the AOC-4 / MGT-7 / MGT-7A acknowledgement PDF, or the MCA master-data Excel export. Fields it can
-        confidently read (CIN, incorporation date, registered office, authorized/paid-up capital, turnover, AGM &
-        Board Meeting dates, PAN) are shown below for review before they're applied to the company master —
-        this is a best-effort text scrape, not an XBRL parser, so always double-check the extracted values.
+        Add MCA master-data XLSX/PDF first to update company details and directors, then add the MGT-7/MGT-7A PDF
+        (or its shareholder attachment) to merge shareholder data. Applied details are saved in both ROC Company
+        Master and the linked Client record. Existing entries are preserved when a filing contains only totals.
       </p>
       <div className={`rounded-lg border-2 border-dashed p-6 text-center ${isDark ? 'border-slate-700' : 'border-slate-300'}`}>
         <Upload size={22} className={`mx-auto mb-2 ${muted}`} />
@@ -912,7 +948,19 @@ function UploadTab({ company, isDark, input, text, muted, onApplied }) {
                 <span className={text}>{String(v)}</span>
               </div>
             ))}
-            {!Object.keys(extracted).filter((k) => !k.startsWith('_')).length && (
+            {extracted.directors && (
+              <div className="sm:col-span-2">
+                <span className={muted}>directors / partners</span>
+                <span className={`${text} block`}>{extracted.directors.map((p) => `${p.name}${p.din ? ` (${p.din})` : ''}`).join(', ')}</span>
+              </div>
+            )}
+            {extracted.shareholders && (
+              <div className="sm:col-span-2">
+                <span className={muted}>shareholders</span>
+                <span className={`${text} block`}>{extracted.shareholders.map((p) => `${p.name} — ${p.shares_held || 0} shares`).join(', ')}</span>
+              </div>
+            )}
+            {!Object.keys(extracted).filter((k) => !k.startsWith('_') && !['directors', 'shareholders'].includes(k)).length && !extracted.directors && !extracted.shareholders && (
               <p className={muted}>No fields could be confidently extracted from this file.</p>
             )}
           </div>
