@@ -309,20 +309,48 @@ api.interceptors.response.use(
       error.response?.status === 503 ||
       error.response?.status === 504;
 
-    if (transientStatus) {
-      // The backend went back to sleep / is redeploying — force the next
-      // request to wait on the readiness probe again.
+    // Only flip the shared "not ready" flag on the FIRST sign of trouble for
+    // a given request chain, not on every retry of the same request.
+    //
+    // BUG FIX (see incident notes above the safety net in server.py): this
+    // used to fire unconditionally, so every one of the retries below
+    // re-entered the request interceptor with _isReady=false and re-ran the
+    // full up-to-75s ensureBackendReady() health probe BEFORE each retry even
+    // fired. With 4+ parallel collection requests on page mount (companies,
+    // quotations, quotations/services, etc.) each independently resetting
+    // readiness on every attempt, the health probe kept restarting for
+    // sibling requests too — producing the exploding, ever-deeper nested
+    // retry/backoff console spam (visible as repeated
+    // "setTimeout > api.request > ..." stack growth) instead of a single
+    // clean wait-then-recover cycle. A 404 already proves the host answered
+    // at the network level, so retries of *this* request no longer need to
+    // re-wait on /health (see _skipReadyGate below); we still mark the app
+    // "not ready" once so genuinely new requests queue behind one shared probe.
+    if (transientStatus && !error.config?._coldStartAttempt) {
       markBackendNotReady();
     }
 
     if (isCollectionGet && transientStatus) {
       const attempt = error.config._coldStartAttempt || 0;
-      const backoffs = [700, 1800, 4000];
+      // Render's free tier can take 30–60s to finish waking a sleeping
+      // service (or to finish a rolling deploy). The old budget here was
+      // only ~6.5s total, so the page gave up and showed "0 companies" /
+      // "0 quotations" long before the backend was actually ready — this is
+      // what was really causing the persistent-looking 404s. Extend the
+      // budget to comfortably cover a full cold start (~50s across 9 tries).
+      const backoffs = [1000, 2000, 3000, 5000, 6000, 7000, 8000, 8000, 8000];
       if (attempt < backoffs.length) {
         return new Promise((resolve, reject) => {
           setTimeout(() => {
             api
-              .request({ ...error.config, _coldStartAttempt: attempt + 1 })
+              .request({
+                ...error.config,
+                _coldStartAttempt: attempt + 1,
+                // We already got an HTTP response (even if 404) from the
+                // server for this request, so it's reachable — skip
+                // re-probing /health on every retry of the same request.
+                _skipReadyGate: true,
+              })
               .then(resolve)
               .catch(reject);
           }, backoffs[attempt]);
@@ -338,6 +366,7 @@ api.interceptors.response.use(
             url: `${normalisedPath}/${requestQuery ? `?${requestQuery}` : ""}`,
             _slashRetry: true,
             _coldStartAttempt: backoffs.length,
+            _skipReadyGate: true,
           })
           .catch(() =>
             Promise.resolve({
