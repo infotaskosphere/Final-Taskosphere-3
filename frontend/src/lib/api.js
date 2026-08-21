@@ -39,7 +39,11 @@ const _configuredUrlIsFrontendHost = (() => {
     return false;
   }
   try {
-    const configuredHost = new URL(_configuredApiUrl, window.location.origin).hostname;
+    const configuredHost = new URL(
+      _configuredApiUrl,
+      window.location.origin
+    ).hostname;
+
     return configuredHost.endsWith("-frontend.onrender.com");
   } catch {
     return false;
@@ -49,7 +53,10 @@ const _configuredUrlIsFrontendHost = (() => {
 let _raw =
   _runtimeOverride ||
   (_configuredUrlIsFrontendHost
-    ? _configuredApiUrl.replace("-frontend.onrender.com", "-backend.onrender.com")
+    ? _configuredApiUrl.replace(
+        "-frontend.onrender.com",
+        "-backend.onrender.com"
+      )
     : _configuredApiUrl) ||
   (_isDevOrPreviewHost ? "" : _defaultBackendUrl);
 
@@ -72,18 +79,22 @@ if (
 
 // Strip trailing slash(es), then append /api if missing
 _raw = _raw.replace(/\/+$/, "");
+
 if (!_raw.endsWith("/api")) {
   _raw += "/api";
 }
 
 const BASE_URL = _raw;
+
 export { BASE_URL };
 
 // ─── Token Helpers ───────────────────────────────────────────
 const TOKEN_KEY = "token";
 
 export const getToken = () => localStorage.getItem(TOKEN_KEY);
+
 export const setToken = (tok) => localStorage.setItem(TOKEN_KEY, tok);
+
 export const clearToken = () => localStorage.removeItem(TOKEN_KEY);
 
 // ─── Global Loading State ─────────────────────────────────────
@@ -92,7 +103,9 @@ const _subscribers = new Set();
 
 function _setLoading(delta) {
   _activeRequests = Math.max(0, _activeRequests + delta);
+
   const isLoading = _activeRequests > 0;
+
   _subscribers.forEach((fn) => fn(isLoading));
 }
 
@@ -101,6 +114,7 @@ export function useLoading() {
 
   useEffect(() => {
     _subscribers.add(setLoading);
+
     return () => _subscribers.delete(setLoading);
   }, []);
 
@@ -116,24 +130,32 @@ export function useLoading() {
 // VITE_API_URL points at a backend host that is down, renamed, or deleted.
 let _consecutiveNetworkFailures = 0;
 let _backendUnreachable = false;
-const _NETWORK_FAILURE_THRESHOLD = 2; // avoid flapping on a single blip
+
+const _NETWORK_FAILURE_THRESHOLD = 2;
+
 const _reachabilitySubscribers = new Set();
 
 function _reportNetworkResult(ok) {
   if (ok) {
     _consecutiveNetworkFailures = 0;
+
     if (_backendUnreachable) {
       _backendUnreachable = false;
+
       _reachabilitySubscribers.forEach((fn) => fn(false));
     }
+
     return;
   }
+
   _consecutiveNetworkFailures += 1;
+
   if (
     !_backendUnreachable &&
     _consecutiveNetworkFailures >= _NETWORK_FAILURE_THRESHOLD
   ) {
     _backendUnreachable = true;
+
     _reachabilitySubscribers.forEach((fn) => fn(true));
   }
 }
@@ -143,6 +165,7 @@ export function useBackendUnreachable() {
 
   useEffect(() => {
     _reachabilitySubscribers.add(setUnreachable);
+
     return () => _reachabilitySubscribers.delete(setUnreachable);
   }, []);
 
@@ -153,20 +176,20 @@ export function useBackendUnreachable() {
 // Prevents identical GET requests fired within 300ms from hitting the network twice.
 // Keyed by full URL string; values are in-flight Promise references.
 const _inflight = new Map();
-const DEDUP_WINDOW_MS = 300;
 
+const DEDUP_WINDOW_MS = 300;
 
 // ─── Backend Readiness Gate (fixes cold-start 404 bursts) ─────
 // Render puts free/standby web services to sleep. While the service is
-// waking up (or mid-deploy) its edge answers EVERY /api/* request with a
-// 404/502 even though the route exists. Pages that fetch on mount
-// (Quotations -> /api/quotations + /api/companies) therefore rendered empty
-// with a wall of console 404s.
+// waking up (or mid-deploy) its edge answers EVERY /api/* request with
+// a 404/502 even though the route exists. Pages that fetch on mount
+// therefore rendered empty with a wall of console 404s.
 //
-// Fix: before the first API GET goes out, wait until the backend answers its
-// unauthenticated /health probe. All requests queue behind one shared probe,
-// so a cold start costs a single wait instead of dozens of failed calls.
+// Fix: before the first API GET goes out, wait until the backend answers
+// its unauthenticated /health probe. All requests queue behind one shared
+// probe, so a cold start costs a single wait instead of dozens of failed calls.
 const HEALTH_URL = `${BASE_URL.replace(/\/api$/, "")}/health`;
+
 let _readyPromise = null;
 let _isReady = false;
 
@@ -179,30 +202,56 @@ export function markBackendNotReady() {
 
 export function ensureBackendReady() {
   if (_isReady) return Promise.resolve(true);
+
   if (_readyPromise) return _readyPromise;
 
   _readyPromise = (async () => {
     // ~75s total: comfortably covers a Render cold start.
-    const backoffs = [0, 1000, 2000, 3000, 5000, 8000, 8000, 12000, 12000, 12000, 12000];
+    const backoffs = [
+      0,
+      1000,
+      2000,
+      3000,
+      5000,
+      8000,
+      8000,
+      12000,
+      12000,
+      12000,
+      12000,
+    ];
+
     for (const wait of backoffs) {
       if (wait) await _sleep(wait);
+
       try {
         await axios.get(HEALTH_URL, { timeout: 15000 });
+
         _isReady = true;
+
         _reportNetworkResult(true);
+
         return true;
       } catch (err) {
-        // A 4xx/5xx still proves the host is reachable and serving; only keep
-        // waiting while it is asleep / mid-deploy (404, 502, 503, 504, no response).
+        // A 4xx/5xx still proves the host is reachable and serving;
+        // only keep waiting while it is asleep / mid-deploy
+        // (404, 502, 503, 504, no response).
         const status = err?.response?.status;
-        if (status && ![404, 500, 502, 503, 504].includes(status)) {
+
+        if (
+          status &&
+          ![404, 500, 502, 503, 504].includes(status)
+        ) {
           _isReady = true;
+
           return true;
         }
       }
     }
+
     // Give up waiting — let the normal retry/degrade path handle it.
     _readyPromise = null;
+
     return false;
   })();
 
@@ -213,7 +262,9 @@ export function ensureBackendReady() {
 const api = axios.create({
   baseURL: BASE_URL,
   timeout: 300000,
-  headers: { "Content-Type": "application/json" },
+  headers: {
+    "Content-Type": "application/json",
+  },
 });
 
 // ─── Request Interceptor ──────────────────────────────────────
@@ -227,20 +278,29 @@ api.interceptors.request.use(
     // Some deployed collection routes are registered with a trailing slash.
     // Normalize them before the request reaches the server so the browser
     // does not log an avoidable 404 for the no-slash URL first.
-    const [requestPath, requestQuery = ""] = (config.url || "").split("?");
+    const [requestPath, requestQuery = ""] = (
+      config.url || ""
+    ).split("?");
+
     const trailingSlashCollections = new Set([
       "/notifications",
       "/visits",
       "/leads",
     ]);
+
     if (
       config.method?.toLowerCase() === "get" &&
-      trailingSlashCollections.has(requestPath.replace(/\/+$/, ""))
+      trailingSlashCollections.has(
+        requestPath.replace(/\/+$/, "")
+      )
     ) {
-      config.url = `${requestPath.replace(/\/+$/, "")}/${requestQuery ? `?${requestQuery}` : ""}`;
+      config.url = `${requestPath.replace(/\/+$/, "")}${
+        requestQuery ? `?${requestQuery}` : ""
+      }`;
     }
 
     const token = getToken();
+
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -253,6 +313,7 @@ api.interceptors.request.use(
   },
   (error) => {
     _setLoading(-1);
+
     return Promise.reject(error);
   }
 );
@@ -260,12 +321,18 @@ api.interceptors.request.use(
 // ─── Response Interceptor ─────────────────────────────────────
 api.interceptors.response.use(
   (response) => {
-    if (!response.config._silent) _setLoading(-1);
+    if (!response.config._silent) {
+      _setLoading(-1);
+    }
+
     _reportNetworkResult(true);
+
     return response;
   },
   (error) => {
-    if (!error.config?._silent) _setLoading(-1);
+    if (!error.config?._silent) {
+      _setLoading(-1);
+    }
 
     // No `error.response` means the request never got an HTTP response at
     // all (DNS failure, connection refused, CORS block, timeout) — a true
@@ -278,31 +345,42 @@ api.interceptors.response.use(
     // form. Retry only these known collection endpoints once so a rolling
     // frontend/backend deployment does not turn dashboard widgets into 404s.
     // Resource-specific 404s (for example /tasks/:id) are never rewritten.
+    //
+    // IMPORTANT:
+    // `/quotations` and `/quotations/list` are intentionally NOT included
+    // here.
+    //
+    // The quotation API is an authenticated business-critical endpoint.
+    // A real 404 from quotations must reach the caller instead of being
+    // interpreted as a Render cold-start and retried repeatedly.
     const requestUrl = error.config?.url || "";
+
     const [requestPath, requestQuery = ""] = requestUrl.split("?");
+
     const normalisedPath = requestPath.replace(/\/+$/, "");
+
     const slashCompatibleCollections = new Set([
       "/notifications",
       "/visits",
       "/leads",
-      "/quotations",
-      "/quotations/list",
       "/companies",
       "/companies/list",
       "/compliance",
       "/passwords",
       "/client-discussion",
     ]);
+
     const isCollectionGet =
       error.config?.method?.toLowerCase() === "get" &&
       slashCompatibleCollections.has(normalisedPath);
 
     // Render's edge answers /api/* with 404 (and sometimes 502/503) while the
     // backend service is cold-starting or mid-deploy, even though the route
-    // exists in the live OpenAPI schema — this is what produces the bursts of
-    // `GET /api/quotations 404` / `GET /api/companies 404` on Client Proposals
-    // and Quotations. Treat those as transient and retry the SAME url with
-    // backoff before doing anything else.
+    // exists in the live OpenAPI schema.
+    //
+    // IMPORTANT:
+    // This retry mechanism deliberately does NOT apply to `/quotations` or
+    // `/quotations/list`. Those routes must expose their real HTTP status.
     const transientStatus =
       error.response?.status === 404 ||
       error.response?.status === 502 ||
@@ -312,33 +390,33 @@ api.interceptors.response.use(
     // Only flip the shared "not ready" flag on the FIRST sign of trouble for
     // a given request chain, not on every retry of the same request.
     //
-    // BUG FIX (see incident notes above the safety net in server.py): this
-    // used to fire unconditionally, so every one of the retries below
-    // re-entered the request interceptor with _isReady=false and re-ran the
-    // full up-to-75s ensureBackendReady() health probe BEFORE each retry even
-    // fired. With 4+ parallel collection requests on page mount (companies,
-    // quotations, quotations/services, etc.) each independently resetting
-    // readiness on every attempt, the health probe kept restarting for
-    // sibling requests too — producing the exploding, ever-deeper nested
-    // retry/backoff console spam (visible as repeated
-    // "setTimeout > api.request > ..." stack growth) instead of a single
-    // clean wait-then-recover cycle. A 404 already proves the host answered
-    // at the network level, so retries of *this* request no longer need to
-    // re-wait on /health (see _skipReadyGate below); we still mark the app
-    // "not ready" once so genuinely new requests queue behind one shared probe.
-    if (transientStatus && !error.config?._coldStartAttempt) {
+    // A 404 already proves the host answered at the network level, so retries
+    // of this request no longer need to re-wait on /health.
+    if (
+      transientStatus &&
+      !error.config?._coldStartAttempt
+    ) {
       markBackendNotReady();
     }
 
     if (isCollectionGet && transientStatus) {
-      const attempt = error.config._coldStartAttempt || 0;
+      const attempt =
+        error.config._coldStartAttempt || 0;
+
       // Render's free tier can take 30–60s to finish waking a sleeping
-      // service (or to finish a rolling deploy). The old budget here was
-      // only ~6.5s total, so the page gave up and showed "0 companies" /
-      // "0 quotations" long before the backend was actually ready — this is
-      // what was really causing the persistent-looking 404s. Extend the
-      // budget to comfortably cover a full cold start (~50s across 9 tries).
-      const backoffs = [1000, 2000, 3000, 5000, 6000, 7000, 8000, 8000, 8000];
+      // service (or to finish a rolling deploy).
+      const backoffs = [
+        1000,
+        2000,
+        3000,
+        5000,
+        6000,
+        7000,
+        8000,
+        8000,
+        8000,
+      ];
+
       if (attempt < backoffs.length) {
         return new Promise((resolve, reject) => {
           setTimeout(() => {
@@ -346,6 +424,7 @@ api.interceptors.response.use(
               .request({
                 ...error.config,
                 _coldStartAttempt: attempt + 1,
+
                 // We already got an HTTP response (even if 404) from the
                 // server for this request, so it's reachable — skip
                 // re-probing /health on every retry of the same request.
@@ -357,13 +436,18 @@ api.interceptors.response.use(
         });
       }
 
-      // Retries exhausted: try the legacy trailing-slash form once, in case an
-      // older backend build really did register the route with a slash.
-      if (error.response?.status === 404 && !error.config?._slashRetry) {
+      // Retries exhausted: try the legacy trailing-slash form once, in case
+      // an older backend build really did register the route with a slash.
+      if (
+        error.response?.status === 404 &&
+        !error.config?._slashRetry
+      ) {
         return api
           .request({
             ...error.config,
-            url: `${normalisedPath}/${requestQuery ? `?${requestQuery}` : ""}`,
+            url: `${normalisedPath}/${
+              requestQuery ? `?${requestQuery}` : ""
+            }`,
             _slashRetry: true,
             _coldStartAttempt: backoffs.length,
             _skipReadyGate: true,
@@ -372,8 +456,10 @@ api.interceptors.response.use(
             Promise.resolve({
               data: [],
               status: 200,
-              statusText: "OK (empty — collection endpoint unavailable)",
-              headers: error.response?.headers || {},
+              statusText:
+                "OK (empty — collection endpoint unavailable)",
+              headers:
+                error.response?.headers || {},
               config: error.config,
               _degraded: true,
             })
@@ -385,8 +471,10 @@ api.interceptors.response.use(
       return Promise.resolve({
         data: [],
         status: 200,
-        statusText: "OK (empty — collection endpoint unavailable)",
-        headers: error.response?.headers || {},
+        statusText:
+          "OK (empty — collection endpoint unavailable)",
+        headers:
+          error.response?.headers || {},
         config: error.config,
         _degraded: true,
       });
@@ -395,29 +483,41 @@ api.interceptors.response.use(
     // 🔐 401 → session expired, redirect to login
     if (error.response?.status === 401) {
       clearToken();
+
       localStorage.removeItem("user");
+
       sessionStorage.removeItem("user");
+
       sessionStorage.removeItem("token");
-      if (!window.location.pathname.startsWith("/login")) {
+
+      if (
+        !window.location.pathname.startsWith("/login")
+      ) {
         window.location.href = "/login";
       }
     }
 
     // 🚫 403 → permission denied
     if (error.response?.status === 403) {
-      window.dispatchEvent(new CustomEvent("permission-denied"));
+      window.dispatchEvent(
+        new CustomEvent("permission-denied")
+      );
     }
 
     // ⚠️ 422 validation
     if (error.response?.status === 422) {
       const detail = error.response.data?.detail;
+
       if (Array.isArray(detail)) {
         const msg = detail
           .map((e) => {
-            const field = e.loc?.slice(-1)[0] ?? "field";
+            const field =
+              e.loc?.slice(-1)[0] ?? "field";
+
             return `${field}: ${e.msg}`;
           })
           .join(" · ");
+
         error.response.data._normalised = msg;
       }
     }
@@ -428,12 +528,22 @@ api.interceptors.response.use(
 
 // ─── Helpers ─────────────────────────────────────────────────
 export const silentGet = (url, config = {}) =>
-  api.get(url, { ...config, _silent: true });
+  api.get(url, {
+    ...config,
+    _silent: true,
+  });
 
-export const upload = (url, formData, config = {}) =>
+export const upload = (
+  url,
+  formData,
+  config = {}
+) =>
   api.post(url, formData, {
     ...config,
-    headers: { "Content-Type": "multipart/form-data", ...config.headers },
+    headers: {
+      "Content-Type": "multipart/form-data",
+      ...config.headers,
+    },
   });
 
 // ─── Deduplicated GET ─────────────────────────────────────────
@@ -441,14 +551,32 @@ export const upload = (url, formData, config = {}) =>
 // components (e.g. /tasks, /users on Dashboard load).
 // If an identical request is already in-flight it returns the same promise
 // instead of firing a second network request.
-export const deduplicatedGet = (url, config = {}) => {
-  const key = url + (config.params ? JSON.stringify(config.params) : "");
-  if (_inflight.has(key)) return _inflight.get(key);
-  const promise = api.get(url, config).finally(() => {
-    // Remove from cache after short window so rapid re-fetches still dedup
-    setTimeout(() => _inflight.delete(key), DEDUP_WINDOW_MS);
-  });
+export const deduplicatedGet = (
+  url,
+  config = {}
+) => {
+  const key =
+    url +
+    (config.params
+      ? JSON.stringify(config.params)
+      : "");
+
+  if (_inflight.has(key)) {
+    return _inflight.get(key);
+  }
+
+  const promise = api
+    .get(url, config)
+    .finally(() => {
+      // Remove from cache after short window so rapid re-fetches still dedup
+      setTimeout(
+        () => _inflight.delete(key),
+        DEDUP_WINDOW_MS
+      );
+    });
+
   _inflight.set(key, promise);
+
   return promise;
 };
 
@@ -456,31 +584,57 @@ export const deduplicatedGet = (url, config = {}) => {
 // Fires multiple GET requests in parallel with automatic deduplication.
 // Returns an object keyed by the supplied map keys.
 // Usage: parallelGet({ tasks: '/tasks', users: '/users' })
-export const parallelGet = async (urlMap, config = {}) => {
+export const parallelGet = async (
+  urlMap,
+  config = {}
+) => {
   const keys = Object.keys(urlMap);
+
   const results = await Promise.allSettled(
-    keys.map((k) => deduplicatedGet(urlMap[k], config))
+    keys.map((k) =>
+      deduplicatedGet(urlMap[k], config)
+    )
   );
+
   return Object.fromEntries(
     keys.map((k, i) => [
       k,
-      results[i].status === "fulfilled" ? results[i].value : null,
+      results[i].status === "fulfilled"
+        ? results[i].value
+        : null,
     ])
   );
 };
 
 // ─── Error Formatter ─────────────────────────────────────────
 export function getErrorMessage(error) {
-  if (!error) return "An unknown error occurred";
+  if (!error) {
+    return "An unknown error occurred";
+  }
 
   const data = error.response?.data;
 
-  if (!data) return error.message || "Network error";
-  if (data._normalised) return data._normalised;
-  if (typeof data.detail === "string") return data.detail;
-  if (Array.isArray(data.detail))
-    return data.detail.map((e) => e.msg).join(", ");
-  if (typeof data.message === "string") return data.message;
+  if (!data) {
+    return error.message || "Network error";
+  }
+
+  if (data._normalised) {
+    return data._normalised;
+  }
+
+  if (typeof data.detail === "string") {
+    return data.detail;
+  }
+
+  if (Array.isArray(data.detail)) {
+    return data.detail
+      .map((e) => e.msg)
+      .join(", ");
+  }
+
+  if (typeof data.message === "string") {
+    return data.message;
+  }
 
   return "Request failed";
 }
