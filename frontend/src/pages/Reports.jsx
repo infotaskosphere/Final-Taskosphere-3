@@ -1441,12 +1441,12 @@ export default function Reports() {
                     initial={{opacity:0,y:18,scale:.98}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:18,scale:.98}}
                     className="w-full max-w-7xl max-h-[92vh] rounded-2xl overflow-hidden flex flex-col"
                     style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:'0 24px 70px rgba(0,0,0,.30)'}}>
-                    <div className="px-5 py-4 flex items-center justify-between gap-4 shrink-0 sticky top-0 z-30"
-                      style={{borderBottom:'1px solid rgba(255,255,255,.18)',background:`linear-gradient(135deg, ${C.deepBlue} 0%, ${C.mediumBlue} 100%)`,boxShadow:'0 4px 14px rgba(13,59,102,.22)'}}>
+                    <div className="px-5 py-4 flex items-center justify-between gap-4 shrink-0"
+                      style={{position:'sticky',top:0,zIndex:9999,borderBottom:'2px solid rgba(255,255,255,.28)',background:`linear-gradient(135deg, ${C.deepBlue} 0%, ${C.mediumBlue} 100%)`,boxShadow:'0 6px 18px rgba(13,59,102,.30)'}}>
                       <div className="min-w-0">
                         <p className="text-lg font-black text-white">{summaryPopupMeta.label}</p>
                         <p className="text-[10px] text-blue-100 truncate">
-                          {reportDateRange.from} → {reportDateRange.to} • {summaryPopupRows.length} exact attendance records • all selected employees
+                          FILTERED: {summaryPopupMeta.label} • {reportDateRange.from} → {reportDateRange.to} • {summaryPopupRows.length} exact attendance records
                         </p>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
@@ -1458,8 +1458,8 @@ export default function Reports() {
                               `${reportDateRange.from} → ${reportDateRange.to} • ${summaryPopupRows.length} exact attendance records`,
                               `attendance_${String(summaryPopupMeta.label||'summary').toLowerCase().replace(/[^a-z0-9]+/g,'_')}_${reportDateRange.from}_${reportDateRange.to}`
                             )}
-                            className="h-9 px-3 rounded-xl flex items-center gap-1.5 text-[10px] font-bold text-white"
-                            style={{background:'rgba(255,255,255,.16)',border:'1px solid rgba(255,255,255,.30)'}}>
+                            className="h-9 px-3.5 rounded-xl flex items-center gap-1.5 text-[10px] font-extrabold text-white shadow-sm"
+                            style={{background:'#16a34a',border:'1px solid rgba(255,255,255,.55)',boxShadow:'0 2px 8px rgba(0,0,0,.18)'}}>
                             <span className="text-[11px]">↓</span> Download PDF
                           </button>
                         )}
@@ -1551,12 +1551,12 @@ export default function Reports() {
                     initial={{opacity:0,y:18,scale:.98}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:18,scale:.98}}
                     className="w-full max-w-6xl max-h-[92vh] rounded-2xl overflow-hidden flex flex-col"
                     style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:'0 24px 70px rgba(0,0,0,.28)'}}>
-                    <div className="px-5 py-4 flex items-center justify-between gap-4 shrink-0 sticky top-0 z-30"
-                      style={{borderBottom:'1px solid rgba(255,255,255,.18)',background:`linear-gradient(135deg, ${C.deepBlue} 0%, ${C.mediumBlue} 100%)`,boxShadow:'0 4px 14px rgba(13,59,102,.22)'}}>
+                    <div className="px-5 py-4 flex items-center justify-between gap-4 shrink-0"
+                      style={{position:'sticky',top:0,zIndex:9999,borderBottom:'2px solid rgba(255,255,255,.28)',background:`linear-gradient(135deg, ${C.deepBlue} 0%, ${C.mediumBlue} 100%)`,boxShadow:'0 6px 18px rgba(13,59,102,.30)'}}>
                       <div className="min-w-0">
                         <p className="text-lg font-black truncate text-white">{selectedEmployeeCard.name}</p>
                         <p className="text-[10px] truncate text-blue-100">
-                          {selectedEmployeeCard.employeeId} • {selectedEmployeeCard.company} • {selectedEmployeeCard.department} • {selectedEmployeeCard.role}
+                          EMPLOYEE ATTENDANCE • {selectedEmployeeCard.employeeId} • {selectedEmployeeCard.company} • {selectedEmployeeCard.department} • {selectedEmployeeCard.role}
                         </p>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
@@ -1568,8 +1568,8 @@ export default function Reports() {
                               `${selectedEmployeeCard.employeeId} • ${selectedEmployeeCard.company} • ${selectedEmployeeCard.department} • ${selectedEmployeeCard.role}`,
                               `attendance_${String(selectedEmployeeCard.name||'employee').toLowerCase().replace(/[^a-z0-9]+/g,'_')}_${reportDateRange.from}_${reportDateRange.to}`
                             )}
-                            className="h-9 px-3 rounded-xl flex items-center gap-1.5 text-[10px] font-bold text-white"
-                            style={{background:'rgba(255,255,255,.16)',border:'1px solid rgba(255,255,255,.30)'}}>
+                            className="h-9 px-3.5 rounded-xl flex items-center gap-1.5 text-[10px] font-extrabold text-white shadow-sm"
+                            style={{background:'#16a34a',border:'1px solid rgba(255,255,255,.55)',boxShadow:'0 2px 8px rgba(0,0,0,.18)'}}>
                             <span className="text-[11px]">↓</span> Download PDF
                           </button>
                         )}
