@@ -54,10 +54,7 @@ from backend.visits import router as visits_router
 from backend.leads import router as leads_router
 from backend.client_activity import router as client_activity_router
 from backend.automation_engine import router as automation_router, expiry_router as service_expiry_router
-from backend.recruitment import (
-    router as recruitment_router,
-    list_candidates as recruitment_list_candidates,
-)
+from backend.recruitment import router as recruitment_router
 from backend.telegram import router as telegram_router
 from backend.notifications import router as notification_router, create_notification, notify_admins_leave
 
@@ -11490,7 +11487,7 @@ def _normalize_client_dates(client: dict) -> dict:
 async def get_clients(
     current_user: User = Depends(check_module_permission("clients", "view")),
     page: int = Query(1, ge=1),
-    page_size: int = Query(100, ge=1, le=500),
+    page_size: int = Query(100, ge=1, le=1000),
 ):
     """
     Return clients with pagination so the first page renders fast.
@@ -14735,32 +14732,17 @@ async def remove_clients_from_group(
     return updated
 
 
-# ── Recruitment route safety mount ────────────────────────────────────────────
-# Recruitment is already part of api_router, but we also register the two
-# exact collection paths directly BEFORE api_router is mounted.
-#
-# This guarantees that the frontend requests:
-#   GET /api/recruitment
-#   GET /api/recruitment/
-# are handled even if nested router registration is not propagated correctly
-# in the running FastAPI/Starlette route tree.
-#
-# The actual endpoint function is reused, so authentication, permissions,
-# query parameters and response behaviour remain exactly the same.
-app.add_api_route(
-    "/api/recruitment",
-    recruitment_list_candidates,
-    methods=["GET"],
-    include_in_schema=False,
-)
-app.add_api_route(
-    "/api/recruitment/",
-    recruitment_list_candidates,
-    methods=["GET"],
-    include_in_schema=False,
-)
-
 app.include_router(api_router)
+
+# ── Recruitment direct API mount ─────────────────────────────────────────────
+# Explicitly expose Recruitment at /api/recruitment.
+# Keeps the endpoint available even if nested api_router registration
+# is not propagated by the running FastAPI/Starlette route tree.
+app.include_router(
+    recruitment_router,
+    prefix="/api",
+    include_in_schema=False,
+)
 
 # ── Phase 12 Commercial SaaS API v2 Router ────────────────────────────────────
 from backend.api_v2.router_v2 import router as api_v2_router
