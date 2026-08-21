@@ -245,6 +245,7 @@ export default function Reports() {
   const [attStatus, setAttStatus] = useState('all');
   const [attFlag, setAttFlag] = useState('all');
   const [attSearch, setAttSearch] = useState('');
+  const [attSelectedEmployee, setAttSelectedEmployee] = useState(null);
 
   const [tab,        setTab]        = useState('overview');
   const [showCustomize, setShowCustomize] = useState(false);
@@ -452,6 +453,41 @@ export default function Reports() {
     const people = new Set(rows.map(a=>String(a.user_id||''))).size;
     return { total:rows.length, people, present, absent, leave, half, late, early, missing, auto, wfh, minutes, avg:present?Math.round(minutes/present):0 };
   }, [reportAttendanceRows]);
+
+  const attendanceEmployeeCards = useMemo(()=>{
+    const map = new Map();
+    reportAttendanceRows.forEach(a=>{
+      const key = String(a.user_id || a._employeeId || a._employeeName || 'unknown');
+      if(!map.has(key)){
+        map.set(key,{
+          key,
+          name:a._employeeName,
+          employeeId:a._employeeId,
+          company:a._companyName,
+          department:a._department,
+          role:a._role,
+          rows:[],
+          present:0, absent:0, leave:0, half:0, late:0, early:0, missing:0, minutes:0
+        });
+      }
+      const g=map.get(key);
+      g.rows.push(a);
+      if(a._status==='present' && a.punch_in) g.present++;
+      if(a._status==='absent') g.absent++;
+      if(a._status==='leave') g.leave++;
+      if(a._status==='half_day' || a._status==='half-day') g.half++;
+      if(a._late) g.late++;
+      if(a._early) g.early++;
+      if(a._missingOut) g.missing++;
+      g.minutes += Number(a.duration_minutes||0);
+    });
+    return Array.from(map.values()).sort((a,b)=>a.name.localeCompare(b.name));
+  },[reportAttendanceRows]);
+
+  const selectedEmployeeCard = useMemo(()=>{
+    if(!attSelectedEmployee) return null;
+    return attendanceEmployeeCards.find(x=>x.key===attSelectedEmployee) || null;
+  },[attSelectedEmployee, attendanceEmployeeCards]);
 
   const exactDateTime = (value) => {
     if (!value) return '—';
@@ -1202,48 +1238,149 @@ export default function Reports() {
             <Sec title="Detailed Attendance Report"
               desc={`${reportFilterLabel} • exact login/logout timestamps • ${reportAttendanceRows.length} filtered records`}
               dark={dark}>
-              {reportAttendanceRows.length>0?(
-                <div className="overflow-x-auto rounded-xl" style={{border:`1px solid ${t.border}`}}>
-                  <table className="w-full text-sm min-w-[1450px]">
-                    <thead>
-                      <tr style={{background:t.card2}}>
-                        {['Date','Employee','Emp. ID','Company','Department','Role','Status','Exact Login','Exact Logout','Duration','Late','Early Out','Missing Out','Auto','Mode','Location','Remarks'].map(h=>(
-                          <th key={h} className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider whitespace-nowrap" style={{color:t.textMute}}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {reportAttendanceRows.map((a,i)=>{
-                        const sc=a._status==='present'?{bg:dark?'rgba(31,175,90,0.15)':'#f0fdf4',col:C.emeraldGreen}:a._status==='absent'?{bg:dark?'rgba(239,68,68,0.12)':'#fef2f2',col:'#dc2626'}:{bg:dark?'rgba(245,158,11,0.12)':'#fffbeb',col:C.amber};
-                        return (
-                          <tr key={`${a._idx}-${i}`} style={{borderTop:`1px solid ${t.border2}`}}
-                            onMouseEnter={e=>e.currentTarget.style.background=t.hover}
-                            onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                            <td className="px-3 py-2.5 text-xs font-medium whitespace-nowrap" style={{color:t.text}}>{a.date||'—'}</td>
-                            <td className="px-3 py-2.5 text-xs font-semibold whitespace-nowrap" style={{color:t.text}}>{a._employeeName}</td>
-                            <td className="px-3 py-2.5 text-[10px] whitespace-nowrap" style={{color:t.textSub}}>{a._employeeId}</td>
-                            <td className="px-3 py-2.5 text-xs whitespace-nowrap" style={{color:t.textSub}}>{a._companyName}</td>
-                            <td className="px-3 py-2.5 text-xs whitespace-nowrap" style={{color:t.textSub}}>{a._department}</td>
-                            <td className="px-3 py-2.5 text-xs whitespace-nowrap" style={{color:t.textSub}}>{a._role}</td>
-                            <td className="px-3 py-2.5"><span className="text-[10px] font-bold px-2 py-0.5 rounded-md capitalize whitespace-nowrap" style={{background:sc.bg,color:sc.col}}>{a._status}</span></td>
-                            <td className="px-3 py-2.5 text-[10px] font-semibold whitespace-nowrap" style={{color:t.textSub}}>{exactDateTime(a.punch_in)}</td>
-                            <td className="px-3 py-2.5 text-[10px] font-semibold whitespace-nowrap" style={{color:t.textSub}}>{exactDateTime(a.punch_out)}</td>
-                            <td className="px-3 py-2.5 text-xs font-bold whitespace-nowrap" style={{color:C.deepBlue}}>{fmt(a.duration_minutes||0)}</td>
-                            <td className="px-3 py-2.5 text-[10px] font-bold" style={{color:a._late?'#dc2626':t.textMute}}>{a._late?'YES':'—'}</td>
-                            <td className="px-3 py-2.5 text-[10px] font-bold" style={{color:a._early?'#ea580c':t.textMute}}>{a._early?'YES':'—'}</td>
-                            <td className="px-3 py-2.5 text-[10px] font-bold" style={{color:a._missingOut?'#dc2626':t.textMute}}>{a._missingOut?'YES':'—'}</td>
-                            <td className="px-3 py-2.5 text-[10px] font-bold" style={{color:a._auto?C.mediumBlue:t.textMute}}>{a._auto?'YES':'—'}</td>
-                            <td className="px-3 py-2.5 text-[10px] whitespace-nowrap" style={{color:t.textSub}}>{a.work_mode||a.attendance_type||(a._wfh?'WFH':'Office')}</td>
-                            <td className="px-3 py-2.5 text-[10px] whitespace-nowrap" style={{color:t.textSub}}>{a.latitude??'—'}, {a.longitude??'—'}</td>
-                            <td className="px-3 py-2.5 text-[10px] max-w-[220px]" style={{color:t.textMute}}>{a.leave_reason||a.notes||'—'}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ):<Empty icon={Clock} text="No attendance records match the selected filters" dark={dark}/>} 
+              {attendanceEmployeeCards.length>0?(
+                <>
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <div>
+                      <p className="text-xs font-bold" style={{color:t.text}}>Employee-wise Attendance</p>
+                      <p className="text-[10px]" style={{color:t.textMute}}>Each employee is shown as a compact card. Open a card to see every exact login/logout record.</p>
+                    </div>
+                    <span className="text-[10px] font-bold whitespace-nowrap" style={{color:t.textSub}}>{attendanceEmployeeCards.length} employees</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                    {attendanceEmployeeCards.map((g,i)=>{
+                      const attendanceDays=g.present+g.absent+g.leave+g.half;
+                      const initials=(g.name||'U').split(/\s+/).slice(0,2).map(x=>x.charAt(0)).join('').toUpperCase();
+                      return (
+                        <motion.button type="button" key={g.key} variants={iV}
+                          onClick={()=>setAttSelectedEmployee(g.key)}
+                          className="text-left rounded-2xl p-3.5 transition-all hover:-translate-y-0.5"
+                          style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:t.shadow}}>
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-xs font-black flex-shrink-0"
+                              style={{background:PALETTE[i%PALETTE.length]}}>{initials}</div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-bold truncate" style={{color:t.text}}>{g.name}</p>
+                              <p className="text-[9px] truncate" style={{color:t.textMute}}>
+                                {g.employeeId!=='—'?g.employeeId+' • ':''}{g.department!=='—'?g.department:'No department'}
+                              </p>
+                            </div>
+                            <span className="text-[9px] font-bold px-2 py-1 rounded-lg"
+                              style={{background:dark?'rgba(31,111,178,.15)':'#eff6ff',color:C.mediumBlue}}>View</span>
+                          </div>
+
+                          <div className="mt-3 flex items-center justify-between gap-2">
+                            <div>
+                              <p className="text-[9px] uppercase tracking-wider font-bold" style={{color:t.textMute}}>Hours</p>
+                              <p className="text-base font-black" style={{color:C.deepBlue}}>{fmtC(g.minutes)}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-[9px]" style={{color:t.textMute}}>{attendanceDays} attendance records</p>
+                              <p className="text-[9px] truncate max-w-[150px]" style={{color:t.textSub}}>{g.company}</p>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-4 gap-1.5 mt-3">
+                            {[
+                              ['P',g.present,C.emeraldGreen],['A',g.absent,'#dc2626'],
+                              ['L',g.late,C.amber],['MO',g.missing,'#dc2626']
+                            ].map(([label,val,color])=>(
+                              <div key={label} className="rounded-lg px-1.5 py-1.5 text-center"
+                                style={{background:t.card2,border:`1px solid ${t.border2}`}}>
+                                <p className="text-[8px] font-bold" style={{color:t.textMute}}>{label}</p>
+                                <p className="text-xs font-black" style={{color}}>{val}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </motion.button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-3 text-[10px]" style={{color:t.textMute}}>
+                    Use the employee filter/search above to narrow the cards, then open any employee to see the complete detailed log in a separate panel.
+                  </p>
+                </>
+              ):<Empty icon={Clock} text="No attendance records match the selected filters" dark={dark}/>}
             </Sec>
+
+            <AnimatePresence>
+              {selectedEmployeeCard && (
+                <motion.div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6"
+                  initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
+                  style={{background:'rgba(15,23,42,.58)',backdropFilter:'blur(4px)'}}>
+                  <motion.div
+                    initial={{opacity:0,y:18,scale:.98}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:18,scale:.98}}
+                    className="w-full max-w-6xl max-h-[92vh] rounded-2xl overflow-hidden flex flex-col"
+                    style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:'0 24px 70px rgba(0,0,0,.28)'}}>
+                    <div className="px-5 py-4 flex items-center justify-between gap-4"
+                      style={{borderBottom:`1px solid ${t.border}`,background:t.card2}}>
+                      <div className="min-w-0">
+                        <p className="text-lg font-black truncate" style={{color:t.text}}>{selectedEmployeeCard.name}</p>
+                        <p className="text-[10px] truncate" style={{color:t.textMute}}>
+                          {selectedEmployeeCard.employeeId} • {selectedEmployeeCard.company} • {selectedEmployeeCard.department} • {selectedEmployeeCard.role}
+                        </p>
+                      </div>
+                      <button type="button" onClick={()=>setAttSelectedEmployee(null)}
+                        className="w-9 h-9 rounded-xl flex items-center justify-center text-lg font-bold flex-shrink-0"
+                        style={{background:t.card,border:`1px solid ${t.border}`,color:t.text}}>×</button>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 p-4"
+                      style={{borderBottom:`1px solid ${t.border}`}}>
+                      {[
+                        ['Present',selectedEmployeeCard.present,C.emeraldGreen],['Absent',selectedEmployeeCard.absent,'#dc2626'],
+                        ['Leave',selectedEmployeeCard.leave,C.mediumBlue],['Half Day',selectedEmployeeCard.half,C.amber],
+                        ['Late',selectedEmployeeCard.late,C.amber],['Early Out',selectedEmployeeCard.early,'#ea580c'],
+                        ['Missing Out',selectedEmployeeCard.missing,'#dc2626'],['Hours',fmt(selectedEmployeeCard.minutes),C.deepBlue]
+                      ].map(([label,val,color])=>(
+                        <div key={label} className="rounded-xl px-2.5 py-2" style={{background:t.card2,border:`1px solid ${t.border}`}}>
+                          <p className="text-[8px] font-bold uppercase tracking-wider" style={{color:t.textMute}}>{label}</p>
+                          <p className="text-sm font-black mt-0.5" style={{color}}>{val}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex-1 overflow-auto p-4">
+                      <div className="overflow-x-auto rounded-xl" style={{border:`1px solid ${t.border}`}}>
+                        <table className="w-full text-sm min-w-[1250px]">
+                          <thead><tr style={{background:t.card2}}>
+                            {['Date','Status','Exact Login','Exact Logout','Duration','Late','Early Out','Missing Out','Auto','Mode','Location','Remarks'].map(h=>(
+                              <th key={h} className="px-3 py-2.5 text-left text-[9px] font-bold uppercase tracking-wider whitespace-nowrap" style={{color:t.textMute}}>{h}</th>
+                            ))}
+                          </tr></thead>
+                          <tbody>
+                            {selectedEmployeeCard.rows.map((a,i)=>{
+                              const sc=a._status==='present'
+                                ?{bg:dark?'rgba(31,175,90,.15)':'#f0fdf4',col:C.emeraldGreen}
+                                :a._status==='absent'
+                                ?{bg:dark?'rgba(239,68,68,.12)':'#fef2f2',col:'#dc2626'}
+                                :{bg:dark?'rgba(245,158,11,.12)':'#fffbeb',col:C.amber};
+                              return (
+                                <tr key={`${a._idx}-${i}`} style={{borderTop:`1px solid ${t.border2}`}}>
+                                  <td className="px-3 py-2 text-xs whitespace-nowrap" style={{color:t.text}}>{a.date||'—'}</td>
+                                  <td className="px-3 py-2"><span className="text-[9px] font-bold px-2 py-0.5 rounded-md capitalize whitespace-nowrap" style={{background:sc.bg,color:sc.col}}>{a._status}</span></td>
+                                  <td className="px-3 py-2 text-[10px] font-semibold whitespace-nowrap" style={{color:t.textSub}}>{exactDateTime(a.punch_in)}</td>
+                                  <td className="px-3 py-2 text-[10px] font-semibold whitespace-nowrap" style={{color:t.textSub}}>{exactDateTime(a.punch_out)}</td>
+                                  <td className="px-3 py-2 text-xs font-bold whitespace-nowrap" style={{color:C.deepBlue}}>{fmt(a.duration_minutes||0)}</td>
+                                  <td className="px-3 py-2 text-[9px] font-bold" style={{color:a._late?'#dc2626':t.textMute}}>{a._late?'YES':'—'}</td>
+                                  <td className="px-3 py-2 text-[9px] font-bold" style={{color:a._early?'#ea580c':t.textMute}}>{a._early?'YES':'—'}</td>
+                                  <td className="px-3 py-2 text-[9px] font-bold" style={{color:a._missingOut?'#dc2626':t.textMute}}>{a._missingOut?'YES':'—'}</td>
+                                  <td className="px-3 py-2 text-[9px] font-bold" style={{color:a._auto?C.mediumBlue:t.textMute}}>{a._auto?'YES':'—'}</td>
+                                  <td className="px-3 py-2 text-[9px] whitespace-nowrap" style={{color:t.textSub}}>{a.work_mode||a.attendance_type||(a._wfh?'WFH':'Office')}</td>
+                                  <td className="px-3 py-2 text-[9px] whitespace-nowrap" style={{color:t.textSub}}>{a.latitude??'—'}, {a.longitude??'—'}</td>
+                                  <td className="px-3 py-2 text-[9px] max-w-[220px]" style={{color:t.textMute}}>{a.leave_reason||a.notes||'—'}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             <div className="rounded-xl px-4 py-3 text-[10px]" style={{background:t.card2,border:`1px solid ${t.border}`,color:t.textMute}}>
               <strong style={{color:t.text}}>Report includes:</strong> exact punch-in/out timestamps, duration, status, late/early flags, missing punch-out, auto-marked attendance, work mode, location coordinates, employee/company/department/role and remarks. PDF and CSV use the same filtered dataset shown above.
