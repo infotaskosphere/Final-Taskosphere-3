@@ -1,4 +1,4 @@
-import React, { Suspense, memo } from "react";
+import React, { Suspense, memo, useEffect } from "react";
 import { BrowserRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/contexts/AuthContext";
@@ -14,7 +14,6 @@ import MinimizedFormsDock from "@/components/layout/MinimizedFormsDock.jsx";
 import { DocumentUploadProvider } from "@/contexts/DocumentUploadContext.jsx";
 
 /* ── Bottom loading bar ─────────────────────────────────────────────── */
-// memo: re-renders only when loading state changes, not on every route change
 const BottomLoadingBar = memo(function BottomLoadingBar() {
   const loading = useLoading();
   if (!loading) return null;
@@ -35,19 +34,86 @@ const BottomLoadingBar = memo(function BottomLoadingBar() {
   );
 });
 
+/*
+ * Route chunk prefetching:
+ * Navigation links/buttons in DashboardLayout remain unchanged. This
+ * listener warms the most-used page chunks when the pointer/focus reaches
+ * a normal <a href="/..."> navigation item. The import is cached by the
+ * browser, so the later React.lazy() import resolves immediately.
+ */
+const ROUTE_PREFETCHERS = {
+  "/dashboard": () => import("./pages/Dashboard.jsx"),
+  "/tasks": () => import("./pages/Tasks.jsx"),
+  "/todos": () => import("./pages/TodoDashboard.jsx"),
+  "/attendance": () => import("./pages/Attendance.jsx"),
+  "/reminders": () => import("./pages/Reminders.jsx"),
+  "/action-center": () => import("./pages/ActionCenter.jsx"),
+  "/compliance-dashboard": () => import("./pages/ComplianceDashboard.jsx"),
+  "/compliance": () => import("./pages/CompliancePage.jsx"),
+  "/gst-reconciliation": () => import("./pages/GSTReconciliation.jsx"),
+  "/trademark-sphere": () => import("./pages/TrademarkSphere.jsx"),
+  "/roc-sphere": () => import("./pages/ROCSpherePage.jsx"),
+  "/records-dashboard": () => import("./pages/RecordsDashboard.jsx"),
+  "/clients": () => import("./pages/Clients.jsx"),
+  "/client-proposals-dashboard": () => import("./pages/ClientProposalsDashboard.jsx"),
+  "/leads": () => import("./pages/Leads.jsx"),
+  "/quotations": () => import("./pages/Quotations.jsx"),
+  "/finix-dashboard": () => import("./pages/FinixDashboard.jsx"),
+  "/invoicing": () => import("./pages/Invoicing.jsx"),
+  "/purchase": () => import("./pages/Purchase.jsx"),
+  "/bank-accounts": () => import("./pages/BankAccounts.jsx"),
+  "/accounting-reports": () => import("./pages/AccountingReports.jsx"),
+  "/people-matrix": () => import("./pages/PeopleMatrixDashboard.jsx"),
+  "/reports": () => import("./pages/Reports.jsx"),
+  "/users": () => import("./pages/Users.jsx"),
+};
+
+const prefetchedRoutes = new Set();
+
+function prefetchRoute(path) {
+  if (prefetchedRoutes.has(path)) return;
+  const loader = ROUTE_PREFETCHERS[path];
+  if (!loader) return;
+  prefetchedRoutes.add(path);
+  loader().catch(() => {
+    prefetchedRoutes.delete(path);
+  });
+}
+
+function RoutePrefetcher() {
+  useEffect(() => {
+    const warm = (event) => {
+      const target = event.target?.closest?.("a[href]");
+      if (!target) return;
+
+      const href = target.getAttribute("href");
+      if (!href || !href.startsWith("/")) return;
+
+      const pathname = href.split("?")[0].split("#")[0];
+      prefetchRoute(pathname);
+    };
+
+    document.addEventListener("pointerover", warm, { passive: true });
+    document.addEventListener("focusin", warm);
+
+    return () => {
+      document.removeEventListener("pointerover", warm);
+      document.removeEventListener("focusin", warm);
+    };
+  }, []);
+
+  return null;
+}
+
 /* ── Query client ──────────────────────────────────────────────────── */
-// Created outside the component so it survives re-renders.
-// gcTime 10min: keeps inactive query data in memory longer → instant
-//   re-renders when the user returns to a page within that window.
-// staleTime 5min: no re-fetch if data was fetched in the last 5 min.
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 5 * 60 * 1000,   // 5 minutes — no refetch on focus
-      gcTime:    10 * 60 * 1000,  // 10 minutes — keep in memory
+      staleTime: 5 * 60 * 1000,
+      gcTime: 10 * 60 * 1000,
       retry: 1,
       refetchOnWindowFocus: false,
-      refetchOnReconnect: false,   // avoid spurious refetch on tab switch
+      refetchOnReconnect: false,
     },
   },
 });
@@ -61,25 +127,17 @@ export default function App() {
           <MinimizedFormsProvider>
             <BulkWASenderProvider>
               <DocumentUploadProvider>
-              {/* Bottom loading bar — always visible, no layout shift */}
-              <BottomLoadingBar />
+                <BottomLoadingBar />
+                <RoutePrefetcher />
+                <ReminderPopupManager />
+                <BulkWASenderWidget />
+                <MinimizedFormsDock />
 
-              {/* Global reminder popup — polls every page, shows on top of any route */}
-              <ReminderPopupManager />
+                <Suspense fallback={<GifLoader />}>
+                  <AppRoutes />
+                </Suspense>
 
-              {/* Persistent bulk-WhatsApp sender widget — survives page navigation */}
-              <BulkWASenderWidget />
-
-              {/* Dock of minimized forms (Create Task, Add Client, Add User, ...) —
-                  rendered outside the route switcher so it survives navigation and
-                  lets you resume any in-progress form from any page. */}
-              <MinimizedFormsDock />
-
-              <Suspense fallback={<GifLoader />}>
-                <AppRoutes />
-              </Suspense>
-
-              <Toaster position="top-right" richColors />
+                <Toaster position="top-right" richColors />
               </DocumentUploadProvider>
             </BulkWASenderProvider>
           </MinimizedFormsProvider>
