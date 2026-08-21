@@ -444,7 +444,9 @@ async def _tg_find_user(name=None, user_id=None):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 TG_MEMORY_COLLECTION = "telegram_ai_memory"
+TG_VOCAB_COLLECTION = "telegram_ai_vocabulary"
 TG_MEMORY_MAX_EXAMPLES = 8
+TG_VOCAB_MAX_EXAMPLES = 12
 TG_MEMORY_RETENTION_DAYS = 365
 _TG_LEARNING_INDEXES_READY = False
 
@@ -547,8 +549,114 @@ async def _tg_ensure_learning_indexes():
         await db[TG_MEMORY_COLLECTION].create_index([("user_id", 1), ("created_at", -1)])
         await db[TG_MEMORY_COLLECTION].create_index([("chat_id", 1), ("created_at", -1)])
         await db[TG_MEMORY_COLLECTION].create_index([("message", 1), ("action", 1)])
+        await db[TG_VOCAB_COLLECTION].create_index([("terms", 1), ("action", 1)])
+        await db[TG_VOCAB_COLLECTION].create_index([("user_id", 1), ("updated_at", -1)])
     except Exception as exc:
         print(f"[Telegram Learning] index creation skipped: {exc}")
+
+
+def _tg_learning_tokens(text: str):
+    """Return useful words while excluding common business-data tokens."""
+    words = re.findall(r"[A-Za-z0-9][A-Za-z0-9_-]{1,40}", str(text or "").lower())
+    stop = {
+        "the", "a", "an", "to", "for", "of", "from", "on", "in", "at", "is", "are",
+        "please", "can", "you", "me", "my", "your", "this", "that", "and", "or", "with",
+        "send", "share", "show", "give", "get", "need", "want", "make", "create", "prepare",
+    }
+    return [w for w in dict.fromkeys(words) if w not in stop and len(w) >= 2][:25]
+
+
+async def _tg_get_learning_vocabulary(text: str, user_id=None, limit=TG_VOCAB_MAX_EXAMPLES):
+    try:
+        tokens = _tg_learning_tokens(text)
+        query = {"active": True}
+        if tokens:
+            query["terms"] = {"$in": tokens}
+        if user_id:
+            query = {"$and": [query, {"$or": [{"user_id": str(user_id)}, {"user_id": None}]}]}
+        return await db[TG_VOCAB_COLLECTION].find(
+            query,
+            {"_id": 0, "term": 1, "action": 1, "uses": 1, "confidence": 1},
+        ).sort([("uses", -1), ("updated_at", -1)]).limit(int(limit)).to_list(int(limit))
+    except Exception as exc:
+        print(f"[Telegram Learning] vocabulary read skipped: {exc}")
+        return []
+
+
+async def _tg_store_learning_vocabulary(*, user_id=None, chat_id=None, message=None, intent=None):
+    """Learn new intent words, never customer/financial data."""
+    try:
+        intent = intent or {}
+        action = str(intent.get("action") or "none").strip().lower()
+        confidence = float(intent.get("confidence") or 0)
+        if not message or action in {"none", "help"} or confidence < 0.70:
+            return
+        raw_terms = intent.get("learned_terms") or []
+        if isinstance(raw_terms, str):
+            raw_terms = [raw_terms]
+        for raw in raw_terms[:5]:
+            term = re.sub(r"[^a-z0-9 _-]", "", str(raw or "").lower()).strip()[:80]
+            if not term:
+                continue
+            now = datetime.now(timezone.utc)
+            existing = await db[TG_VOCAB_COLLECTION].find_one(
+                {"term": term, "action": action, "$or": [{"user_id": str(user_id) if user_id else None}, {"user_id": None}]},
+                {"_id": 1},
+            )
+            if existing:
+                await db[TG_VOCAB_COLLECTION].update_one(
+                    {"_id": existing["_id"]},
+                    {"$set": {"confidence": confidence, "updated_at": now, "active": True}, "$inc": {"uses": 1}},
+                )
+            else:
+                await db[TG_VOCAB_COLLECTION].insert_one({
+                    "id": str(uuid.uuid4()), "user_id": str(user_id) if user_id else None,
+                    "chat_id": str(chat_id) if chat_id else None, "term": term,
+                    "terms": term.split(), "action": action, "confidence": confidence,
+                    "uses": 1, "active": True, "created_at": now, "updated_at": now,
+                })
+    except Exception as exc:
+        print(f"[Telegram Learning] vocabulary write skipped: {exc}")
+
+
+def _tg_fallback_intent(text: str):
+    """Deterministic fallback for common requests when the AI parser is unavailable."""
+    raw = str(text or "").strip()
+    low = raw.lower().replace("’", "'")
+    if not raw:
+        return None
+
+    create_invoice_words = r"\b(prepare|create|make|raise|generate)\b.*\b(invoice|bill)\b|\b(create|make|prepare|raise)\s+(?:a\s+)?bill\b"
+    if re.search(create_invoice_words, low):
+        client = None
+        m = re.search(r"\b(?:for|of)\s+(.+?)(?=\s+(?:for|total|amount|services?|service|from)\b|$)", raw, re.I)
+        if m:
+            client = m.group(1).strip(" .,'\"")
+        return {"action": "create_invoice", "confidence": 0.82, "output_format": "text",
+                "invoice": {"invoice_no": None, "client_name": client}}
+
+    retrieval = re.search(r"\b(share|send|give|show|get|find|download|need)\b", low) or re.search(r"\b(invoice|bill)\b", low)
+    invoice_words = re.search(r"\b(invoice|bill|tax\s+invoice|invoice\s+pdf)\b", low)
+    if retrieval and invoice_words and not re.search(r"\b(prepare|create|make|raise|generate)\b", low):
+        client = None
+        patterns = [
+            r"\b(?:invoice|bill)(?:\s+pdf)?\s+(?:of|for|from)\s+(.+)$",
+            r"\b(?:invoice|bill)(?:\s+pdf)?\s+(?:for|of)\s+(.+)$",
+            r"\b(?:share|send|give|show|get|find|download)\s+(?:me\s+)?(.+?)\s+(?:invoice|bill)(?:\s+pdf)?\s*$",
+            r"\b(?:i\s+need|need)\s+(.+?)['’]s\s+(?:invoice|bill)(?:\s+pdf)?\s*$",
+        ]
+        for pattern in patterns:
+            m = re.search(pattern, raw, re.I)
+            if m:
+                client = m.group(1).strip(" .,'\"")
+                break
+        if client:
+            client = re.sub(r"^(?:the|my)\s+", "", client, flags=re.I).strip()
+        return {"action": "get_invoice", "confidence": 0.90 if client else 0.76,
+                "output_format": "pdf" if re.search(r"\b(share|send|give|show|get|find|download|need|pdf)\b", low) else "text",
+                "invoice": {"invoice_no": None, "client_name": client}}
+
+    return None
 
 
 def _tg_normalize_conversational_text(text: str) -> str:
@@ -578,6 +686,13 @@ async def _tg_ai_command(text: str, user_id=None, chat_id=None):
     learning_examples = await _tg_get_learning_examples(
         user_id=user_id, chat_id=chat_id, limit=TG_MEMORY_MAX_EXAMPLES
     )
+    learning_vocabulary = await _tg_get_learning_vocabulary(
+        parser_text, user_id=user_id, limit=TG_VOCAB_MAX_EXAMPLES
+    )
+    vocabulary_text = "\n".join(
+        f"- Learned word/phrase: {v.get('term')} -> {v.get('action')}"
+        for v in learning_vocabulary
+    ) or "(No matching learned vocabulary yet.)"
     examples_text = "\n".join(
         f"- User previously said: {ex.get('message')}\n  Learned intent: {json.dumps(ex.get('intent') or {}, ensure_ascii=False)}"
         for ex in learning_examples
@@ -628,6 +743,9 @@ IMPORTANT LANGUAGE RULES:
 
 LEARNED LANGUAGE EXAMPLES:
 {examples_text}
+
+LEARNED VOCABULARY:
+{vocabulary_text}
 {feedback_hint}
 
 Use learned examples only to understand wording and intent. Do NOT copy business data from an example into the current request.
@@ -655,6 +773,8 @@ For task assignment, assignee_name is the person the task is assigned to; if abs
 For a PDF request, set output_format to "pdf".
 For "latest" or "most recent", use the existing date/order behaviour rather than inventing an invoice number.
 
+Also return "learned_terms": [] with up to 5 NEW intent words/short phrases from the current message that helped identify the action. Never include customer names, person names, amounts, dates, invoice numbers, phone numbers, emails, GSTIN/PAN/CIN, or addresses.
+
 NATURAL-LANGUAGE EXAMPLES:
 - "share invoice pdf of abori house" -> get_invoice, output_format="pdf", invoice.client_name="Abori House"
 - "send Abori House bill" -> get_invoice, output_format="pdf", invoice.client_name="Abori House"
@@ -680,6 +800,7 @@ Return this shape:
   "client": {{"company_name": null,"client_type": null,"email": null,"phone": null,"gstin": null,"pan": null,"cin": null,"llpin": null,"address": null,"city": null,"state": null,"services": [],"notes": null}},
   "invoice": {{"invoice_no": null,"client_name": null}},
   "quotation": {{"quotation_no": null,"client_name": null}},
+  "learned_terms": [],
   "limit": 30
 }}
 
@@ -762,8 +883,21 @@ async def _tg_natural_language_handler(chat_id: int, text: str, message: dict) -
         chat_id=chat_id,
     )
     if not intent:
+        # Never fall through to the generic Welcome message just because the AI
+        # provider is unavailable or returns malformed JSON. Handle the most
+        # common natural-language invoice requests locally.
+        intent = _tg_fallback_intent(text)
+    else:
+        # If the AI returned a valid JSON object but could not classify the
+        # message, give the deterministic fallback a chance before Welcome.
+        ai_action = str(intent.get("action") or "none").lower().strip()
+        if ai_action == "none":
+            fallback_intent = _tg_fallback_intent(text)
+            if fallback_intent:
+                intent = fallback_intent
+    if not intent:
         return False
-    # Store the language pattern only after the AI parser produced a confident intent.
+    # Store the language pattern only after the parser produced a confident intent.
     is_feedback = bool(re.search(r"(?i)\b(no|wrong|incorrect|i meant|not that|that's not|instead)\b", text))
     await _tg_store_learning_example(
         user_id=user.get("id") if user else None,
@@ -771,6 +905,12 @@ async def _tg_natural_language_handler(chat_id: int, text: str, message: dict) -
         message=text,
         intent=intent,
         outcome="correction" if is_feedback else "parsed",
+    )
+    await _tg_store_learning_vocabulary(
+        user_id=user.get("id") if user else None,
+        chat_id=chat_id,
+        message=text,
+        intent=intent,
     )
     action = str(intent.get("action") or "none").lower().strip()
     if action in {"none", "help"}:
