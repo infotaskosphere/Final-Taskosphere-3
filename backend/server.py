@@ -14743,6 +14743,7 @@ app.include_router(
     prefix="/api",
     include_in_schema=False,
 )
+
 # ─────────────────────────────────────────────────────────────────────────────
 # RECRUITMENT EXPLICIT ROUTE
 # Guarantees the frontend endpoint exists at both:
@@ -14764,7 +14765,6 @@ app.add_api_route(
     methods=["GET"],
     include_in_schema=False,
 )
-
 
 # ── Phase 12 Commercial SaaS API v2 Router ────────────────────────────────────
 from backend.api_v2.router_v2 import router as api_v2_router
