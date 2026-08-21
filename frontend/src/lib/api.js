@@ -228,12 +228,18 @@ api.interceptors.request.use(
     // Normalize them before the request reaches the server so the browser
     // does not log an avoidable 404 for the no-slash URL first.
     const [requestPath, requestQuery = ""] = (config.url || "").split("?");
-    const trailingSlashCollections = new Set([
+    const slashCompatibleCollections = new Set([
       "/notifications",
       "/visits",
       "/leads",
       "/quotations",
+      "/quotations/list",
       "/companies",
+      "/companies/list",
+      "/compliance",
+      "/passwords",
+      "/client-discussion",
+      "/recruitment",
     ]);
     if (
       config.method?.toLowerCase() === "get" &&
