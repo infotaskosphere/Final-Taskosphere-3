@@ -488,8 +488,7 @@ export default function Reports() {
       a._late?'Yes':'No',a._early?'Yes':'No',a._missingOut?'Yes':'No',a._auto?'Yes':'No',
       a.work_mode||a.attendance_type||(a._wfh?'WFH':'Office'),a.latitude??'',a.longitude??'',a.leave_reason||'',a.notes||''
     ].map(esc).join(','));
-    const csv=[headers.map(esc).join(','),...rows].join('
-');
+    const csv=[headers.map(esc).join(','),...rows].join('\\n');
     const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
     const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
     a.download=`attendance_report_${reportDateRange.from}_${reportDateRange.to}.csv`; a.click();
