@@ -232,6 +232,8 @@ api.interceptors.request.use(
       "/notifications",
       "/visits",
       "/leads",
+      "/quotations",
+      "/companies",
     ]);
     if (
       config.method?.toLowerCase() === "get" &&
