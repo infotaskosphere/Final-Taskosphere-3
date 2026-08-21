@@ -1441,8 +1441,8 @@ export default function Reports() {
                     initial={{opacity:0,y:18,scale:.98}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:18,scale:.98}}
                     className="w-full max-w-7xl max-h-[92vh] rounded-2xl overflow-hidden flex flex-col"
                     style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:'0 24px 70px rgba(0,0,0,.30)'}}>
-                    <div className="px-5 py-4 flex items-center justify-between gap-4"
-                      style={{borderBottom:'1px solid rgba(255,255,255,.18)',background:`linear-gradient(135deg, ${C.deepBlue} 0%, ${C.mediumBlue} 100%)`}}>
+                    <div className="px-5 py-4 flex items-center justify-between gap-4 shrink-0 sticky top-0 z-30"
+                      style={{borderBottom:'1px solid rgba(255,255,255,.18)',background:`linear-gradient(135deg, ${C.deepBlue} 0%, ${C.mediumBlue} 100%)`,boxShadow:'0 4px 14px rgba(13,59,102,.22)'}}>
                       <div className="min-w-0">
                         <p className="text-lg font-black text-white">{summaryPopupMeta.label}</p>
                         <p className="text-[10px] text-blue-100 truncate">
@@ -1460,7 +1460,7 @@ export default function Reports() {
                             )}
                             className="h-9 px-3 rounded-xl flex items-center gap-1.5 text-[10px] font-bold text-white"
                             style={{background:'rgba(255,255,255,.16)',border:'1px solid rgba(255,255,255,.30)'}}>
-                            ↓ PDF
+                            <span className="text-[11px]">↓</span> Download PDF
                           </button>
                         )}
                         <button type="button" onClick={()=>setAttSummaryFilter(null)}
@@ -1551,8 +1551,8 @@ export default function Reports() {
                     initial={{opacity:0,y:18,scale:.98}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:18,scale:.98}}
                     className="w-full max-w-6xl max-h-[92vh] rounded-2xl overflow-hidden flex flex-col"
                     style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:'0 24px 70px rgba(0,0,0,.28)'}}>
-                    <div className="px-5 py-4 flex items-center justify-between gap-4"
-                      style={{borderBottom:'1px solid rgba(255,255,255,.18)',background:`linear-gradient(135deg, ${C.deepBlue} 0%, ${C.mediumBlue} 100%)`}}>
+                    <div className="px-5 py-4 flex items-center justify-between gap-4 shrink-0 sticky top-0 z-30"
+                      style={{borderBottom:'1px solid rgba(255,255,255,.18)',background:`linear-gradient(135deg, ${C.deepBlue} 0%, ${C.mediumBlue} 100%)`,boxShadow:'0 4px 14px rgba(13,59,102,.22)'}}>
                       <div className="min-w-0">
                         <p className="text-lg font-black truncate text-white">{selectedEmployeeCard.name}</p>
                         <p className="text-[10px] truncate text-blue-100">
@@ -1570,7 +1570,7 @@ export default function Reports() {
                             )}
                             className="h-9 px-3 rounded-xl flex items-center gap-1.5 text-[10px] font-bold text-white"
                             style={{background:'rgba(255,255,255,.16)',border:'1px solid rgba(255,255,255,.30)'}}>
-                            ↓ PDF
+                            <span className="text-[11px]">↓</span> Download PDF
                           </button>
                         )}
                         <button type="button" onClick={()=>setAttSelectedEmployee(null)}
