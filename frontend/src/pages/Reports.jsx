@@ -233,6 +233,19 @@ export default function Reports() {
   const [refreshing, setRefreshing] = useState(false);
   const [selUser,    setSelUser]    = useState('all');
   const [selCompany, setSelCompany] = useState('all');
+
+  // ── Attendance report filters — kept inside the existing Attendance tab ──
+  const [attPreset, setAttPreset] = useState('month');
+  const [attFrom, setAttFrom] = useState('');
+  const [attTo, setAttTo] = useState('');
+  const [attCompany, setAttCompany] = useState('all');
+  const [attDepartment, setAttDepartment] = useState('all');
+  const [attUser, setAttUser] = useState('all');
+  const [attRole, setAttRole] = useState('all');
+  const [attStatus, setAttStatus] = useState('all');
+  const [attFlag, setAttFlag] = useState('all');
+  const [attSearch, setAttSearch] = useState('');
+
   const [tab,        setTab]        = useState('overview');
   const [showCustomize, setShowCustomize] = useState(false);
   const RPT_SECTIONS = ['kpi_row','tab_panels'];
@@ -288,6 +301,251 @@ export default function Reports() {
 
   useEffect(()=>{ if(user) { fetchAll(); fetchCompanies(); } },[user]);
   useEffect(()=>{ fetchPerf(); },[rankPeriod]);
+
+  // ── Attendance report helpers ─────────────────────────────────────────────
+  const isoLocalDate = (d) => {
+    const x = new Date(d);
+    if (Number.isNaN(x.getTime())) return '';
+    return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
+  };
+
+  const reportDateRange = useMemo(() => {
+    const now = new Date();
+    const today = isoLocalDate(now);
+    if (attPreset === 'today') return { from: today, to: today };
+    if (attPreset === 'week') {
+      const d = new Date(now);
+      const day = d.getDay();
+      const diff = day === 0 ? -6 : 1 - day;
+      d.setDate(d.getDate() + diff);
+      const from = isoLocalDate(d);
+      d.setDate(d.getDate() + 6);
+      return { from, to: isoLocalDate(d) };
+    }
+    if (attPreset === 'month') {
+      const from = new Date(now.getFullYear(), now.getMonth(), 1);
+      const to = new Date(now.getFullYear(), now.getMonth()+1, 0);
+      return { from: isoLocalDate(from), to: isoLocalDate(to) };
+    }
+    if (attPreset === 'last_month') {
+      const from = new Date(now.getFullYear(), now.getMonth()-1, 1);
+      const to = new Date(now.getFullYear(), now.getMonth(), 0);
+      return { from: isoLocalDate(from), to: isoLocalDate(to) };
+    }
+    if (attPreset === 'year') {
+      return { from: `${now.getFullYear()}-01-01`, to: `${now.getFullYear()}-12-31` };
+    }
+    if (attPreset === 'last_year') {
+      const y = now.getFullYear()-1;
+      return { from: `${y}-01-01`, to: `${y}-12-31` };
+    }
+    return { from: attFrom || today, to: attTo || today };
+  }, [attPreset, attFrom, attTo]);
+
+  useEffect(()=>{
+    if (attPreset === 'custom') return;
+    setAttFrom(reportDateRange.from);
+    setAttTo(reportDateRange.to);
+  }, [attPreset, reportDateRange.from, reportDateRange.to]);
+
+  const userMap = useMemo(()=>{
+    const m = new Map();
+    allUsers.forEach(u=>{
+      const id = u?.id || u?._id;
+      if (id) m.set(String(id), u);
+    });
+    return m;
+  }, [allUsers]);
+
+  const attendanceUsers = useMemo(()=>{
+    const m = new Map();
+    allUsers.forEach(u=>{
+      const id = u?.id || u?._id;
+      if (id) m.set(String(id), u);
+    });
+    attendance.forEach(a=>{
+      const id = a?.user_id;
+      if (id && !m.has(String(id))) m.set(String(id), {
+        id, full_name:a.user_name || a.full_name || 'Unknown',
+        company_id:a.company_id, department:a.department, role:a.role,
+      });
+    });
+    return Array.from(m.values()).filter(u=>u?.id);
+  }, [allUsers, attendance]);
+
+  const attendanceDepartments = useMemo(()=>Array.from(new Set(
+    attendanceUsers.map(u=>u.department).filter(Boolean).map(String)
+  )).sort((a,b)=>a.localeCompare(b)), [attendanceUsers]);
+
+  const attendanceRoles = useMemo(()=>Array.from(new Set(
+    attendanceUsers.map(u=>u.role).filter(Boolean).map(String)
+  )).sort((a,b)=>a.localeCompare(b)), [attendanceUsers]);
+
+  const attendanceCompanies = useMemo(()=>{
+    const m = new Map();
+    companies.forEach(c=>{ if(c?.id) m.set(String(c.id), c); });
+    attendanceUsers.forEach(u=>{
+      if(u?.company_id && !m.has(String(u.company_id))) m.set(String(u.company_id), {id:u.company_id,name:u.company_name || 'Company'});
+    });
+    return Array.from(m.values());
+  }, [companies, attendanceUsers]);
+
+  const reportAttendanceRows = useMemo(()=>{
+    const from = reportDateRange.from || '';
+    const to = reportDateRange.to || '';
+    const search = attSearch.trim().toLowerCase();
+    return attendance
+      .map((a, idx)=>{
+        const u = userMap.get(String(a?.user_id || ''));
+        const companyId = a?.company_id || u?.company_id || '';
+        const companyName = a?.company_name || u?.company_name || attendanceCompanies.find(c=>String(c.id)===String(companyId))?.name || '—';
+        const department = a?.department || u?.department || '—';
+        const role = a?.role || u?.role || '—';
+        const employeeName = a?.user_name || u?.full_name || u?.name || 'Unknown';
+        const employeeId = a?.employee_id || u?.employee_id || u?.employee_code || '—';
+        const status = String(a?.status || 'unknown').toLowerCase();
+        const late = !!a?.is_late;
+        const early = !!a?.punched_out_early;
+        const auto = !!a?.auto_marked;
+        const missingOut = !!a?.punch_in && !a?.punch_out;
+        const wfh = String(a?.work_mode || a?.attendance_type || '').toLowerCase().includes('wfh') || a?.is_wfh === true;
+        return { ...a, _idx:idx, _user:u, _companyId:String(companyId||''), _companyName:companyName, _department:department, _role:role, _employeeName:employeeName, _employeeId:employeeId, _status:status, _late:late, _early:early, _auto:auto, _missingOut:missingOut, _wfh:wfh };
+      })
+      .filter(a=>{
+        if (from && String(a.date||'') < from) return false;
+        if (to && String(a.date||'') > to) return false;
+        if (attCompany !== 'all' && a._companyId !== String(attCompany)) return false;
+        if (attDepartment !== 'all' && String(a._department) !== String(attDepartment)) return false;
+        if (attUser !== 'all' && String(a.user_id) !== String(attUser)) return false;
+        if (attRole !== 'all' && String(a._role) !== String(attRole)) return false;
+        if (attStatus !== 'all' && a._status !== attStatus) return false;
+        if (attFlag !== 'all') {
+          if (attFlag==='late' && !a._late) return false;
+          if (attFlag==='early' && !a._early) return false;
+          if (attFlag==='missing_out' && !a._missingOut) return false;
+          if (attFlag==='auto' && !a._auto) return false;
+          if (attFlag==='wfh' && !a._wfh) return false;
+          if (attFlag==='present' && !a.punch_in) return false;
+          if (attFlag==='absent' && a._status!=='absent') return false;
+        }
+        if (search) {
+          const hay = [a._employeeName,a._employeeId,a._companyName,a._department,a._role,a.date,a._status].join(' ').toLowerCase();
+          if (!hay.includes(search)) return false;
+        }
+        return true;
+      })
+      .sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')) || String(a._employeeName).localeCompare(String(b._employeeName)));
+  }, [attendance, userMap, attendanceCompanies, reportDateRange, attCompany, attDepartment, attUser, attRole, attStatus, attFlag, attSearch]);
+
+  const reportSummary = useMemo(()=>{
+    const rows = reportAttendanceRows;
+    const present = rows.filter(a=>a._status==='present' && a.punch_in).length;
+    const absent = rows.filter(a=>a._status==='absent').length;
+    const leave = rows.filter(a=>a._status==='leave').length;
+    const half = rows.filter(a=>a._status==='half_day' || a._status==='half-day').length;
+    const late = rows.filter(a=>a._late).length;
+    const early = rows.filter(a=>a._early).length;
+    const missing = rows.filter(a=>a._missingOut).length;
+    const auto = rows.filter(a=>a._auto).length;
+    const wfh = rows.filter(a=>a._wfh).length;
+    const minutes = rows.reduce((s,a)=>s + Number(a.duration_minutes||0),0);
+    const people = new Set(rows.map(a=>String(a.user_id||''))).size;
+    return { total:rows.length, people, present, absent, leave, half, late, early, missing, auto, wfh, minutes, avg:present?Math.round(minutes/present):0 };
+  }, [reportAttendanceRows]);
+
+  const exactDateTime = (value) => {
+    if (!value) return '—';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return String(value);
+    return d.toLocaleString('en-IN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true});
+  };
+
+  const exactTime = (value) => {
+    if (!value) return '—';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return String(value);
+    return d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true});
+  };
+
+  const reportFilterLabel = useMemo(()=>{
+    const parts=[];
+    if(attCompany!=='all') parts.push(`Company: ${attendanceCompanies.find(c=>String(c.id)===String(attCompany))?.name||attCompany}`);
+    if(attDepartment!=='all') parts.push(`Department: ${attDepartment}`);
+    if(attUser!=='all') parts.push(`Employee: ${attendanceUsers.find(u=>String(u.id||u._id)===String(attUser))?.full_name||'Selected'}`);
+    if(attRole!=='all') parts.push(`Role: ${attRole}`);
+    if(attStatus!=='all') parts.push(`Status: ${attStatus}`);
+    if(attFlag!=='all') parts.push(`Flag: ${attFlag}`);
+    return parts.length?parts.join(' | '):'All users / all selected records';
+  }, [attCompany,attDepartment,attUser,attRole,attStatus,attFlag,attendanceCompanies,attendanceUsers]);
+
+  const downloadAttendanceCsv = () => {
+    if(!canDL){ toast.error('You do not have permission to download reports'); return; }
+    const headers=['Date','Employee','Employee ID','Company','Department','Role','Status','Exact Login','Exact Logout','Duration','Late','Early Out','Missing Punch-Out','Auto Marked','Work Mode','Latitude','Longitude','Leave Reason','Notes'];
+    const esc=v=>`"${String(v??'').replace(/"/g,'""')}"`;
+    const rows=reportAttendanceRows.map(a=>[
+      a.date,a._employeeName,a._employeeId,a._companyName,a._department,a._role,a._status,
+      exactDateTime(a.punch_in),exactDateTime(a.punch_out),fmt(a.duration_minutes||0),
+      a._late?'Yes':'No',a._early?'Yes':'No',a._missingOut?'Yes':'No',a._auto?'Yes':'No',
+      a.work_mode||a.attendance_type||(a._wfh?'WFH':'Office'),a.latitude??'',a.longitude??'',a.leave_reason||'',a.notes||''
+    ].map(esc).join(','));
+    const csv=[headers.map(esc).join(','),...rows].join('
+');
+    const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download=`attendance_report_${reportDateRange.from}_${reportDateRange.to}.csv`; a.click();
+    URL.revokeObjectURL(a.href);
+    toast.success(`Attendance CSV downloaded (${reportAttendanceRows.length} records)`);
+  };
+
+  const downloadAttendancePdf = async () => {
+    if(!canDL){ toast.error('You do not have permission to download reports'); return; }
+    try {
+      const jsPDF = await getJsPDF();
+      await getAutoTable();
+      const doc=new jsPDF('l','mm','a4');
+      let y=12;
+      doc.setFontSize(18); doc.setTextColor(13,59,102); doc.text('Attendance Report',12,y); y+=7;
+      doc.setFontSize(9); doc.setTextColor(80,80,80);
+      doc.text(`Period: ${reportDateRange.from || '—'} to ${reportDateRange.to || '—'}`,12,y);
+      doc.text(`Generated: ${new Date().toLocaleString('en-IN')}`,125,y); y+=5;
+      doc.text(reportFilterLabel,12,y); y+=7;
+
+      doc.setFontSize(10); doc.setTextColor(13,59,102); doc.text('Report Summary',12,y); y+=4;
+      doc.autoTable({
+        head:[['Employees','Records','Present','Absent','Leave','Half Day','Late','Early Out','Missing Out','Total Hours','Avg / Present Day']],
+        body:[[reportSummary.people,reportSummary.total,reportSummary.present,reportSummary.absent,reportSummary.leave,reportSummary.half,reportSummary.late,reportSummary.early,reportSummary.missing,fmt(reportSummary.minutes),fmt(reportSummary.avg)]],
+        startY:y,margin:{left:12,right:12},theme:'grid',styles:{fontSize:7,cellPadding:2},headStyles:{fillColor:[13,59,102],textColor:[255,255,255],fontStyle:'bold'},
+      });
+      y=doc.lastAutoTable.finalY+7;
+
+      const body=reportAttendanceRows.map(a=>[
+        a.date,a._employeeName,a._employeeId,a._companyName,a._department,a._role,a._status,
+        exactDateTime(a.punch_in),exactDateTime(a.punch_out),fmt(a.duration_minutes||0),
+        a._late?'Yes':'No',a._early?'Yes':'No',a._missingOut?'Yes':'No',a._auto?'Yes':'No',
+        a.work_mode||a.attendance_type||(a._wfh?'WFH':'Office'),
+        `${a.latitude??'—'}, ${a.longitude??'—'}`,a.leave_reason||a.notes||'—'
+      ]);
+      doc.autoTable({
+        head:[['Date','Employee','Emp. ID','Company','Department','Role','Status','Login','Logout','Duration','Late','Early','Missing Out','Auto','Mode','Location','Remarks']],
+        body,startY:y,margin:{left:8,right:8},theme:'grid',
+        styles:{fontSize:5.5,cellPadding:1.5,overflow:'linebreak',valign:'middle'},
+        headStyles:{fillColor:[31,111,178],textColor:[255,255,255],fontStyle:'bold',fontSize:5.5},
+        alternateRowStyles:{fillColor:[248,250,252]},
+        didDrawPage:(data)=>{
+          const page=doc.internal.getNumberOfPages();
+          doc.setFontSize(7); doc.setTextColor(100,100,100);
+          doc.text(`Taskosphere • Attendance Report • Page ${page}`,8,doc.internal.pageSize.getHeight()-5);
+        },
+      });
+      doc.save(`attendance_report_${reportDateRange.from}_${reportDateRange.to}.pdf`);
+      toast.success(`Attendance PDF exported (${reportAttendanceRows.length} records)`);
+    } catch(e) { console.error(e); toast.error('Attendance PDF failed'); }
+  };
+
+  const resetAttendanceFilters = () => {
+    setAttPreset('month'); setAttCompany('all'); setAttDepartment('all'); setAttUser('all');
+    setAttRole('all'); setAttStatus('all'); setAttFlag('all'); setAttSearch('');
+  };
 
   // ── Derived: tasks ────────────────────────────────────────────────────────
   const fTasks = useMemo(()=>
@@ -802,81 +1060,195 @@ export default function Reports() {
           <motion.div key="at" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-stretch">
               {[
-                {label:'Days Present',  value:presDays,         sub:'This period',        color:C.emeraldGreen, icon:CheckCircle2},
-                {label:'Total Hours',   value:fmtC(totMins),    sub:'Logged time',         color:C.deepBlue,     icon:Clock       },
-                {label:'Avg / Day',     value:fmt(avgMins),     sub:'Per present day',     color:C.mediumBlue,   icon:Activity    },
-                {label:'Late Days',     value:lateDays,         sub:'Arrived after time',  color:C.amber,        icon:AlertTriangle},
+                {label:'Days Present',  value:reportSummary.present,       sub:`${reportSummary.people} employees`, color:C.emeraldGreen, icon:CheckCircle2},
+                {label:'Total Hours',   value:fmtC(reportSummary.minutes), sub:'Filtered report period', color:C.deepBlue,     icon:Clock},
+                {label:'Avg / Day',     value:fmt(reportSummary.avg),      sub:'Per present record',     color:C.mediumBlue,   icon:Activity},
+                {label:'Late Days',     value:reportSummary.late,         sub:`${reportSummary.early} early-out`, color:C.amber, icon:AlertTriangle},
               ].map((k,i)=><KpiCard key={i} {...k} dark={dark}/>)}
             </div>
 
-            <Sec title="Daily Hours — Last 7 Days" desc="From actual punch records" dark={dark}>
-              {attTrend.some(d=>d.hours>0)?(
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={attTrend} barSize={28}>
-                    <XAxis dataKey="name" tick={{fontSize:11,fill:t.textSub}} axisLine={false} tickLine={false}/>
-                    <YAxis tick={{fontSize:11,fill:t.textSub}} unit="h" axisLine={false} tickLine={false}/>
-                    <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
-                    <Bar dataKey="hours" name="Hours" radius={[6,6,0,0]}>
-                      {attTrend.map((d,i)=>(
-                        <Cell key={i} fill={d.hours>=8?C.emeraldGreen:d.hours>=4?C.mediumBlue:dark?'#334155':'#e2e8f0'}/>
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              ):<Empty icon={Clock} text="No attendance records for the last 7 days" dark={dark}/>}
+            {/* Full attendance report controls — intentionally kept inside the existing Attendance tab. */}
+            <Sec title="Attendance Report & Filters"
+              desc="Filter the existing attendance records by period, company, department, employee and status. Exact punch timestamps are preserved in exports."
+              dark={dark}
+              action={
+                <div className="flex flex-wrap gap-1.5">
+                  {canDL&&<>
+                    <button onClick={downloadAttendanceCsv}
+                      className="h-7 px-2.5 text-[10px] font-bold rounded-lg flex items-center gap-1"
+                      style={{background:C.deepBlue,color:'#fff'}}>
+                      <Download className="w-3 h-3"/> CSV
+                    </button>
+                    <button onClick={downloadAttendancePdf}
+                      className="h-7 px-2.5 text-[10px] font-bold rounded-lg flex items-center gap-1"
+                      style={{background:C.emeraldGreen,color:'#fff'}}>
+                      <Download className="w-3 h-3"/> PDF
+                    </button>
+                  </>}
+                  <button onClick={resetAttendanceFilters}
+                    className="h-7 px-2.5 text-[10px] font-bold rounded-lg"
+                    style={{background:t.card2,color:t.textSub,border:`1px solid ${t.border}`}}>
+                    Reset
+                  </button>
+                </div>
+              }>
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2">
+                  {[
+                    ['today','Today'],['week','This Week'],['month','This Month'],['last_month','Last Month'],
+                    ['year','This Year'],['last_year','Last Year'],['custom','Custom']
+                  ].map(([id,label])=>(
+                    <button key={id} onClick={()=>setAttPreset(id)}
+                      className="h-8 px-2 text-[10px] font-bold rounded-lg transition-all"
+                      style={attPreset===id?{background:C.deepBlue,color:'#fff'}:{background:t.card2,color:t.textSub,border:`1px solid ${t.border}`}}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-2">
+                  <label className="text-[10px] font-semibold" style={{color:t.textSub}}>
+                    From
+                    <input type="date" value={attFrom} onChange={e=>{setAttPreset('custom');setAttFrom(e.target.value)}}
+                      className="mt-1 w-full h-9 rounded-lg px-2 text-xs focus:outline-none" style={{background:t.inputBg,color:t.text,border:`1px solid ${t.inputBdr}`}}/>
+                  </label>
+                  <label className="text-[10px] font-semibold" style={{color:t.textSub}}>
+                    To
+                    <input type="date" value={attTo} onChange={e=>{setAttPreset('custom');setAttTo(e.target.value)}}
+                      className="mt-1 w-full h-9 rounded-lg px-2 text-xs focus:outline-none" style={{background:t.inputBg,color:t.text,border:`1px solid ${t.inputBdr}`}}/>
+                  </label>
+                  <label className="text-[10px] font-semibold" style={{color:t.textSub}}>
+                    Company
+                    <select value={attCompany} onChange={e=>{setAttCompany(e.target.value);setAttUser('all')}}
+                      className="mt-1 w-full h-9 rounded-lg px-2 text-xs focus:outline-none" style={{background:t.inputBg,color:t.text,border:`1px solid ${t.inputBdr}`}}>
+                      <option value="all">All Companies</option>
+                      {attendanceCompanies.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </label>
+                  <label className="text-[10px] font-semibold" style={{color:t.textSub}}>
+                    Department
+                    <select value={attDepartment} onChange={e=>setAttDepartment(e.target.value)}
+                      className="mt-1 w-full h-9 rounded-lg px-2 text-xs focus:outline-none" style={{background:t.inputBg,color:t.text,border:`1px solid ${t.inputBdr}`}}>
+                      <option value="all">All Departments</option>
+                      {attendanceDepartments.map(d=><option key={d} value={d}>{d}</option>)}
+                    </select>
+                  </label>
+                  <label className="text-[10px] font-semibold" style={{color:t.textSub}}>
+                    Employee
+                    <select value={attUser} onChange={e=>setAttUser(e.target.value)}
+                      className="mt-1 w-full h-9 rounded-lg px-2 text-xs focus:outline-none" style={{background:t.inputBg,color:t.text,border:`1px solid ${t.inputBdr}`}}>
+                      <option value="all">All Employees</option>
+                      {attendanceUsers.filter(u=>attCompany==='all'||String(u.company_id)===String(attCompany)).sort((a,b)=>String(a.full_name||'').localeCompare(String(b.full_name||''))).map(u=><option key={u.id||u._id} value={u.id||u._id}>{u.full_name||u.name||'Unknown'}</option>)}
+                    </select>
+                  </label>
+                  <label className="text-[10px] font-semibold" style={{color:t.textSub}}>
+                    Role
+                    <select value={attRole} onChange={e=>setAttRole(e.target.value)}
+                      className="mt-1 w-full h-9 rounded-lg px-2 text-xs focus:outline-none" style={{background:t.inputBg,color:t.text,border:`1px solid ${t.inputBdr}`}}>
+                      <option value="all">All Roles</option>
+                      {attendanceRoles.map(r=><option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </label>
+                  <label className="text-[10px] font-semibold" style={{color:t.textSub}}>
+                    Status
+                    <select value={attStatus} onChange={e=>setAttStatus(e.target.value)}
+                      className="mt-1 w-full h-9 rounded-lg px-2 text-xs focus:outline-none" style={{background:t.inputBg,color:t.text,border:`1px solid ${t.inputBdr}`}}>
+                      <option value="all">All Status</option>
+                      <option value="present">Present</option>
+                      <option value="absent">Absent</option>
+                      <option value="leave">Leave</option>
+                      <option value="half_day">Half Day</option>
+                    </select>
+                  </label>
+                  <label className="text-[10px] font-semibold" style={{color:t.textSub}}>
+                    Special Filter
+                    <select value={attFlag} onChange={e=>setAttFlag(e.target.value)}
+                      className="mt-1 w-full h-9 rounded-lg px-2 text-xs focus:outline-none" style={{background:t.inputBg,color:t.text,border:`1px solid ${t.inputBdr}`}}>
+                      <option value="all">All Records</option>
+                      <option value="late">Late Arrival</option>
+                      <option value="early">Early Out</option>
+                      <option value="missing_out">Missing Punch-Out</option>
+                      <option value="auto">Auto Marked</option>
+                      <option value="wfh">WFH</option>
+                      <option value="present">Has Punch-In</option>
+                      <option value="absent">Absent Only</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input value={attSearch} onChange={e=>setAttSearch(e.target.value)}
+                    placeholder="Search employee, ID, company, department, role, date or status…"
+                    className="h-9 flex-1 rounded-lg px-3 text-xs focus:outline-none" style={{background:t.inputBg,color:t.text,border:`1px solid ${t.inputBdr}`}}/>
+                  <div className="flex items-center justify-between sm:justify-end gap-3 text-[10px]" style={{color:t.textMute}}>
+                    <span>{reportDateRange.from} → {reportDateRange.to}</span>
+                    <span className="font-bold" style={{color:C.deepBlue}}>{reportAttendanceRows.length} records</span>
+                  </div>
+                </div>
+              </div>
             </Sec>
 
-            {fAtt.length>0&&(
-              <Sec title="Attendance Log" desc="Recent punch records" dark={dark}>
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+              {[
+                ['Present',reportSummary.present,C.emeraldGreen],['Absent',reportSummary.absent,'#dc2626'],['Leave',reportSummary.leave,C.mediumBlue],['Half Day',reportSummary.half,C.amber],
+                ['Late',reportSummary.late,C.amber],['Early Out',reportSummary.early,'#ea580c'],['Missing Out',reportSummary.missing,'#dc2626'],['Auto Marked',reportSummary.auto,C.deepBlue]
+              ].map(([label,val,color])=>(
+                <div key={label} className="rounded-xl p-2.5" style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:t.shadow}}>
+                  <p className="text-[9px] font-bold uppercase tracking-wider" style={{color:t.textMute}}>{label}</p>
+                  <p className="text-lg font-black mt-1" style={{color}}>{val}</p>
+                </div>
+              ))}
+            </div>
+
+            <Sec title="Detailed Attendance Report"
+              desc={`${reportFilterLabel} • exact login/logout timestamps • ${reportAttendanceRows.length} filtered records`}
+              dark={dark}>
+              {reportAttendanceRows.length>0?(
                 <div className="overflow-x-auto rounded-xl" style={{border:`1px solid ${t.border}`}}>
-                  <table className="w-full text-sm min-w-[600px]">
+                  <table className="w-full text-sm min-w-[1450px]">
                     <thead>
                       <tr style={{background:t.card2}}>
-                        {(isAdmin?['Employee','Date','In','Out','Duration','Status','Notes']:['Date','In','Out','Duration','Status','Notes']).map(h=>(
-                          <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider"
-                            style={{color:t.textMute}}>{h}</th>
+                        {['Date','Employee','Emp. ID','Company','Department','Role','Status','Exact Login','Exact Logout','Duration','Late','Early Out','Missing Out','Auto','Mode','Location','Remarks'].map(h=>(
+                          <th key={h} className="px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider whitespace-nowrap" style={{color:t.textMute}}>{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {fAtt.slice(0,20).map((a,i)=>{
-                        const pi=a.punch_in ?new Date(a.punch_in ).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}):'—';
-                        const po=a.punch_out?new Date(a.punch_out).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}):'—';
-                        const sc=a.status==='present'
-                          ?{bg:dark?'rgba(31,175,90,0.15)':'#f0fdf4',col:C.emeraldGreen}
-                          :a.status==='absent'
-                          ?{bg:dark?'rgba(239,68,68,0.12)':'#fef2f2',col:'#dc2626'}
-                          :{bg:dark?'rgba(245,158,11,0.12)':'#fffbeb',col:C.amber};
-                        const flags=[a.is_late&&'⏰ Late',a.punched_out_early&&'🚪 Early',a.auto_marked&&'🤖 Auto'].filter(Boolean);
+                      {reportAttendanceRows.map((a,i)=>{
+                        const sc=a._status==='present'?{bg:dark?'rgba(31,175,90,0.15)':'#f0fdf4',col:C.emeraldGreen}:a._status==='absent'?{bg:dark?'rgba(239,68,68,0.12)':'#fef2f2',col:'#dc2626'}:{bg:dark?'rgba(245,158,11,0.12)':'#fffbeb',col:C.amber};
                         return (
-                          <tr key={i} style={{borderTop:`1px solid ${t.border2}`}}
+                          <tr key={`${a._idx}-${i}`} style={{borderTop:`1px solid ${t.border2}`}}
                             onMouseEnter={e=>e.currentTarget.style.background=t.hover}
                             onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                            {isAdmin&&<td className="px-4 py-2.5 text-xs font-medium" style={{color:t.text}}>{a.user_name||'—'}</td>}
-                            <td className="px-4 py-2.5 font-medium text-xs" style={{color:t.text}}>{a.date}</td>
-                            <td className="px-4 py-2.5 text-xs" style={{color:t.textSub}}>{pi}</td>
-                            <td className="px-4 py-2.5 text-xs" style={{color:t.textSub}}>{po}</td>
-                            <td className="px-4 py-2.5 text-xs font-bold" style={{color:C.deepBlue}}>{fmt(a.duration_minutes||0)}</td>
-                            <td className="px-4 py-2.5">
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md capitalize"
-                                style={{background:sc.bg,color:sc.col}}>{a.status}</span>
-                            </td>
-                            <td className="px-4 py-2.5 text-[10px]" style={{color:t.textMute}}>
-                              {flags.length?flags.join(' '):<span style={{color:C.emeraldGreen}}>✓ OK</span>}
-                            </td>
+                            <td className="px-3 py-2.5 text-xs font-medium whitespace-nowrap" style={{color:t.text}}>{a.date||'—'}</td>
+                            <td className="px-3 py-2.5 text-xs font-semibold whitespace-nowrap" style={{color:t.text}}>{a._employeeName}</td>
+                            <td className="px-3 py-2.5 text-[10px] whitespace-nowrap" style={{color:t.textSub}}>{a._employeeId}</td>
+                            <td className="px-3 py-2.5 text-xs whitespace-nowrap" style={{color:t.textSub}}>{a._companyName}</td>
+                            <td className="px-3 py-2.5 text-xs whitespace-nowrap" style={{color:t.textSub}}>{a._department}</td>
+                            <td className="px-3 py-2.5 text-xs whitespace-nowrap" style={{color:t.textSub}}>{a._role}</td>
+                            <td className="px-3 py-2.5"><span className="text-[10px] font-bold px-2 py-0.5 rounded-md capitalize whitespace-nowrap" style={{background:sc.bg,color:sc.col}}>{a._status}</span></td>
+                            <td className="px-3 py-2.5 text-[10px] font-semibold whitespace-nowrap" style={{color:t.textSub}}>{exactDateTime(a.punch_in)}</td>
+                            <td className="px-3 py-2.5 text-[10px] font-semibold whitespace-nowrap" style={{color:t.textSub}}>{exactDateTime(a.punch_out)}</td>
+                            <td className="px-3 py-2.5 text-xs font-bold whitespace-nowrap" style={{color:C.deepBlue}}>{fmt(a.duration_minutes||0)}</td>
+                            <td className="px-3 py-2.5 text-[10px] font-bold" style={{color:a._late?'#dc2626':t.textMute}}>{a._late?'YES':'—'}</td>
+                            <td className="px-3 py-2.5 text-[10px] font-bold" style={{color:a._early?'#ea580c':t.textMute}}>{a._early?'YES':'—'}</td>
+                            <td className="px-3 py-2.5 text-[10px] font-bold" style={{color:a._missingOut?'#dc2626':t.textMute}}>{a._missingOut?'YES':'—'}</td>
+                            <td className="px-3 py-2.5 text-[10px] font-bold" style={{color:a._auto?C.mediumBlue:t.textMute}}>{a._auto?'YES':'—'}</td>
+                            <td className="px-3 py-2.5 text-[10px] whitespace-nowrap" style={{color:t.textSub}}>{a.work_mode||a.attendance_type||(a._wfh?'WFH':'Office')}</td>
+                            <td className="px-3 py-2.5 text-[10px] whitespace-nowrap" style={{color:t.textSub}}>{a.latitude??'—'}, {a.longitude??'—'}</td>
+                            <td className="px-3 py-2.5 text-[10px] max-w-[220px]" style={{color:t.textMute}}>{a.leave_reason||a.notes||'—'}</td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
-                  {fAtt.length>20&&(
-                    <p className="text-xs text-center py-2" style={{color:t.textMute}}>
-                      Showing 20 of {fAtt.length} records
-                    </p>
-                  )}
                 </div>
-              </Sec>
-            )}
+              ):<Empty icon={Clock} text="No attendance records match the selected filters" dark={dark}/>} 
+            </Sec>
+
+            <div className="rounded-xl px-4 py-3 text-[10px]" style={{background:t.card2,border:`1px solid ${t.border}`,color:t.textMute}}>
+              <strong style={{color:t.text}}>Report includes:</strong> exact punch-in/out timestamps, duration, status, late/early flags, missing punch-out, auto-marked attendance, work mode, location coordinates, employee/company/department/role and remarks. PDF and CSV use the same filtered dataset shown above.
+            </div>
           </motion.div>
         )}
 
