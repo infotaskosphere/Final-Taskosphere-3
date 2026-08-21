@@ -14734,6 +14734,16 @@ async def remove_clients_from_group(
 
 app.include_router(api_router)
 
+# ── Recruitment direct API mount ─────────────────────────────────────────────
+# Explicitly expose Recruitment at /api/recruitment.
+# Keeps the endpoint available even if nested api_router registration
+# is not propagated by the running FastAPI/Starlette route tree.
+app.include_router(
+    recruitment_router,
+    prefix="/api",
+    include_in_schema=False,
+)
+
 # ── Phase 12 Commercial SaaS API v2 Router ────────────────────────────────────
 from backend.api_v2.router_v2 import router as api_v2_router
 app.include_router(api_v2_router, prefix="/api")
