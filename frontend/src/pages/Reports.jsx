@@ -246,6 +246,7 @@ export default function Reports() {
   const [attFlag, setAttFlag] = useState('all');
   const [attSearch, setAttSearch] = useState('');
   const [attSelectedEmployee, setAttSelectedEmployee] = useState(null);
+  const [attSummaryFilter, setAttSummaryFilter] = useState(null);
 
   const [tab,        setTab]        = useState('overview');
   const [showCustomize, setShowCustomize] = useState(false);
@@ -489,6 +490,37 @@ export default function Reports() {
     return attendanceEmployeeCards.find(x=>x.key===attSelectedEmployee) || null;
   },[attSelectedEmployee, attendanceEmployeeCards]);
 
+  const summaryPopupRows = useMemo(()=>{
+    if(!attSummaryFilter) return [];
+    return reportAttendanceRows.filter(a=>{
+      switch(attSummaryFilter){
+        case 'present': return a._status==='present' && !!a.punch_in;
+        case 'absent': return a._status==='absent';
+        case 'leave': return a._status==='leave';
+        case 'half': return a._status==='half_day' || a._status==='half-day';
+        case 'late': return !!a._late;
+        case 'early': return !!a._early;
+        case 'missing': return !!a._missingOut;
+        case 'auto': return !!a._auto;
+        default: return true;
+      }
+    });
+  },[attSummaryFilter, reportAttendanceRows]);
+
+  const summaryPopupMeta = useMemo(()=>{
+    const meta = {
+      present:{label:'Present Attendance',color:C.emeraldGreen},
+      absent:{label:'Absent Attendance',color:'#dc2626'},
+      leave:{label:'Leave Records',color:C.mediumBlue},
+      half:{label:'Half Day Records',color:C.amber},
+      late:{label:'Late Attendance',color:C.amber},
+      early:{label:'Early Out Records',color:'#ea580c'},
+      missing:{label:'Missing Punch-Out Records',color:'#dc2626'},
+      auto:{label:'Auto Marked Attendance',color:C.deepBlue},
+    };
+    return attSummaryFilter ? meta[attSummaryFilter] : null;
+  },[attSummaryFilter]);
+
   const exactDateTime = (value) => {
     if (!value) return '—';
     const d = new Date(value);
@@ -575,6 +607,88 @@ export default function Reports() {
       doc.save(`attendance_report_${reportDateRange.from}_${reportDateRange.to}.pdf`);
       toast.success(`Attendance PDF exported (${reportAttendanceRows.length} records)`);
     } catch(e) { console.error(e); toast.error('Attendance PDF failed'); }
+  };
+
+
+  const downloadAttendancePopupPdf = async (rows, title, subtitle, fileName) => {
+    if(!canDL){ toast.error('You do not have permission to download reports'); return; }
+    if(!rows || rows.length===0){ toast.error('No attendance records available for PDF'); return; }
+    try {
+      const jsPDF = await getJsPDF();
+      const autoTable = await getAutoTable();
+      const doc = new jsPDF('l','mm','a4');
+      let y = 12;
+
+      doc.setFillColor(13,59,102);
+      doc.rect(0,0,doc.internal.pageSize.getWidth(),28,'F');
+      doc.setFontSize(17);
+      doc.setFont('helvetica','bold');
+      doc.setTextColor(255,255,255);
+      doc.text(String(title||'Attendance Report'),10,11);
+      doc.setFontSize(8);
+      doc.setFont('helvetica','normal');
+      doc.text(String(subtitle||''),10,18);
+      doc.text(`Generated: ${new Date().toLocaleString('en-IN')}`,10,24);
+      y = 34;
+
+      const totalMinutes = rows.reduce((s,a)=>s+Number(a.duration_minutes||0),0);
+      const present = rows.filter(a=>a._status==='present' && a.punch_in).length;
+      const absent = rows.filter(a=>a._status==='absent').length;
+      const leave = rows.filter(a=>a._status==='leave').length;
+      const half = rows.filter(a=>a._status==='half_day' || a._status==='half-day').length;
+      const late = rows.filter(a=>a._late).length;
+      const early = rows.filter(a=>a._early).length;
+      const missing = rows.filter(a=>a._missingOut).length;
+
+      autoTable(doc,{
+        head:[['Records','Employees','Present','Absent','Leave','Half Day','Late','Early Out','Missing Out','Total Hours']],
+        body:[[rows.length,new Set(rows.map(a=>String(a.user_id||a._employeeName))).size,present,absent,leave,half,late,early,missing,fmt(totalMinutes)]],
+        startY:y,margin:{left:8,right:8},theme:'grid',
+        styles:{fontSize:7,cellPadding:2},
+        headStyles:{fillColor:[13,59,102],textColor:[255,255,255],fontStyle:'bold'}
+      });
+      y = doc.lastAutoTable.finalY + 6;
+
+      const body = rows.map(a=>[
+        a.date||'—',
+        a._employeeName||'—',
+        a._employeeId||'—',
+        a._companyName||'—',
+        a._department||'—',
+        a._role||'—',
+        a._status||'—',
+        exactDateTime(a.punch_in),
+        exactDateTime(a.punch_out),
+        fmt(a.duration_minutes||0),
+        a._late?'YES':'—',
+        a._early?'YES':'—',
+        a._missingOut?'YES':'—',
+        a._auto?'YES':'—',
+        a.work_mode||a.attendance_type||(a._wfh?'WFH':'Office'),
+        a.leave_reason||a.notes||'—'
+      ]);
+
+      autoTable(doc,{
+        head:[['Date','Employee','Emp. ID','Company','Department','Role','Status','Exact Login','Exact Logout','Duration','Late','Early Out','Missing Out','Auto','Mode','Remarks']],
+        body,
+        startY:y,margin:{left:6,right:6},
+        theme:'grid',
+        styles:{fontSize:5.8,cellPadding:1.5,overflow:'linebreak',valign:'middle'},
+        headStyles:{fillColor:[31,111,178],textColor:[255,255,255],fontStyle:'bold',fontSize:5.8},
+        alternateRowStyles:{fillColor:[248,250,252]},
+        didDrawPage:()=>{
+          const page=doc.internal.getNumberOfPages();
+          doc.setFontSize(7); doc.setTextColor(100,100,100);
+          doc.text(`Taskosphere • Attendance Report • Page ${page}`,8,doc.internal.pageSize.getHeight()-5);
+        }
+      });
+
+      doc.save(`${fileName||'attendance_report'}.pdf`);
+      toast.success(`Attendance PDF exported (${rows.length} records)`);
+    } catch(e) {
+      console.error('Attendance popup PDF error:',e);
+      toast.error('Attendance PDF failed');
+    }
   };
 
   const resetAttendanceFilters = () => {
@@ -1225,13 +1339,27 @@ export default function Reports() {
 
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
               {[
-                ['Present',reportSummary.present,C.emeraldGreen],['Absent',reportSummary.absent,'#dc2626'],['Leave',reportSummary.leave,C.mediumBlue],['Half Day',reportSummary.half,C.amber],
-                ['Late',reportSummary.late,C.amber],['Early Out',reportSummary.early,'#ea580c'],['Missing Out',reportSummary.missing,'#dc2626'],['Auto Marked',reportSummary.auto,C.deepBlue]
-              ].map(([label,val,color])=>(
-                <div key={label} className="rounded-xl p-2.5" style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:t.shadow}}>
+                ['Present',reportSummary.present,C.emeraldGreen,'present'],
+                ['Absent',reportSummary.absent,'#dc2626','absent'],
+                ['Leave',reportSummary.leave,C.mediumBlue,'leave'],
+                ['Half Day',reportSummary.half,C.amber,'half'],
+                ['Late',reportSummary.late,C.amber,'late'],
+                ['Early Out',reportSummary.early,'#ea580c','early'],
+                ['Missing Out',reportSummary.missing,'#dc2626','missing'],
+                ['Auto Marked',reportSummary.auto,C.deepBlue,'auto']
+              ].map(([label,val,color,filterKey])=>(
+                <button
+                  key={label}
+                  type="button"
+                  onClick={()=>setAttSummaryFilter(filterKey)}
+                  className="rounded-xl p-2.5 text-left transition-all hover:-translate-y-0.5 hover:shadow-md cursor-pointer"
+                  style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:t.shadow}}
+                  title={`View ${label} attendance details`}
+                >
                   <p className="text-[9px] font-bold uppercase tracking-wider" style={{color:t.textMute}}>{label}</p>
                   <p className="text-lg font-black mt-1" style={{color}}>{val}</p>
-                </div>
+                  <p className="text-[8px] mt-0.5" style={{color:t.textMute}}>Click to view details</p>
+                </button>
               ))}
             </div>
 
@@ -1305,6 +1433,116 @@ export default function Reports() {
             </Sec>
 
             <AnimatePresence>
+              {summaryPopupMeta && (
+                <motion.div className="fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-6"
+                  initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
+                  style={{background:'rgba(15,23,42,.62)',backdropFilter:'blur(5px)'}}>
+                  <motion.div
+                    initial={{opacity:0,y:18,scale:.98}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:18,scale:.98}}
+                    className="w-full max-w-7xl max-h-[92vh] rounded-2xl overflow-hidden flex flex-col"
+                    style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:'0 24px 70px rgba(0,0,0,.30)'}}>
+                    <div className="px-5 py-4 flex items-center justify-between gap-4"
+                      style={{borderBottom:'1px solid rgba(255,255,255,.18)',background:`linear-gradient(135deg, ${C.deepBlue} 0%, ${C.mediumBlue} 100%)`}}>
+                      <div className="min-w-0">
+                        <p className="text-lg font-black text-white">{summaryPopupMeta.label}</p>
+                        <p className="text-[10px] text-blue-100 truncate">
+                          {reportDateRange.from} → {reportDateRange.to} • {summaryPopupRows.length} exact attendance records • all selected employees
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {canDL && (
+                          <button type="button"
+                            onClick={()=>downloadAttendancePopupPdf(
+                              summaryPopupRows,
+                              `${summaryPopupMeta.label} Attendance Report`,
+                              `${reportDateRange.from} → ${reportDateRange.to} • ${summaryPopupRows.length} exact attendance records`,
+                              `attendance_${String(summaryPopupMeta.label||'summary').toLowerCase().replace(/[^a-z0-9]+/g,'_')}_${reportDateRange.from}_${reportDateRange.to}`
+                            )}
+                            className="h-9 px-3 rounded-xl flex items-center gap-1.5 text-[10px] font-bold text-white"
+                            style={{background:'rgba(255,255,255,.16)',border:'1px solid rgba(255,255,255,.30)'}}>
+                            ↓ PDF
+                          </button>
+                        )}
+                        <button type="button" onClick={()=>setAttSummaryFilter(null)}
+                          className="w-9 h-9 rounded-xl flex items-center justify-center text-lg font-bold flex-shrink-0 text-white"
+                          style={{background:'rgba(255,255,255,.14)',border:'1px solid rgba(255,255,255,.28)'}}>×</button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-4"
+                      style={{borderBottom:`1px solid ${t.border}`}}>
+                      <div className="rounded-xl p-2.5" style={{background:t.card2,border:`1px solid ${t.border}`}}>
+                        <p className="text-[8px] font-bold uppercase tracking-wider" style={{color:t.textMute}}>Records</p>
+                        <p className="text-sm font-black mt-0.5" style={{color:summaryPopupMeta.color}}>{summaryPopupRows.length}</p>
+                      </div>
+                      <div className="rounded-xl p-2.5" style={{background:t.card2,border:`1px solid ${t.border}`}}>
+                        <p className="text-[8px] font-bold uppercase tracking-wider" style={{color:t.textMute}}>Employees</p>
+                        <p className="text-sm font-black mt-0.5" style={{color:C.deepBlue}}>{new Set(summaryPopupRows.map(a=>String(a.user_id||a._employeeName))).size}</p>
+                      </div>
+                      <div className="rounded-xl p-2.5" style={{background:t.card2,border:`1px solid ${t.border}`}}>
+                        <p className="text-[8px] font-bold uppercase tracking-wider" style={{color:t.textMute}}>Total Hours</p>
+                        <p className="text-sm font-black mt-0.5" style={{color:t.text}}>{fmt(summaryPopupRows.reduce((s,a)=>s+Number(a.duration_minutes||0),0))}</p>
+                      </div>
+                      <div className="rounded-xl p-2.5" style={{background:t.card2,border:`1px solid ${t.border}`}}>
+                        <p className="text-[8px] font-bold uppercase tracking-wider" style={{color:t.textMute}}>Exact Data</p>
+                        <p className="text-sm font-black mt-0.5" style={{color:C.emeraldGreen}}>Available</p>
+                      </div>
+                    </div>
+
+                    <div className="flex-1 overflow-auto p-4">
+                      {summaryPopupRows.length>0 ? (
+                        <div className="overflow-x-auto rounded-xl" style={{border:`1px solid ${t.border}`}}>
+                          <table className="w-full text-sm min-w-[1350px]">
+                            <thead>
+                              <tr style={{background:t.card2}}>
+                                {['Date','Employee','Emp. ID','Company','Department','Role','Status','Exact Login','Exact Logout','Duration','Late','Early Out','Missing Out','Auto','Mode','Remarks'].map(h=>(
+                                  <th key={h} className="px-3 py-2.5 text-left text-[9px] font-bold uppercase tracking-wider whitespace-nowrap" style={{color:t.textMute}}>{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {summaryPopupRows.map((a,i)=>{
+                                const sc=a._status==='present'
+                                  ?{bg:dark?'rgba(31,175,90,.15)':'#f0fdf4',col:C.emeraldGreen}
+                                  :a._status==='absent'
+                                  ?{bg:dark?'rgba(239,68,68,.12)':'#fef2f2',col:'#dc2626'}
+                                  :{bg:dark?'rgba(245,158,11,.12)':'#fffbeb',col:C.amber};
+                                return (
+                                  <tr key={`${a._idx}-${i}`} style={{borderTop:`1px solid ${t.border2}`}}>
+                                    <td className="px-3 py-2 text-xs whitespace-nowrap" style={{color:t.text}}>{a.date||'—'}</td>
+                                    <td className="px-3 py-2 text-xs font-semibold whitespace-nowrap" style={{color:t.text}}>{a._employeeName}</td>
+                                    <td className="px-3 py-2 text-[10px] whitespace-nowrap" style={{color:t.textSub}}>{a._employeeId||'—'}</td>
+                                    <td className="px-3 py-2 text-[10px] whitespace-nowrap" style={{color:t.textSub}}>{a._companyName||'—'}</td>
+                                    <td className="px-3 py-2 text-[10px] whitespace-nowrap" style={{color:t.textSub}}>{a._department||'—'}</td>
+                                    <td className="px-3 py-2 text-[10px] whitespace-nowrap" style={{color:t.textSub}}>{a._role||'—'}</td>
+                                    <td className="px-3 py-2">
+                                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-md capitalize whitespace-nowrap" style={{background:sc.bg,color:sc.col}}>{a._status}</span>
+                                    </td>
+                                    <td className="px-3 py-2 text-[10px] font-semibold whitespace-nowrap" style={{color:t.textSub}}>{exactDateTime(a.punch_in)}</td>
+                                    <td className="px-3 py-2 text-[10px] font-semibold whitespace-nowrap" style={{color:t.textSub}}>{exactDateTime(a.punch_out)}</td>
+                                    <td className="px-3 py-2 text-xs font-bold whitespace-nowrap" style={{color:C.deepBlue}}>{fmt(a.duration_minutes||0)}</td>
+                                    <td className="px-3 py-2 text-[9px] font-bold" style={{color:a._late?'#dc2626':t.textMute}}>{a._late?'YES':'—'}</td>
+                                    <td className="px-3 py-2 text-[9px] font-bold" style={{color:a._early?'#ea580c':t.textMute}}>{a._early?'YES':'—'}</td>
+                                    <td className="px-3 py-2 text-[9px] font-bold" style={{color:a._missingOut?'#dc2626':t.textMute}}>{a._missingOut?'YES':'—'}</td>
+                                    <td className="px-3 py-2 text-[9px] font-bold" style={{color:a._auto?C.mediumBlue:t.textMute}}>{a._auto?'YES':'—'}</td>
+                                    <td className="px-3 py-2 text-[9px] whitespace-nowrap" style={{color:t.textSub}}>{a.work_mode||a.attendance_type||(a._wfh?'WFH':'Office')}</td>
+                                    <td className="px-3 py-2 text-[9px] max-w-[220px]" style={{color:t.textMute}}>{a.leave_reason||a.notes||'—'}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <Empty icon={Clock} text="No attendance records match this summary filter" dark={dark}/>
+                      )}
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <AnimatePresence>
               {selectedEmployeeCard && (
                 <motion.div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6"
                   initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
@@ -1314,16 +1552,31 @@ export default function Reports() {
                     className="w-full max-w-6xl max-h-[92vh] rounded-2xl overflow-hidden flex flex-col"
                     style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:'0 24px 70px rgba(0,0,0,.28)'}}>
                     <div className="px-5 py-4 flex items-center justify-between gap-4"
-                      style={{borderBottom:`1px solid ${t.border}`,background:t.card2}}>
+                      style={{borderBottom:'1px solid rgba(255,255,255,.18)',background:`linear-gradient(135deg, ${C.deepBlue} 0%, ${C.mediumBlue} 100%)`}}>
                       <div className="min-w-0">
-                        <p className="text-lg font-black truncate" style={{color:t.text}}>{selectedEmployeeCard.name}</p>
-                        <p className="text-[10px] truncate" style={{color:t.textMute}}>
+                        <p className="text-lg font-black truncate text-white">{selectedEmployeeCard.name}</p>
+                        <p className="text-[10px] truncate text-blue-100">
                           {selectedEmployeeCard.employeeId} • {selectedEmployeeCard.company} • {selectedEmployeeCard.department} • {selectedEmployeeCard.role}
                         </p>
                       </div>
-                      <button type="button" onClick={()=>setAttSelectedEmployee(null)}
-                        className="w-9 h-9 rounded-xl flex items-center justify-center text-lg font-bold flex-shrink-0"
-                        style={{background:t.card,border:`1px solid ${t.border}`,color:t.text}}>×</button>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {canDL && (
+                          <button type="button"
+                            onClick={()=>downloadAttendancePopupPdf(
+                              selectedEmployeeCard.rows,
+                              `${selectedEmployeeCard.name} Attendance Report`,
+                              `${selectedEmployeeCard.employeeId} • ${selectedEmployeeCard.company} • ${selectedEmployeeCard.department} • ${selectedEmployeeCard.role}`,
+                              `attendance_${String(selectedEmployeeCard.name||'employee').toLowerCase().replace(/[^a-z0-9]+/g,'_')}_${reportDateRange.from}_${reportDateRange.to}`
+                            )}
+                            className="h-9 px-3 rounded-xl flex items-center gap-1.5 text-[10px] font-bold text-white"
+                            style={{background:'rgba(255,255,255,.16)',border:'1px solid rgba(255,255,255,.30)'}}>
+                            ↓ PDF
+                          </button>
+                        )}
+                        <button type="button" onClick={()=>setAttSelectedEmployee(null)}
+                          className="w-9 h-9 rounded-xl flex items-center justify-center text-lg font-bold flex-shrink-0 text-white"
+                          style={{background:'rgba(255,255,255,.14)',border:'1px solid rgba(255,255,255,.28)'}}>×</button>
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 p-4"
