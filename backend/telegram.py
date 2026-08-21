@@ -144,6 +144,119 @@ def _today_plus(days: int) -> str:
     return (date.today() + timedelta(days=days)).isoformat()
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# HUMAN-LANGUAGE TELEGRAM RESPONSES
+#
+# Telegram is a conversation channel, not a database/log viewer.  Keep factual
+# values exact, but phrase activity messages naturally and only show fields that
+# actually exist.  These helpers are deliberately deterministic: they improve
+# tone without allowing an LLM to invent business data.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _tg_name(value, fallback="there"):
+    value = _tg_clean(value)
+    if not value:
+        return fallback
+    return str(value).strip()
+
+
+def _tg_join(values):
+    if not values:
+        return None
+    if isinstance(values, str):
+        values = [values]
+    cleaned = [str(v).strip() for v in values if _tg_clean(v)]
+    return ", ".join(cleaned) if cleaned else None
+
+
+def _tg_human_task_created(task, assignee=None):
+    title = _tg_name(task.get("title"), "your task")
+    lines = [f"📋 *Done — I created the task.*", "", f"📝 *{title}*"]
+    if assignee:
+        lines.append(f"👤 I've assigned it to *{_tg_name(assignee.get('full_name'), assignee.get('email', 'the team'))}*.")
+    if _tg_clean(task.get("due_date")):
+        lines.append(f"📅 Due: *{task['due_date']}*")
+    if _tg_clean(task.get("priority")):
+        lines.append(f"⚡ Priority: *{task['priority']}*")
+    return "\n".join(lines)
+
+
+def _tg_human_lead_created(lead):
+    company = _tg_name(lead.get("company_name") or lead.get("contact_name"), "the lead")
+    lines = [f"👤 *Got it — I added {company} as a new lead.*"]
+    services = _tg_join(lead.get("services"))
+    if services:
+        lines.append(f"📂 Looking for: *{services}*")
+    if _tg_clean(lead.get("contact_name")):
+        lines.append(f"👤 Contact: {_tg_name(lead.get('contact_name'))}")
+    if _tg_clean(lead.get("phone")):
+        lines.append(f"📞 Phone: {lead['phone']}")
+    if _tg_clean(lead.get("email")):
+        lines.append(f"✉️ Email: {lead['email']}")
+    return "\n".join(lines)
+
+
+def _tg_human_client_created(client):
+    company = _tg_name(client.get("company_name"), "the client")
+    lines = [f"🏢 *Done — {company} is now added as a client.*"]
+    if _tg_clean(client.get("phone")):
+        lines.append(f"📞 Phone: {client['phone']}")
+    if _tg_clean(client.get("email")):
+        lines.append(f"✉️ Email: {client['email']}")
+    if _tg_clean(client.get("gstin")):
+        lines.append(f"🏷 GSTIN: {client['gstin']}")
+    return "\n".join(lines)
+
+
+def _tg_human_invoice_pdf(inv):
+    invoice_no = _tg_name(inv.get("invoice_no"), "the invoice")
+    client = _tg_name(inv.get("client_name"), "the client")
+    total = _fmt_inr(inv.get("grand_total", 0))
+    return (
+        f"🧾 *Here you go — {invoice_no}*\n\n"
+        f"👤 Client: *{client}*\n"
+        f"💰 Total: *{total}*\n"
+        f"📄 I've attached the invoice PDF above."
+    )
+
+
+def _tg_human_invoice_created(inv, pdf_sent=True):
+    invoice_no = _tg_name(inv.get("invoice_no"), "the invoice")
+    client = _tg_name(inv.get("client_name"), "the client")
+    total = _fmt_inr(inv.get("grand_total", 0))
+    lines = [
+        "🧾 *Done — the invoice is ready.*",
+        "",
+        f"📄 Invoice: `{invoice_no}`",
+        f"👤 Client: *{client}*",
+        f"💰 Total: *{total}*",
+    ]
+    if _tg_clean(inv.get("due_date")):
+        lines.append(f"📅 Due: *{inv['due_date']}*")
+    if pdf_sent:
+        lines.append("\n📎 I've sent the PDF here as well.")
+    lines.append(f"\nIf you want to email it, say *“email {invoice_no} to the client”*.")
+    return "\n".join(lines)
+
+
+def _tg_human_no_results(kind, qualifier=None):
+    kind = str(kind).strip().lower()
+    qualifier = f" for *{qualifier}*" if _tg_clean(qualifier) else ""
+    wording = {
+        "tasks": "I couldn't find any tasks",
+        "leads": "I couldn't find any leads",
+        "clients": "I couldn't find any clients",
+        "invoices": "I couldn't find any invoices",
+        "quotations": "I couldn't find any quotations",
+        "attendance": "I couldn't find any attendance records",
+    }.get(kind, f"I couldn't find any matching {kind}")
+    return f"🔎 {wording}{qualifier}."
+
+
+def _tg_human_error(action="request"):
+    return f"⚠️ I couldn't complete that {action} right now. Please try again."
+
+
 # ── Build a human-readable invoice summary for the confirm step ───────────────
 def _build_invoice_summary(data: dict) -> str:
     inv_type_label = next(
@@ -438,9 +551,29 @@ async def _tg_ensure_learning_indexes():
         print(f"[Telegram Learning] index creation skipped: {exc}")
 
 
+def _tg_normalize_conversational_text(text: str) -> str:
+    """
+    Light normalization only.  It helps the parser recognize conversational
+    wording without rewriting names, amounts, invoice numbers, or dates.
+    """
+    value = str(text or "").strip()
+    if not value:
+        return value
+
+    # Common conversational shorthand. Keep the original meaning intact.
+    value = re.sub(r"(?i)^pls\\b", "please", value)
+    value = re.sub(r"(?i)^plz\\b", "please", value)
+    value = re.sub(r"(?i)\\bbill\\b", "invoice", value)
+    value = re.sub(r"(?i)\\bbilling\\b", "invoice", value)
+
+    return value
+
+
 async def _tg_ai_command(text: str, user_id=None, chat_id=None):
     if not TG_AI_KEY or not httpx:
         return None
+    original_text = str(text or "").strip()
+    parser_text = _tg_normalize_conversational_text(original_text)
     today = date.today().isoformat()
     learning_examples = await _tg_get_learning_examples(
         user_id=user_id, chat_id=chat_id, limit=TG_MEMORY_MAX_EXAMPLES
@@ -460,11 +593,38 @@ async def _tg_ai_command(text: str, user_id=None, chat_id=None):
                 + json.dumps(previous.get("intent") or {}, ensure_ascii=False)
             )
     prompt = f"""
-You are Taskosphere's Telegram command parser for a CA/CS ERP.
+You are Taskosphere's Telegram assistant and natural-language action parser for a CA/CS ERP.
 Today is {today}.
-Read the user's natural-language request and return ONLY valid JSON.
-Never invent missing values. Missing fields MUST be null, empty string, or [].
+
+The user is speaking naturally, like they would speak to a colleague. Do NOT require slash
+commands, database terminology, field names, or a rigid sentence structure.
+
+Your job has TWO separate responsibilities:
+1. Understand what the user wants, even when the wording is informal, abbreviated, misspelled,
+   conversational, or incomplete.
+2. Return ONLY valid JSON describing the intended action.
+
+Never invent missing business data. Missing fields MUST be null, empty string, or [].
 Resolve relative dates into ISO dates when possible.
+
+IMPORTANT LANGUAGE RULES:
+- "bill", "invoice", "tax bill", "billing" and "invoice PDF" can refer to invoices.
+- "share", "send", "give me", "show me", "get me", "I need" can all express retrieval.
+- "share invoice pdf of Abori House", "send Abori House bill", "I need Abori House's invoice",
+  and "can you send the latest invoice for Abori House" should all map to get_invoice with
+  output_format="pdf" when the user is asking for the PDF.
+- "prepare invoice", "make invoice", "raise invoice", "create bill", "make a bill" can map
+  to create_invoice.
+- "lead", "enquiry", "enquiry from", "prospect", "new customer enquiry" can refer to a lead.
+- "task", "work", "job", "to-do", "please handle", "give this to Priya" can refer to tasks.
+- "client", "customer", "company" can refer to a client when the context is client management.
+- "quotation", "quote", "estimate" can refer to quotations, subject to the existing action rules.
+- Understand possessive and natural forms such as "Rahul's pending work", "Abori House bill",
+  "invoice for Radhakrishna Gems", and "task for Priya".
+- Preserve exact names, amounts, invoice numbers, dates, service names and company names from
+  the current message. Do not replace them with data from learned examples.
+- If the user asks to perform a financial or record-changing action and essential information is
+  missing, identify the action and leave the missing field null so the application can ask for it.
 
 LEARNED LANGUAGE EXAMPLES:
 {examples_text}
@@ -478,19 +638,31 @@ create_task, create_lead, create_client, create_invoice, create_quotation,
 get_tasks, get_leads, get_attendance, get_clients, get_invoices, get_quotations,
 get_task, get_lead, get_client, get_invoice, get_quotation, help, none.
 
-For reports, understand phrases such as:
+For reports and retrieval, understand phrases such as:
 - pending/overdue/completed/all tasks
-- pending tasks of a named user / tasks assigned to a named user
+- pending tasks of a named user / tasks assigned to a named user / someone's pending work
 - my tasks / tasks assigned by me
 - attendance / attendance of a named user / attendance between two dates
-- new leads / leads between two dates / leads of a company/contact
-- clients / clients added between dates / a particular client
-- pending invoices / invoices of a client / invoice PDF of a client or invoice number
-- quotations / quotation of a client / quotation PDF
+- new leads / enquiries / leads between two dates / leads of a company/contact
+- clients / customers / clients added between dates / a particular client
+- pending invoices / invoices of a client / bill of a client
+- invoice PDF of a client / share invoice PDF / send bill / latest invoice for a client
+- quotations / quote of a client / quotation PDF / share quote
+- "show", "send", "share", "get", "give me", "I need", "please find" as retrieval wording
 
 For creation, extract every explicitly stated field but leave unspecified fields blank.
 For task assignment, assignee_name is the person the task is assigned to; if absent leave null.
 For a PDF request, set output_format to "pdf".
+For "latest" or "most recent", use the existing date/order behaviour rather than inventing an invoice number.
+
+NATURAL-LANGUAGE EXAMPLES:
+- "share invoice pdf of abori house" -> get_invoice, output_format="pdf", invoice.client_name="Abori House"
+- "send Abori House bill" -> get_invoice, output_format="pdf", invoice.client_name="Abori House"
+- "can you send me the latest invoice for Abori House" -> get_invoice, output_format="pdf", invoice.client_name="Abori House"
+- "prepare invoice for Radhakrishna Gems for ROC services total amount 15000 from MS Advisory"
+  -> create_invoice; capture client, service, amount and billing company only if those fields exist in the schema
+- "give Priya the ROC task for Radhakrishna Gems tomorrow" -> create_task with assignee_name="Priya"
+- "Radhakrishna Gems is interested in trademark registration" -> create_lead with company/requirement
 
 Return this shape:
 {{
@@ -512,7 +684,7 @@ Return this shape:
 }}
 
 USER MESSAGE:
-{text}
+{parser_text}
 """.strip()
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{TG_AI_MODEL}:generateContent?key={TG_AI_KEY}"
     payload = {
@@ -603,12 +775,22 @@ async def _tg_natural_language_handler(chat_id: int, text: str, message: dict) -
     action = str(intent.get("action") or "none").lower().strip()
     if action in {"none", "help"}:
         if action == "help":
-            await send_message(chat_id, "🤖 You can ask me to create or find tasks, leads, clients, invoices and quotations, or share attendance and date-range reports.\n\nExamples:\n• Share pending tasks\n• Share pending tasks of Rahul\n• Share attendance from 1 August to 20 August\n• Share new leads from 1 August to 20 August\n• Add ABC Pvt Ltd as client\n• Assign Priya to call ABC tomorrow")
+            await send_message(
+                chat_id,
+                "🤖 *Just tell me what you need in normal language.*\n\n"
+                "For example:\n"
+                "• “Share invoice PDF of Abori House”\n"
+                "• “Prepare invoice for Radhakrishna Gems for ROC services, 15000”\n"
+                "• “Give Priya the ROC task for ABC tomorrow”\n"
+                "• “Show Rahul's pending work”\n"
+                "• “Add ABC Pvt Ltd as a client”\n"
+                "• “Show new leads from 1 August to 20 August”"
+            )
             return True
         return False
 
     if not user:
-        await send_message(chat_id, "❌ Your Telegram account is not linked to a Taskosphere user account.")
+        await send_message(chat_id, "🔗 I can help with that, but this Telegram account isn't linked to a Taskosphere user yet.")
         return True
 
     # ───────────────────────────────────────────────────────────────────────
@@ -622,7 +804,7 @@ async def _tg_natural_language_handler(chat_id: int, text: str, message: dict) -
             return True
         assignee = await _tg_find_user(intent.get("assignee_name"))
         if intent.get("assignee_name") and not assignee:
-            await send_message(chat_id, f"❌ I could not find user *{intent.get('assignee_name')}*.")
+            await send_message(chat_id, f"👤 I couldn't find a Taskosphere user named *{intent.get('assignee_name')}*. Could you check the name?")
             return True
         now = datetime.now(timezone.utc)
         client = None
@@ -650,7 +832,13 @@ async def _tg_natural_language_handler(chat_id: int, text: str, message: dict) -
         await db.tasks.insert_one(new_task)
         if assignee:
             await create_notification(user_id=assignee["id"], title="New Task Assigned", message=f"Task '{title}' assigned via Telegram", type="assignment")
-        await send_message(chat_id, f"✅ *Task created*\n\n📝 {title}\n👤 Assigned to: {assignee.get('full_name') if assignee else '—'}\n📅 Due: {task.get('due_date') or '—'}\n⚡ Priority: {task.get('priority') or '—'}")
+        await send_message(
+            chat_id,
+            _tg_human_task_created(
+                task,
+                assignee=assignee,
+            ),
+        )
         return True
 
     # ───────────────────────────────────────────────────────────────────────
@@ -672,7 +860,7 @@ async def _tg_natural_language_handler(chat_id: int, text: str, message: dict) -
         if not duplicate and company_name:
             duplicate = await db.leads.find_one({"company_name": {"$regex": re.escape(company_name), "$options": "i"}, "status": {"$ne": "closed"}}, {"_id": 0})
         if duplicate:
-            await send_message(chat_id, f"ℹ️ Lead already exists for *{company_name or contact_name or phone}*.")
+            await send_message(chat_id, f"ℹ️ I found an existing lead for *{company_name or contact_name or phone}*, so I didn’t create a duplicate.")
             return True
         doc = {
             "id": str(uuid.uuid4()), "company_name": company_name, "contact_name": contact_name,
@@ -687,7 +875,16 @@ async def _tg_natural_language_handler(chat_id: int, text: str, message: dict) -
             "ai_confidence": float(intent.get("confidence") or 0),
         }
         await db.leads.insert_one(doc)
-        await send_message(chat_id, f"✅ *Lead added*\n\n👤 Contact: {contact_name or '—'}\n🏢 Company: {company_name or '—'}\n📂 Services: {', '.join(services) if services else '—'}\n📞 Phone: {phone or '—'}\n✉️ Email: {lead.get('email') or '—'}")
+        await send_message(
+            chat_id,
+            _tg_human_lead_created({
+                "contact_name": contact_name,
+                "company_name": company_name,
+                "services": services,
+                "phone": phone,
+                "email": lead.get("email"),
+            }),
+        )
         return True
 
     # ───────────────────────────────────────────────────────────────────────
@@ -704,7 +901,7 @@ async def _tg_natural_language_handler(chat_id: int, text: str, message: dict) -
             return True
         existing = await db.clients.find_one({"company_name": {"$regex": f"^{re.escape(company_name)}$", "$options": "i"}}, {"_id": 0})
         if existing:
-            await send_message(chat_id, f"ℹ️ Client *{existing.get('company_name', company_name)}* already exists.")
+            await send_message(chat_id, f"ℹ️ *{existing.get('company_name', company_name)}* is already in your client list, so I didn’t create a duplicate.")
             return True
         doc = {
             "id": str(uuid.uuid4()), "company_name": company_name,
@@ -720,7 +917,7 @@ async def _tg_natural_language_handler(chat_id: int, text: str, message: dict) -
             "created_at": datetime.now(timezone.utc), "status": "active",
         }
         await db.clients.insert_one(doc)
-        await send_message(chat_id, f"✅ *Client added*\n\n🏢 {company_name}\n📞 {doc['phone'] or '—'}\n✉️ {doc['email'] or '—'}\n🏷 GSTIN: {doc['gstin'] or '—'}")
+        await send_message(chat_id, _tg_human_client_created(doc))
         return True
 
     # ───────────────────────────────────────────────────────────────────────
@@ -732,7 +929,7 @@ async def _tg_natural_language_handler(chat_id: int, text: str, message: dict) -
     user_name = _tg_clean(intent.get("user_name"))
     target_user = await _tg_find_user(user_name) if user_name else None
     if user_name and not target_user:
-        await send_message(chat_id, f"❌ I could not find user *{user_name}*.")
+        await send_message(chat_id, f"👤 I couldn't find a Taskosphere user named *{user_name}*. Could you check the name?")
         return True
 
     if action in {"get_tasks", "get_task"}:
@@ -753,7 +950,7 @@ async def _tg_natural_language_handler(chat_id: int, text: str, message: dict) -
         q = _tg_merge_query(base, *filters)
         tasks = await db.tasks.find(q, {"_id": 0}).sort("due_date", 1).limit(min(int(intent.get("limit") or 30), 100)).to_list(min(int(intent.get("limit") or 30), 100))
         if not tasks:
-            await send_message(chat_id, "📋 No matching tasks found.")
+            await send_message(chat_id, _tg_human_no_results("tasks", search))
             return True
         ids = {x.get("assigned_to") for x in tasks if x.get("assigned_to")} | {x.get("created_by") for x in tasks if x.get("created_by")}
         users = await db.users.find({"id": {"$in": list(ids)}}, {"_id": 0, "password": 0}).to_list(100)
@@ -779,7 +976,7 @@ async def _tg_natural_language_handler(chat_id: int, text: str, message: dict) -
         if dq: filters.append(dq)
         leads = await db.leads.find(_tg_merge_query(base, *filters), {"_id": 0}).sort("created_at", -1).limit(min(int(intent.get("limit") or 30), 100)).to_list(min(int(intent.get("limit") or 30), 100))
         if not leads:
-            await send_message(chat_id, "📈 No matching leads found.")
+            await send_message(chat_id, _tg_human_no_results("leads", search))
             return True
         lines = [f"📈 *Leads ({len(leads)})*"]
         for x in leads:
@@ -803,7 +1000,7 @@ async def _tg_natural_language_handler(chat_id: int, text: str, message: dict) -
             q = _tg_merge_query(base, {"date": dfilter})
         rows = await db.attendance.find(q, {"_id": 0}).sort("date", -1).limit(1000).to_list(1000)
         if not rows:
-            await send_message(chat_id, "🕘 No attendance records found for that period.")
+            await send_message(chat_id, _tg_human_no_results("attendance"))
             return True
         ids = {r.get("user_id") for r in rows if r.get("user_id")}
         users = await db.users.find({"id": {"$in": list(ids)}}, {"_id": 0, "password": 0}).to_list(1000)
@@ -826,7 +1023,7 @@ async def _tg_natural_language_handler(chat_id: int, text: str, message: dict) -
         if dq: filters.append(dq)
         clients = await db.clients.find(_tg_merge_query(base, *filters), {"_id": 0}).sort("company_name", 1).limit(min(int(intent.get("limit") or 30), 100)).to_list(min(int(intent.get("limit") or 30), 100))
         if not clients:
-            await send_message(chat_id, "🏢 No matching clients found.")
+            await send_message(chat_id, _tg_human_no_results("clients", search))
             return True
         lines = [f"🏢 *Clients ({len(clients)})*"]
         for c in clients:
@@ -846,7 +1043,7 @@ async def _tg_natural_language_handler(chat_id: int, text: str, message: dict) -
         if dq: filters.append(dq)
         invoices = await db.invoices.find(_tg_merge_query(base, *filters), {"_id": 0}).sort("invoice_date", -1).limit(min(int(intent.get("limit") or 20), 50)).to_list(min(int(intent.get("limit") or 20), 50))
         if not invoices:
-            await send_message(chat_id, "🧾 No matching invoices found.")
+            await send_message(chat_id, _tg_human_no_results("invoices", inv.get("client_name") or search))
             return True
         if intent.get("output_format") == "pdf" and len(invoices) == 1:
             return bool(await _send_invoice_pdf_by_id(chat_id, invoices[0].get("id")))
@@ -868,7 +1065,7 @@ async def _tg_natural_language_handler(chat_id: int, text: str, message: dict) -
         if dq: filters.append(dq)
         quotations = await db.quotations.find(_tg_merge_query(base, *filters), {"_id": 0}).sort("created_at", -1).limit(min(int(intent.get("limit") or 20), 50)).to_list(min(int(intent.get("limit") or 20), 50))
         if not quotations:
-            await send_message(chat_id, "📄 No matching quotations found.")
+            await send_message(chat_id, _tg_human_no_results("quotations", qdata.get("client_name") or search))
             return True
         lines = [f"📄 *Quotations ({len(quotations)})*"]
         for x in quotations:
@@ -910,14 +1107,14 @@ async def telegram_webhook(request: Request):  # noqa: C901  (complex but intent
             # ── Generic cancel ────────────────────────────────────
             if clicked == "cancel_convo":
                 await db.telegram_conversations.delete_many({"telegram_id": chat_id})
-                await send_message(chat_id, "❌ Action cancelled.")
+                await send_message(chat_id, "👍 No problem — I cancelled that for you.")
                 return {"status": "cancelled"}
 
             # ── Delete task shortcut ──────────────────────────────
             if clicked.startswith("delete_"):
                 task_id = clicked.replace("delete_", "")
                 await db.tasks.delete_one({"id": task_id})
-                await send_message(chat_id, "🗑 Task deleted successfully.")
+                await send_message(chat_id, "🗑 Done — I removed that task.")
                 return {"status": "task_deleted"}
 
             # Load conversation
@@ -1460,7 +1657,7 @@ async def telegram_webhook(request: Request):  # noqa: C901  (complex but intent
         # ── Cancel ────────────────────────────────────────────────
         if text.lower() in ["/cl", "/cancel"]:
             await db.telegram_conversations.delete_many({"telegram_id": chat_id})
-            await send_message(chat_id, "❌ Action cancelled.")
+            await send_message(chat_id, "👍 No problem — I cancelled that for you.")
             return {"status": "cancelled"}
 
         # ── My Tasks ──────────────────────────────────────────────
@@ -1694,13 +1891,13 @@ async def telegram_webhook(request: Request):  # noqa: C901  (complex but intent
 
                 await send_message(
                     chat_id,
-                    "✅ *Lead Added Successfully!*\n\n"
-                    f"👤 *Contact:* {contact_name or '—'}\n"
-                    f"🏢 *Company:* {company_name or '—'}\n"
-                    f"📂 *Requirement:* {', '.join(services) if services else '—'}\n"
-                    f"📞 *Mobile:* {phone or '—'}\n"
-                    f"🏷 *Trademark:* {lead.get('trademark_name') or '—'}\n\n"
-                    "The lead has been added to Taskosphere Lead Management."
+                    _tg_human_lead_created({
+                        "contact_name": contact_name,
+                        "company_name": company_name,
+                        "services": services,
+                        "phone": phone,
+                        "email": email,
+                    }),
                 )
                 return {"status": "lead_created", "lead_id": lead_id}
 
@@ -1727,7 +1924,7 @@ async def telegram_webhook(request: Request):  # noqa: C901  (complex but intent
         if not convo:
             await send_message(
                 chat_id,
-                "👋 *Welcome to TaskOsphere Bot!*\n\n"
+                "👋 *Hi! I’m your Taskosphere assistant.*\n\n"
                 "📄 *Invoicing:* `/inv` · `/invlist` · `/invpdf` · `/invemail`\n"
                 "📋 *CRM / Tasks:* `/ld` · `/ts` · `/qo` · `/mt`\n"
                 "❌ Cancel: `/cl`  |  Help: `/help`"
@@ -2318,8 +2515,8 @@ async def _handle_confirm_invoice(chat_id: int, data: dict) -> dict:
                 chat_id,
                 f"✅ Invoice *{inv_no}* created!\n"
                 f"💎 Total: {_fmt_inr(grand_total)}\n\n"
-                f"⚠️ PDF generation failed: {pdf_err}\n"
-                f"Download from the web app."
+                "⚠️ The invoice was created, but I couldn't prepare the PDF just now. "
+                "You can open it from the web app and try again."
             )
             await db.telegram_conversations.delete_one({"telegram_id": chat_id})
             return {"status": "inv_created_no_pdf"}
@@ -2329,12 +2526,7 @@ async def _handle_confirm_invoice(chat_id: int, data: dict) -> dict:
         await db.telegram_conversations.delete_one({"telegram_id": chat_id})
         await send_message(
             chat_id,
-            f"✅ *Invoice Created Successfully!*\n\n"
-            f"📄 Invoice No: `{inv_no}`\n"
-            f"👤 Client: {data.get('client_name','—')}\n"
-            f"💎 Grand Total: *{_fmt_inr(grand_total)}*\n"
-            f"📅 Due: {invoice_doc['due_date']}\n\n"
-            f"📩 PDF sent above. Use `/invemail {inv_no}` to email it to your client."
+            _tg_human_invoice_created(invoice_doc, pdf_sent=True),
         )
         return {"status": "invoice_created"}
 
@@ -2392,7 +2584,7 @@ async def _send_invoice_pdf_by_id(chat_id: int, inv_id: str) -> dict:
     """Fetch invoice + company, generate PDF, send to chat."""
     inv = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
     if not inv:
-        await send_message(chat_id, "❌ Invoice not found.")
+        await send_message(chat_id, "🔎 I couldn't find that invoice. Please check the client name or invoice number.")
         return {"status": "not_found"}
 
     company = await db.companies.find_one({"id": inv.get("company_id")}, {"_id": 0}) or {}
@@ -2407,12 +2599,10 @@ async def _send_invoice_pdf_by_id(chat_id: int, inv_id: str) -> dict:
     await send_document(chat_id, pdf_bytes, f"Invoice_{safe_no}.pdf")
     await send_message(
         chat_id,
-        f"📄 *{inv.get('invoice_no','—')}*\n"
-        f"👤 {inv.get('client_name','—')}\n"
-        f"💎 {_fmt_inr(inv.get('grand_total',0))}\n"
-        f"📅 Due: {inv.get('due_date','—')}\n"
-        f"Status: {inv.get('status','—')}\n\n"
-        f"📩 Use `/invemail {inv.get('invoice_no','')}` to email this to the client."
+        _tg_human_invoice_pdf(inv)
+        + (
+            f"\n📩 If you'd like, I can email it to the client too."
+        ),
     )
     return {"status": "pdf_sent"}
 
@@ -2421,7 +2611,7 @@ async def _send_invoice_email_by_id(chat_id: int, inv_id: str) -> dict:
     """Generate PDF and email it to the client's email address."""
     inv = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
     if not inv:
-        await send_message(chat_id, "❌ Invoice not found.")
+        await send_message(chat_id, "🔎 I couldn't find that invoice. Please check the client name or invoice number.")
         return {"status": "not_found"}
 
     client_email = (inv.get("client_email") or "").strip()
@@ -2473,7 +2663,11 @@ async def _send_invoice_email_by_id(chat_id: int, inv_id: str) -> dict:
             company_email,
         )
     except Exception as e:
-        await send_message(chat_id, f"❌ Email sending failed: {e}\n\nCheck SMTP settings in environment variables.")
+        await send_message(
+        chat_id,
+        "⚠️ I couldn't send the invoice email right now. "
+        "Please check the email settings and try again."
+    )
         return {"status": "email_error"}
 
     # Update invoice status to "sent" if still draft
