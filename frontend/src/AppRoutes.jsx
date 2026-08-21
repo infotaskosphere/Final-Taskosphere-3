@@ -5,7 +5,6 @@ import DashboardLayout from '@/components/layout/DashboardLayout.jsx';
 import ModuleGate from '@/components/ModuleGate.jsx';
 import { PageGuard } from '@/components/governance/GovernanceGuards.jsx';
 import GifLoader, { ContentLoader } from '@/components/ui/GifLoader.jsx';
-import { AnimatePresence, motion } from 'framer-motion';
 
 /* ── Auth pages (no sidebar) ─────────────────────────────────────────── */
 const Login = lazy(() => import('./pages/Login.jsx'));
@@ -68,7 +67,6 @@ const ImportInvoices = lazy(() => import('./pages/ImportInvoices.jsx'));
 const Reports = lazy(() => import('./pages/Reports.jsx'));
 const TaskAudit = lazy(() => import('./pages/TaskAudit.jsx'));
 const Users = lazy(() => import('./pages/Users.jsx'));
-
 const StaffActivity = lazy(() => import('./pages/StaffActivity.jsx'));
 const ClientPortalManagerPage = lazy(() => import('./pages/ClientPortalManagerPage.jsx'));
 const WhatsAppHub = lazy(() => import('./pages/WhatsAppHub.jsx'));
@@ -91,40 +89,16 @@ const EmailSettings = lazy(() => import('@/components/EmailSettings.jsx'));
 const PendingApprovals = lazy(() => import('@/components/PendingApprovalsPanel.jsx'));
 
 /* ── Route guards ─────────────────────────────────────────────────────── */
-
-// Shown while AuthContext is restoring the session from localStorage/
-// sessionStorage on first load or a hard refresh.
 function AuthLoading() {
   return <GifLoader />;
 }
 
-// Renders ONCE and stays mounted for every internal-app navigation — the
-// sidebar/header (DashboardLayout) no longer unmounts + remounts on every
-// route change the way the old per-route <Protected> wrapper caused (it
-// was re-created inside a tree that App.jsx keyed by pathname, so every
-// click fully tore down and rebuilt the whole layout: sidebar nav list,
-// notification polling effect, section-bar computation, etc.). Now only
-// the page content under <Outlet/> swaps, which is what actually needs
-// to change between pages — this is what makes navigation feel instant.
 function ProtectedLayout() {
   const { user, loading } = useAuth();
   if (loading) return <AuthLoading />;
   if (!user) return <Navigate to="/login" replace />;
   return (
     <DashboardLayout>
-      {/* Nested Suspense boundary: a not-yet-downloaded lazy page (e.g.
-          Tasks.jsx, which is large) now only shows ContentLoader inside
-          the content area while its chunk loads — the sidebar/header
-          stay mounted and visible. Previously the ONLY Suspense boundary
-          was the app-wide one in App.jsx using the full-screen GifLoader,
-          so every first-visit navigation to a lazy page unmounted the
-          entire DashboardLayout (sidebar and all) and replaced the whole
-          screen with a loading overlay, then remounted everything from
-          scratch once the chunk arrived — which is what made pages like
-          Tasks (opened via "+ New Task", ?newTask=1) look like they
-          "opened, then closed, then reopened": the real sequence was
-          mount → suspend → full-screen overlay → remount, not a genuine
-          dialog open/close. */}
       <Suspense fallback={<ContentLoader />}>
         <AnimatedOutlet />
       </Suspense>
@@ -132,29 +106,35 @@ function ProtectedLayout() {
   );
 }
 
-// Small opacity-only cross-fade on the page content itself. Deliberately
-// cheap (no layout-shifting slide/scale) so it never becomes the
-// bottleneck — this replaced the old app-wide "wait for exit, then
-// mount" transition that used to block on every navigation.
+/*
+ * Navigation is intentionally opacity-only and does not wait for an exit
+ * animation. The previous implementation used AnimatePresence mode="wait",
+ * which forced the old page to finish exiting before the next page could
+ * mount. That made module switching feel slower than it actually was.
+ */
 function AnimatedOutlet() {
   const location = useLocation();
   return (
-    <AnimatePresence mode="wait" initial={false}>
-      <motion.div
-        key={location.pathname}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.12, ease: 'easeOut' }}
-      >
-        <Outlet />
-      </motion.div>
-    </AnimatePresence>
+    <div
+      key={location.pathname}
+      style={{
+        width: '100%',
+        minHeight: '100%',
+        animation: 'taskospherePageIn 120ms ease-out',
+        willChange: 'opacity',
+      }}
+    >
+      <Outlet />
+      <style>{`
+        @keyframes taskospherePageIn {
+          from { opacity: 0.82; }
+          to { opacity: 1; }
+        }
+      `}</style>
+    </div>
   );
 }
 
-// Wraps /login, /register, /forgot-password: an already-signed-in user
-// skips straight to the dashboard instead of seeing the auth form again.
 function PublicOnly({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <AuthLoading />;
@@ -162,9 +142,6 @@ function PublicOnly({ children }) {
   return children;
 }
 
-// Admin module is role-gated only, not flag-gated (see backend/models.py
-// MODULE_HIERARCHY["admin"] note) — every route under it uses this instead
-// of ModuleGate.
 function AdminOnly({ children }) {
   const { user } = useAuth();
   if (user?.role?.toLowerCase() !== 'admin') return <Navigate to="/dashboard" replace />;
@@ -176,30 +153,16 @@ export default function AppRoutes() {
   return (
     <Suspense fallback={<AuthLoading />}>
       <Routes>
-        {/* ── Public / auth ── */}
         <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
         <Route path="/register" element={<PublicOnly><Register /></PublicOnly>} />
         <Route path="/forgot-password" element={<PublicOnly><ForgotPassword /></PublicOnly>} />
 
-        {/* ── Client portal (separate client-facing auth) ── */}
         <Route path="/client-portal" element={<Navigate to="/client-portal/login" replace />} />
         <Route path="/client-portal/login" element={<ClientPortalLogin />} />
         <Route path="/client-portal/dashboard" element={<ClientPortalDashboard />} />
 
-        {/* ── Everything below shares ONE persistent DashboardLayout instance
-            (mounted once by ProtectedLayout) instead of each page getting
-            its own — this is the fix for sluggish page-to-page navigation. ── */}
         <Route element={<ProtectedLayout />}>
 
-        {/* ── Core ──
-            Every Taskosphere page is now individually admin-granted via its
-            own can_view_X flag (see MODULE_HIERARCHY["taskosphere"] in
-            backend/models.py) — same PageGuard pattern Client Portal Manager
-            already used. Dashboard is the one exception: it's intentionally
-            left un-gated here (no PageGuard) so that turning any page off
-            can never create a redirect loop, since every denied PageGuard
-            redirects to /dashboard. Its can_view_dashboard flag still
-            controls whether the Dashboard link shows in the sidebar. */}
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/tasks" element={<ModuleGate module="taskosphere"><PageGuard module="taskosphere" page="can_view_tasks"><Tasks /></PageGuard></ModuleGate>} />
         <Route path="/todos" element={<ModuleGate module="taskosphere"><PageGuard module="taskosphere" page="can_view_todo_dashboard"><TodoDashboard /></PageGuard></ModuleGate>} />
@@ -209,12 +172,8 @@ export default function AppRoutes() {
         <Route path="/action-center" element={<ModuleGate module="taskosphere"><PageGuard module="taskosphere" page="can_view_action_center"><ActionCenter /></PageGuard></ModuleGate>} />
         <Route path="/visits" element={<ModuleGate module="taskosphere"><PageGuard module="taskosphere" page="can_view_client_visits"><VisitsPage /></PageGuard></ModuleGate>} />
         <Route path="/ai-reader" element={<ModuleGate module="taskosphere"><PageGuard module="taskosphere" page="can_view_ai_document_reader"><AIDocumentReader /></PageGuard></ModuleGate>} />
-        {/* Client Portal Manager — moved here from Admin; still individually
-            admin-granted per user via can_view_client_portal (see
-            MODULE_HIERARCHY["taskosphere"] in backend/models.py). */}
         <Route path="/client-portal-manager/*" element={<ModuleGate module="taskosphere"><PageGuard module="taskosphere" page="can_view_client_portal"><ClientPortalManagerPage /></PageGuard></ModuleGate>} />
 
-        {/* ── Compliance ── */}
         <Route path="/compliance-dashboard" element={<ModuleGate module="compliance"><ComplianceDashboard /></ModuleGate>} />
         <Route path="/compliance" element={<ModuleGate module="compliance"><CompliancePage /></ModuleGate>} />
         <Route path="/gst-reconciliation" element={<ModuleGate module="compliance"><GSTReconciliation /></ModuleGate>} />
@@ -223,7 +182,6 @@ export default function AppRoutes() {
         <Route path="/salary-slips" element={<ModuleGate module="compliance"><PageGuard module="compliance" page="can_view_salary_slips"><SalarySlips /></PageGuard></ModuleGate>} />
         <Route path="/roc-sphere" element={<ModuleGate module="compliance"><ROCSpherePage /></ModuleGate>} />
 
-        {/* ── Records ── */}
         <Route path="/records-dashboard" element={<ModuleGate module="records"><RecordsDashboard /></ModuleGate>} />
         <Route path="/client-approvals" element={<ModuleGate module="records"><ClientApprovals /></ModuleGate>} />
         <Route path="/dsc" element={<ModuleGate module="records"><DSCRegister /></ModuleGate>} />
@@ -231,12 +189,10 @@ export default function AppRoutes() {
         <Route path="/clients" element={<ModuleGate module="records"><Clients /></ModuleGate>} />
         <Route path="/passwords" element={<ModuleGate module="records"><PasswordRepository /></ModuleGate>} />
 
-        {/* ── Client proposals ── */}
         <Route path="/client-proposals-dashboard" element={<ModuleGate module="proposals"><ClientProposalsDashboard /></ModuleGate>} />
         <Route path="/leads" element={<ModuleGate module="proposals"><LeadsPage /></ModuleGate>} />
         <Route path="/quotations" element={<ModuleGate module="proposals"><Quotations /></ModuleGate>} />
 
-        {/* ── Accounts ── */}
         <Route path="/finix-dashboard" element={<ModuleGate module="finix"><FinixDashboard /></ModuleGate>} />
         <Route path="/invoicing" element={<ModuleGate module="finix"><Invoicing /></ModuleGate>} />
         <Route path="/purchase" element={<ModuleGate module="finix"><Purchase /></ModuleGate>} />
@@ -263,55 +219,34 @@ export default function AppRoutes() {
         <Route path="/due-dates" element={<ModuleGate module="finix"><DueDates /></ModuleGate>} />
         <Route path="/import-invoices" element={<ModuleGate module="finix"><ImportInvoices /></ModuleGate>} />
 
-        {/* ── Admin ── */}
         <Route path="/people-matrix" element={<ModuleGate module="peopleMatrix"><PeopleMatrixDashboard /></ModuleGate>} />
         <Route path="/reports" element={<Reports />} />
-        {/* Audit Logs & Unified Inbox are now admin-only in the nav (see
-            DashboardLayout.jsx) — gate the routes themselves too, so a
-            non-admin can't reach them just by typing the URL. */}
         <Route path="/task-audit" element={<AdminOnly><TaskAudit /></AdminOnly>} />
         <Route path="/users" element={<ModuleGate module="peopleMatrix"><Users /></ModuleGate>} />
         <Route path="/staff-activity" element={<StaffActivity />} />
         <Route path="/whatsapp-hub" element={<AdminOnly><WhatsAppHub /></AdminOnly>} />
 
-        {/* ── People Matrix: Leave / Payroll / HR / Recruitment ── */}
-        {/* Performance was removed — it duplicated /reports (see the Reports
-            nav item above), which is the real, built-out reporting page. */}
         <Route path="/leave" element={<ModuleGate module="peopleMatrix"><PageGuard module="people_matrix" page="can_view_leave"><Leave /></PageGuard></ModuleGate>} />
         <Route path="/payroll" element={<ModuleGate module="peopleMatrix"><PageGuard module="people_matrix" page="can_view_payroll"><Payroll /></PageGuard></ModuleGate>} />
         <Route path="/hr" element={<ModuleGate module="peopleMatrix"><PageGuard module="people_matrix" page="can_view_hr"><HR /></PageGuard></ModuleGate>} />
         <Route path="/recruitment" element={<ModuleGate module="peopleMatrix"><PageGuard module="people_matrix" page="can_view_recruitment"><Recruitment /></PageGuard></ModuleGate>} />
 
-        {/* ── Client Proposals: Client Discussion ── */}
         <Route path="/client-discussion" element={<ModuleGate module="proposals"><PageGuard module="proposals" page="can_view_client_discussion"><ClientDiscussion /></PageGuard></ModuleGate>} />
 
-        {/* ── Admin: Dashboard / Permission Matrix / Master Data / Roles ──
-            The Admin module is role-gated only (see MODULE_HIERARCHY["admin"]
-            in backend/models.py) — AdminOnly below checks role directly
-            instead of going through ModuleGate/PageGuard's flag lookups. ── */}
         <Route path="/admin-dashboard" element={<AdminOnly><AdminDashboard /></AdminOnly>} />
         <Route path="/permission-matrix" element={<AdminOnly><PermissionMatrix /></AdminOnly>} />
         <Route path="/master-data" element={<AdminOnly><PageGuard module="admin" page="can_view_master_data"><MasterData /></PageGuard></AdminOnly>} />
         <Route path="/roles" element={<AdminOnly><PageGuard module="admin" page="can_view_roles"><Roles /></PageGuard></AdminOnly>} />
 
-        {/* ── Settings ── */}
         <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
         <Route path="/settings/general" element={<GeneralSettings />} />
         <Route path="/settings/email" element={<EmailSettings />} />
-        {/* WhatsApp Settings + Automation Settings were merged into one
-            "Message Automation" page (WhatsAppSettings.jsx now includes a
-            Birthday & Approval Gate tab). Old bookmarks/links to
-            /settings/automation redirect here. */}
         <Route path="/settings/whatsapp" element={<WhatsAppSettings />} />
         <Route path="/settings/automation" element={<Navigate to="/settings/whatsapp" replace />} />
-        {/* Not AdminOnly — reachable by any logged-in user; the panel itself
-            (and the backend) only shows/allows channels the user is granted
-            via can_approve_whatsapp_wishes / can_approve_email_wishes. */}
         <Route path="/automation/approvals" element={<PendingApprovals />} />
 
         </Route>
 
-        {/* ── Root & fallback ── */}
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
