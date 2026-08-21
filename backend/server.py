@@ -54,7 +54,10 @@ from backend.visits import router as visits_router
 from backend.leads import router as leads_router
 from backend.client_activity import router as client_activity_router
 from backend.automation_engine import router as automation_router, expiry_router as service_expiry_router
-from backend.recruitment import router as recruitment_router
+from backend.recruitment import (
+    router as recruitment_router,
+    list_candidates as recruitment_list_candidates,
+)
 from backend.telegram import router as telegram_router
 from backend.notifications import router as notification_router, create_notification, notify_admins_leave
 
@@ -14735,9 +14738,26 @@ async def remove_clients_from_group(
 app.include_router(api_router)
 
 # ── Recruitment direct API mount ─────────────────────────────────────────────
-# Explicitly expose Recruitment at /api/recruitment.
-# Keeps the endpoint available even if nested api_router registration
-# is not propagated by the running FastAPI/Starlette route tree.
+# EXPLICIT ROUTE SAFETY FIX:
+# The People Matrix frontend calls GET /api/recruitment.
+# Register the exact collection endpoint directly on the FastAPI app so it
+# cannot disappear because of nested router mounting/order issues.
+#
+# Keep the normal router mount below as well so every other Recruitment
+# endpoint (/stats, /{candidate_id}, etc.) remains available unchanged.
+app.add_api_route(
+    "/api/recruitment",
+    recruitment_list_candidates,
+    methods=["GET"],
+    include_in_schema=False,
+)
+app.add_api_route(
+    "/api/recruitment/",
+    recruitment_list_candidates,
+    methods=["GET"],
+    include_in_schema=False,
+)
+
 app.include_router(
     recruitment_router,
     prefix="/api",
