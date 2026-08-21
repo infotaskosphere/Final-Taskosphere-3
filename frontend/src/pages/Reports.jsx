@@ -247,6 +247,7 @@ export default function Reports() {
   const [attSearch, setAttSearch] = useState('');
   const [attSelectedEmployee, setAttSelectedEmployee] = useState(null);
   const [attSummaryFilter, setAttSummaryFilter] = useState(null);
+  const [attEmployeeSummaryFilter, setAttEmployeeSummaryFilter] = useState('all');
 
   const [tab,        setTab]        = useState('overview');
   const [showCustomize, setShowCustomize] = useState(false);
@@ -489,6 +490,39 @@ export default function Reports() {
     if(!attSelectedEmployee) return null;
     return attendanceEmployeeCards.find(x=>x.key===attSelectedEmployee) || null;
   },[attSelectedEmployee, attendanceEmployeeCards]);
+
+  // Employee popup filter: the status cards inside an employee popup are real
+  // filters, not decorative KPI cards. The table and popup PDF use this exact dataset.
+  const selectedEmployeePopupRows = useMemo(()=>{
+    if(!selectedEmployeeCard) return [];
+    const rows = selectedEmployeeCard.rows || [];
+    if(attEmployeeSummaryFilter === 'all') return rows;
+    return rows.filter(a=>{
+      switch(attEmployeeSummaryFilter){
+        case 'present': return a._status==='present' && !!a.punch_in;
+        case 'absent': return a._status==='absent';
+        case 'leave': return a._status==='leave';
+        case 'half': return a._status==='half_day' || a._status==='half-day';
+        case 'late': return !!a._late;
+        case 'early': return !!a._early;
+        case 'missing': return !!a._missingOut;
+        case 'auto': return !!a._auto;
+        default: return true;
+      }
+    });
+  },[selectedEmployeeCard,attEmployeeSummaryFilter]);
+
+  const selectedEmployeePopupFilterMeta = useMemo(()=>({
+    all:{label:'All Attendance Records',color:C.deepBlue},
+    present:{label:'Present Attendance',color:C.emeraldGreen},
+    absent:{label:'Absent Attendance',color:'#dc2626'},
+    leave:{label:'Leave Records',color:C.mediumBlue},
+    half:{label:'Half Day Records',color:C.amber},
+    late:{label:'Late Attendance',color:C.amber},
+    early:{label:'Early Out Records',color:'#ea580c'},
+    missing:{label:'Missing Punch-Out Records',color:'#dc2626'},
+    auto:{label:'Auto Marked Attendance',color:C.deepBlue},
+  }[attEmployeeSummaryFilter] || {label:'All Attendance Records',color:C.deepBlue}),[attEmployeeSummaryFilter]);
 
   const summaryPopupRows = useMemo(()=>{
     if(!attSummaryFilter) return [];
@@ -1382,7 +1416,7 @@ export default function Reports() {
                       const initials=(g.name||'U').split(/\s+/).slice(0,2).map(x=>x.charAt(0)).join('').toUpperCase();
                       return (
                         <motion.button type="button" key={g.key} variants={iV}
-                          onClick={()=>setAttSelectedEmployee(g.key)}
+                          onClick={()=>{setAttSelectedEmployee(g.key);setAttEmployeeSummaryFilter('all')}}
                           className="text-left rounded-2xl p-3.5 transition-all hover:-translate-y-0.5"
                           style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:t.shadow}}>
                           <div className="flex items-center gap-3">
@@ -1551,50 +1585,71 @@ export default function Reports() {
                     initial={{opacity:0,y:18,scale:.98}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:18,scale:.98}}
                     className="w-full max-w-6xl max-h-[92vh] rounded-2xl overflow-hidden flex flex-col"
                     style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:'0 24px 70px rgba(0,0,0,.28)'}}>
+                    {/* FIXED employee popup header: never scrolls out of view. */}
                     <div className="px-5 py-4 flex items-center justify-between gap-4 shrink-0"
-                      style={{position:'sticky',top:0,zIndex:9999,borderBottom:'2px solid rgba(255,255,255,.28)',background:`linear-gradient(135deg, ${C.deepBlue} 0%, ${C.mediumBlue} 100%)`,boxShadow:'0 6px 18px rgba(13,59,102,.30)'}}>
+                      style={{position:'relative',zIndex:20,borderBottom:'2px solid rgba(255,255,255,.30)',background:`linear-gradient(135deg, ${C.deepBlue} 0%, ${C.mediumBlue} 100%)`,boxShadow:'0 6px 18px rgba(13,59,102,.30)'}}>
                       <div className="min-w-0">
                         <p className="text-lg font-black truncate text-white">{selectedEmployeeCard.name}</p>
                         <p className="text-[10px] truncate text-blue-100">
                           EMPLOYEE ATTENDANCE • {selectedEmployeeCard.employeeId} • {selectedEmployeeCard.company} • {selectedEmployeeCard.department} • {selectedEmployeeCard.role}
+                        </p>
+                        <p className="text-[10px] font-bold text-white/90 mt-1 truncate">
+                          Showing: {selectedEmployeePopupFilterMeta.label} • {selectedEmployeePopupRows.length} records
                         </p>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         {canDL && (
                           <button type="button"
                             onClick={()=>downloadAttendancePopupPdf(
-                              selectedEmployeeCard.rows,
-                              `${selectedEmployeeCard.name} Attendance Report`,
-                              `${selectedEmployeeCard.employeeId} • ${selectedEmployeeCard.company} • ${selectedEmployeeCard.department} • ${selectedEmployeeCard.role}`,
-                              `attendance_${String(selectedEmployeeCard.name||'employee').toLowerCase().replace(/[^a-z0-9]+/g,'_')}_${reportDateRange.from}_${reportDateRange.to}`
+                              selectedEmployeePopupRows,
+                              `${selectedEmployeeCard.name} Attendance Report - ${selectedEmployeePopupFilterMeta.label}`,
+                              `${selectedEmployeeCard.employeeId} • ${selectedEmployeeCard.company} • ${selectedEmployeeCard.department} • ${selectedEmployeePopupRows.length} records`,
+                              `attendance_${String(selectedEmployeeCard.name||'employee').toLowerCase().replace(/[^a-z0-9]+/g,'_')}_${attEmployeeSummaryFilter}_${reportDateRange.from}_${reportDateRange.to}`
                             )}
-                            className="h-9 px-3.5 rounded-xl flex items-center gap-1.5 text-[10px] font-extrabold text-white shadow-sm"
-                            style={{background:'#16a34a',border:'1px solid rgba(255,255,255,.55)',boxShadow:'0 2px 8px rgba(0,0,0,.18)'}}>
-                            <span className="text-[11px]">↓</span> Download PDF
+                            className="h-10 px-4 rounded-xl flex items-center gap-1.5 text-[11px] font-extrabold text-white shadow-lg whitespace-nowrap"
+                            style={{background:'#16a34a',border:'2px solid rgba(255,255,255,.72)',boxShadow:'0 3px 12px rgba(0,0,0,.24)'}}>
+                            <Download className="w-3.5 h-3.5"/> Download PDF
                           </button>
                         )}
-                        <button type="button" onClick={()=>setAttSelectedEmployee(null)}
-                          className="w-9 h-9 rounded-xl flex items-center justify-center text-lg font-bold flex-shrink-0 text-white"
-                          style={{background:'rgba(255,255,255,.14)',border:'1px solid rgba(255,255,255,.28)'}}>×</button>
+                        <button type="button" onClick={()=>{setAttSelectedEmployee(null);setAttEmployeeSummaryFilter('all')}}
+                          className="w-10 h-10 rounded-xl flex items-center justify-center text-xl font-bold flex-shrink-0 text-white"
+                          style={{background:'rgba(255,255,255,.16)',border:'2px solid rgba(255,255,255,.30)'}}>×</button>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 p-4"
+                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 p-4 shrink-0"
                       style={{borderBottom:`1px solid ${t.border}`}}>
                       {[
-                        ['Present',selectedEmployeeCard.present,C.emeraldGreen],['Absent',selectedEmployeeCard.absent,'#dc2626'],
-                        ['Leave',selectedEmployeeCard.leave,C.mediumBlue],['Half Day',selectedEmployeeCard.half,C.amber],
-                        ['Late',selectedEmployeeCard.late,C.amber],['Early Out',selectedEmployeeCard.early,'#ea580c'],
-                        ['Missing Out',selectedEmployeeCard.missing,'#dc2626'],['Hours',fmt(selectedEmployeeCard.minutes),C.deepBlue]
-                      ].map(([label,val,color])=>(
-                        <div key={label} className="rounded-xl px-2.5 py-2" style={{background:t.card2,border:`1px solid ${t.border}`}}>
-                          <p className="text-[8px] font-bold uppercase tracking-wider" style={{color:t.textMute}}>{label}</p>
-                          <p className="text-sm font-black mt-0.5" style={{color}}>{val}</p>
-                        </div>
+                        ['Present',selectedEmployeeCard.present,C.emeraldGreen,'present'],['Absent',selectedEmployeeCard.absent,'#dc2626','absent'],
+                        ['Leave',selectedEmployeeCard.leave,C.mediumBlue,'leave'],['Half Day',selectedEmployeeCard.half,C.amber,'half'],
+                        ['Late',selectedEmployeeCard.late,C.amber,'late'],['Early Out',selectedEmployeeCard.early,'#ea580c','early'],
+                        ['Missing Out',selectedEmployeeCard.missing,'#dc2626','missing'],['Hours',fmt(selectedEmployeeCard.minutes),C.deepBlue,null]
+                      ].map(([label,val,color,filterKey])=>(
+                        filterKey ? (
+                          <button key={label} type="button" onClick={()=>setAttEmployeeSummaryFilter(filterKey)}
+                            className="rounded-xl px-2.5 py-2 text-left transition-all hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                            style={{background:attEmployeeSummaryFilter===filterKey ? `${color}18` : t.card2,border:`2px solid ${attEmployeeSummaryFilter===filterKey ? color : t.border}`,boxShadow:attEmployeeSummaryFilter===filterKey ? `0 0 0 2px ${color}22` : 'none',cursor:'pointer'}}>
+                            <p className="text-[8px] font-bold uppercase tracking-wider" style={{color:t.textMute}}>{label}</p>
+                            <p className="text-sm font-black mt-0.5" style={{color}}>{val}</p>
+                            <p className="text-[7px] font-bold mt-0.5" style={{color:attEmployeeSummaryFilter===filterKey?color:t.textMute}}>FILTER</p>
+                          </button>
+                        ) : (
+                          <div key={label} className="rounded-xl px-2.5 py-2" style={{background:t.card2,border:`1px solid ${t.border}`}}>
+                            <p className="text-[8px] font-bold uppercase tracking-wider" style={{color:t.textMute}}>{label}</p>
+                            <p className="text-sm font-black mt-0.5" style={{color}}>{val}</p>
+                          </div>
+                        )
                       ))}
                     </div>
 
-                    <div className="flex-1 overflow-auto p-4">
+                    <div className="flex items-center justify-between gap-2 px-4 py-2 shrink-0" style={{background:t.card2,borderBottom:`1px solid ${t.border}`}}>
+                      <span className="text-[10px] font-bold" style={{color:selectedEmployeePopupFilterMeta.color}}>FILTER: {selectedEmployeePopupFilterMeta.label} ({selectedEmployeePopupRows.length})</span>
+                      {attEmployeeSummaryFilter!=='all' && (
+                        <button type="button" onClick={()=>setAttEmployeeSummaryFilter('all')} className="text-[10px] font-bold px-2.5 py-1 rounded-lg" style={{background:C.deepBlue,color:'#fff'}}>Show All Records</button>
+                      )}
+                    </div>
+
+                    <div className="flex-1 min-h-0 overflow-auto p-4">
                       <div className="overflow-x-auto rounded-xl" style={{border:`1px solid ${t.border}`}}>
                         <table className="w-full text-sm min-w-[1250px]">
                           <thead><tr style={{background:t.card2}}>
@@ -1603,7 +1658,7 @@ export default function Reports() {
                             ))}
                           </tr></thead>
                           <tbody>
-                            {selectedEmployeeCard.rows.map((a,i)=>{
+                            {selectedEmployeePopupRows.map((a,i)=>{
                               const sc=a._status==='present'
                                 ?{bg:dark?'rgba(31,175,90,.15)':'#f0fdf4',col:C.emeraldGreen}
                                 :a._status==='absent'
