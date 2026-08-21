@@ -54,7 +54,10 @@ from backend.visits import router as visits_router
 from backend.leads import router as leads_router
 from backend.client_activity import router as client_activity_router
 from backend.automation_engine import router as automation_router, expiry_router as service_expiry_router
-from backend.recruitment import router as recruitment_router
+from backend.recruitment import (
+    router as recruitment_router,
+    list_candidates as recruitment_list_candidates,
+)
 from backend.telegram import router as telegram_router
 from backend.notifications import router as notification_router, create_notification, notify_admins_leave
 
@@ -14732,39 +14735,32 @@ async def remove_clients_from_group(
     return updated
 
 
-app.include_router(api_router)
-
-# ── Recruitment direct API mount ─────────────────────────────────────────────
-# Explicitly expose Recruitment at /api/recruitment.
-# Keeps the endpoint available even if nested api_router registration
-# is not propagated by the running FastAPI/Starlette route tree.
-app.include_router(
-    recruitment_router,
-    prefix="/api",
-    include_in_schema=False,
-)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# RECRUITMENT EXPLICIT ROUTE
-# Guarantees the frontend endpoint exists at both:
+# ── Recruitment route safety mount ────────────────────────────────────────────
+# Recruitment is already part of api_router, but we also register the two
+# exact collection paths directly BEFORE api_router is mounted.
+#
+# This guarantees that the frontend requests:
 #   GET /api/recruitment
 #   GET /api/recruitment/
-# ─────────────────────────────────────────────────────────────────────────────
-from backend.recruitment import list_candidates as _recruitment_list_candidates
-
+# are handled even if nested router registration is not propagated correctly
+# in the running FastAPI/Starlette route tree.
+#
+# The actual endpoint function is reused, so authentication, permissions,
+# query parameters and response behaviour remain exactly the same.
 app.add_api_route(
     "/api/recruitment",
-    _recruitment_list_candidates,
+    recruitment_list_candidates,
+    methods=["GET"],
+    include_in_schema=False,
+)
+app.add_api_route(
+    "/api/recruitment/",
+    recruitment_list_candidates,
     methods=["GET"],
     include_in_schema=False,
 )
 
-app.add_api_route(
-    "/api/recruitment/",
-    _recruitment_list_candidates,
-    methods=["GET"],
-    include_in_schema=False,
-)
+app.include_router(api_router)
 
 # ── Phase 12 Commercial SaaS API v2 Router ────────────────────────────────────
 from backend.api_v2.router_v2 import router as api_v2_router
