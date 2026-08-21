@@ -536,7 +536,7 @@ export default function Reports() {
     if(!canDL){ toast.error('You do not have permission to download reports'); return; }
     try {
       const jsPDF = await getJsPDF();
-      await getAutoTable();
+      const autoTable = await getAutoTable();
       const doc=new jsPDF('l','mm','a4');
       let y=12;
       doc.setFontSize(18); doc.setTextColor(13,59,102); doc.text('Attendance Report',12,y); y+=7;
@@ -546,7 +546,7 @@ export default function Reports() {
       doc.text(reportFilterLabel,12,y); y+=7;
 
       doc.setFontSize(10); doc.setTextColor(13,59,102); doc.text('Report Summary',12,y); y+=4;
-      doc.autoTable({
+      autoTable(doc,{
         head:[['Employees','Records','Present','Absent','Leave','Half Day','Late','Early Out','Missing Out','Total Hours','Avg / Present Day']],
         body:[[reportSummary.people,reportSummary.total,reportSummary.present,reportSummary.absent,reportSummary.leave,reportSummary.half,reportSummary.late,reportSummary.early,reportSummary.missing,fmt(reportSummary.minutes),fmt(reportSummary.avg)]],
         startY:y,margin:{left:12,right:12},theme:'grid',styles:{fontSize:7,cellPadding:2},headStyles:{fillColor:[13,59,102],textColor:[255,255,255],fontStyle:'bold'},
@@ -560,7 +560,7 @@ export default function Reports() {
         a.work_mode||a.attendance_type||(a._wfh?'WFH':'Office'),
         `${a.latitude??'—'}, ${a.longitude??'—'}`,a.leave_reason||a.notes||'—'
       ]);
-      doc.autoTable({
+      autoTable(doc,{
         head:[['Date','Employee','Emp. ID','Company','Department','Role','Status','Login','Logout','Duration','Late','Early','Missing Out','Auto','Mode','Location','Remarks']],
         body,startY:y,margin:{left:8,right:8},theme:'grid',
         styles:{fontSize:5.5,cellPadding:1.5,overflow:'linebreak',valign:'middle'},
@@ -723,7 +723,7 @@ export default function Reports() {
   const handlePdf = async () => {
     try {
       const jsPDF = await getJsPDF();
-      await getAutoTable(); // side-effect: patches doc.autoTable(...)
+      const autoTable = await getAutoTable();
       const doc=new jsPDF('p','mm','a4'); let y=15;
       doc.setFontSize(20);doc.setTextColor(13,59,102);
       doc.text('Efficiency Reports & Analytics',15,y);y+=9;
@@ -731,7 +731,7 @@ export default function Reports() {
       doc.text(`Generated: ${new Date().toLocaleDateString()} | Period: ${rankPeriod}`,15,y);y+=10;
 
       doc.setFontSize(12);doc.setTextColor(13,59,102);doc.text('Key Performance Indicators',15,y);y+=8;
-      doc.autoTable({
+      autoTable(doc,{
         head:[['Metric','Value']],
         body:[
           ['Total Tasks',fTasks.length.toString()],['Completed',done.length.toString()],
@@ -749,7 +749,7 @@ export default function Reports() {
       if(effCards.length>0){
         if(y>180){doc.addPage();y=15;}
         doc.setFontSize(12);doc.setTextColor(13,59,102);doc.text('Efficiency Breakdown',15,y);y+=8;
-        doc.autoTable({
+        autoTable(doc,{
           head:[['User','Tasks','Completed','Pending','Completion%','Screen Time','Days']],
           body:effCards.map(d=>[d.user_name,d.total,d.done,d.pend,`${d.pct}%`,fmt(d.mins),d.days]),
           startY:y,margin:15,theme:'grid',
@@ -761,7 +761,7 @@ export default function Reports() {
       if(performers.length>0){
         doc.addPage();y=15;
         doc.setFontSize(12);doc.setTextColor(13,59,102);doc.text('Performance Leaderboard',15,y);y+=8;
-        doc.autoTable({
+        autoTable(doc,{
           head:[['Rank','Name','Final Score','Att. Score','Task Done','Timeliness','Hours Score','Quality','Consistency','Auto Absent','Att. %','Badge']],
           body:performers.map((m,i)=>[`#${i+1}`,m.user_name,m.final_score??m.overall_score*10,m.attendance_score,m.task_completion_score,m.task_timeliness_score,m.working_hours_score,m.quality_score,m.consistency_bonus,m.auto_absent_count,`${m.attendance_percent}%`,m.badge||'Needs Improvement']),
           startY:y,margin:15,theme:'grid',
