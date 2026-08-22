@@ -17,6 +17,9 @@
 .taskosphere-page-transition--standalone {
   min-height: 100vh;
 }
+.taskosphere-loading-bar {
+  animation: loadingBar 1.2s infinite ease-in-out;
+}
 .taskosphere-loader {
   position: relative;
   display: flex;
