@@ -19,6 +19,7 @@ const BottomLoadingBar = memo(function BottomLoadingBar() {
   if (!loading) return null;
   return (
     <div
+      className="taskosphere-loading-bar"
       style={{
         position: "fixed",
         bottom: 0,
@@ -27,7 +28,6 @@ const BottomLoadingBar = memo(function BottomLoadingBar() {
         height: 3,
         background: "linear-gradient(90deg, #7F77DD, #1F6FB2)",
         zIndex: 9999,
-        animation: "loadingBar 1.2s infinite ease-in-out",
         pointerEvents: "none",
       }}
     />
