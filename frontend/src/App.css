@@ -7,6 +7,77 @@
   overflow-x: hidden;
 }
 
+/* ── Shared Apple-style page and loading motion ───────────────────── */
+.taskosphere-page-transition {
+  width: 100%;
+  min-height: 100%;
+  transform-origin: 50% 12%;
+  will-change: opacity, transform, filter;
+}
+.taskosphere-page-transition--standalone {
+  min-height: 100vh;
+}
+.taskosphere-loader {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  overflow: hidden;
+  isolation: isolate;
+}
+.taskosphere-loader--fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  min-height: 100vh;
+  background: rgba(248, 250, 252, .9);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  animation: taskosphereLoaderIn .32s ease-out both;
+}
+.taskosphere-loader--fullscreen.is-dark {
+  background: rgba(15, 23, 42, .9);
+}
+.taskosphere-loader--content { min-height: 60vh; width: 100%; }
+.taskosphere-loader--mini { width: 100%; }
+.taskosphere-loader__gif {
+  position: relative;
+  z-index: 1;
+  width: 108px;
+  height: 108px;
+  object-fit: contain;
+  animation: taskosphereLoaderFloat 1.8s ease-in-out infinite;
+}
+.taskosphere-loader--fullscreen .taskosphere-loader__gif { width: 142px; height: 142px; }
+.taskosphere-loader__orb {
+  position: absolute;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(31,111,178,.18), rgba(127,119,221,.06) 52%, transparent 72%);
+  filter: blur(2px);
+  animation: taskosphereLoaderPulse 1.8s ease-in-out infinite;
+}
+.taskosphere-loader__label {
+  position: relative;
+  z-index: 1;
+  color: #64748b;
+  font-size: 12px;
+  letter-spacing: .02em;
+  animation: taskosphereLoaderText 1.8s ease-in-out infinite;
+}
+.dark .taskosphere-loader__label { color: #94a3b8; }
+@keyframes taskosphereLoaderIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes taskosphereLoaderFloat { 0%,100% { transform: translateY(0) scale(.98); } 50% { transform: translateY(-5px) scale(1); } }
+@keyframes taskosphereLoaderPulse { 0%,100% { transform: scale(.82); opacity: .5; } 50% { transform: scale(1.18); opacity: 1; } }
+@keyframes taskosphereLoaderText { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .taskosphere-page-transition, .taskosphere-loader, .taskosphere-loader__gif,
+  .taskosphere-loader__orb, .taskosphere-loader__label { animation: none !important; transition: none !important; }
+}
+
 /* ── Global Reset ───────────────────────────────────────────────── */
 *,
 *::before,
