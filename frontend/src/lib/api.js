@@ -267,19 +267,25 @@ export function ensureBackendReady() {
   }
 
   _readyPromise = (async () => {
-    const backoffs = [
-      0,
-      1000,
-      2000,
-      3000,
-      5000,
-      8000,
-      8000,
-      12000,
-      12000,
-      12000,
-      12000,
-    ];
+    // FIX: the old backoff sequence summed to 75s of *scheduled* waiting,
+    // plus up to 15s per attempt if the health check itself hung — worst
+    // case, several minutes. And because EVERY request in the app (see the
+    // request interceptor above) awaits this same function before it's
+    // allowed to fire, a single 502/503/504 anywhere would silently freeze
+    // every page's data loading for that entire window. Worse, if it gave
+    // up without ever setting `_isReady = true`, the NEXT request would
+    // restart the whole multi-minute sequence from scratch — so once the
+    // backend hiccuped once, every subsequent page navigation could look
+    // permanently broken until a hard refresh happened to land on a moment
+    // the backend was responsive again.
+    //
+    // This is now a short, bounded check: a couple of quick retries, then
+    // we fail OPEN (treat backend as ready) instead of failing closed.
+    // Individual requests still have their own error handling / the
+    // collection-retry logic below for genuine cold-start responses — this
+    // gate should only smooth over the first second or two of a cold start,
+    // never hold the whole app hostage.
+    const backoffs = [0, 500, 1500];
 
     for (const wait of backoffs) {
       if (wait) {
@@ -288,7 +294,7 @@ export function ensureBackendReady() {
 
       try {
         await axios.get(HEALTH_URL, {
-          timeout: 15000,
+          timeout: 4000,
         });
 
         _isReady = true;
@@ -309,7 +315,12 @@ export function ensureBackendReady() {
       }
     }
 
-    // Give up waiting and allow normal request handling.
+    // Give up waiting, but fail OPEN: let requests proceed as normal rather
+    // than re-running this multi-second gate again for every single request
+    // that follows. A genuinely down backend will still surface as normal
+    // request failures (network error / 502 / 503), handled where those
+    // requests are called, instead of an invisible app-wide freeze.
+    _isReady = true;
     _readyPromise = null;
 
     return false;
