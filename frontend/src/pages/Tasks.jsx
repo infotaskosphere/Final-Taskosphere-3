@@ -10,7 +10,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -888,11 +888,23 @@ export default function Tasks() {
   const user = authUser || { id: '', full_name: 'User', role: 'staff', permissions: { view_other_tasks: [], can_view_all_tasks: false } };
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const apiFetch = React.useCallback(async (endpoint) => {
+  // PAGE-SAFETY FIX: every Task-page request is now abortable and bounded.
+  // This prevents a slow task/client/ranking request from continuing after the
+  // user navigates to Dashboard, Attendance, Reports, etc. and tying up the
+  // browser/backend connection pool. Existing callers can still pass only the
+  // endpoint; the second argument is optional and is used by the page loader.
+  const apiFetch = React.useCallback(async (endpoint, requestOptions = {}) => {
     try {
-      const res = await api.get(endpoint);
+      const res = await api.get(endpoint, {
+        signal: requestOptions.signal,
+        timeout: requestOptions.timeout || 12000,
+      });
       return res.data;
     } catch (err) {
+      // Abort/cancellation is expected when the user leaves the Tasks page.
+      if (err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError' || err?.name === 'AbortError') {
+        return null;
+      }
       console.error(`apiFetch ${endpoint} failed:`, err?.response?.status, err?.response?.data?.detail || err.message);
       return null;
     }
@@ -999,6 +1011,28 @@ export default function Tasks() {
   const [sortBy,                  setSortBy]                  = useState('due_date');
   const [sortDirection,           setSortDirection]           = useState('asc');
   const [showMyTasksOnly,         setShowMyTasksOnly]         = useState(false);
+
+  // FIX: These dropdowns previously used useState/useRef/useEffect inside
+  // inline JSX IIFEs. Those are conditional/nested hook calls and can cause
+  // React error #310 when the Tasks page rerenders (notably when New Task opens).
+  // Keep the same UI, but make their hook state stable at component level.
+  const [departmentFilterOpen, setDepartmentFilterOpen] = useState(false);
+  const [assigneeFilterOpen, setAssigneeFilterOpen] = useState(false);
+  const departmentFilterRef = useRef(null);
+  const assigneeFilterRef = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (departmentFilterRef.current && !departmentFilterRef.current.contains(e.target)) {
+        setDepartmentFilterOpen(false);
+      }
+      if (assigneeFilterRef.current && !assigneeFilterRef.current.contains(e.target)) {
+        setAssigneeFilterOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
   const [taskChecklists,          setTaskChecklists]          = useState({});
   const [showWorkflowLibrary,     setShowWorkflowLibrary]     = useState(false);
   const [workflowSearch,          setWorkflowSearch]          = useState('');
@@ -1072,13 +1106,28 @@ export default function Tasks() {
   }, [isAdmin, users, tasks, user, crossVisibilityUserIds]);
 
   useEffect(() => {
+    // PAGE-SAFETY FIX: all data loading belongs to this page lifecycle.
+    // When the user navigates away, abort every in-flight request immediately
+    // instead of allowing Tasks to keep loading in the background and compete
+    // with the next page's requests.
+    let isMounted = true;
+    let bgRefreshTimeoutId = null;
+    const loadAbortController = new AbortController();
+    const loadSignal = loadAbortController.signal;
+    const isLoadActive = () => isMounted && !loadSignal.aborted;
+
     // Fetch every page of clients until exhausted — identical to Clients.jsx strategy
-    const fetchAllClients = async () => {
+    const fetchAllClients = async (signal = loadSignal) => {
       const PAGE = 200;
       let page = 1;
       let all = [];
       while (true) {
-        const res = await api.get('/clients', { params: { page, page_size: PAGE } });
+        if (!isLoadActive() || signal.aborted) return all;
+        const res = await api.get('/clients', {
+          params: { page, page_size: PAGE },
+          signal,
+          timeout: 12000,
+        });
         const batch = Array.isArray(res.data) ? res.data : [];
         all = [...all, ...batch];
         if (batch.length < PAGE) break;
@@ -1090,6 +1139,7 @@ export default function Tasks() {
     // Always hits the network, updates state + cache. Used both for the
     // initial (no-cache) load and for the one-shot background refresh.
     const fetchFresh = async (showLoadingState) => {
+      if (!isLoadActive()) return;
       if (showLoadingState) setDataLoading(true);
       // ── All 4 API calls fire simultaneously — no sequential waterfalls ──
       // NOTE: /tasks is capped to the 500 most-recently-created tasks (server sorts
@@ -1098,11 +1148,15 @@ export default function Tasks() {
       // (search/filter hitting the server instead of the in-memory array) is a
       // larger follow-up change, not done here.
       const [tasksResult, usersResult, clientsResult, rankResult] = await Promise.allSettled([
-        apiFetch('/tasks?page=1&page_size=500'),
-        apiFetch('/users'),
-        fetchAllClients(),
-        apiFetch('/reports/performance-rankings?period=monthly'),
+        apiFetch('/tasks?page=1&page_size=500', { signal: loadSignal, timeout: 12000 }),
+        apiFetch('/users', { signal: loadSignal, timeout: 12000 }),
+        fetchAllClients(loadSignal),
+        apiFetch('/reports/performance-rankings?period=monthly', { signal: loadSignal, timeout: 12000 }),
       ]);
+
+      // If navigation happened while the requests were running, do not touch
+      // any state, toast, cache, or ranking data belonging to the old page.
+      if (!isLoadActive()) return;
 
       // tasks
       if (tasksResult.status === 'fulfilled') {
@@ -1113,29 +1167,31 @@ export default function Tasks() {
           if (tasksData?.total > tasksArray.length) {
             toast.info(`Showing the ${tasksArray.length} most recent tasks (of ${tasksData.total} total). Use filters/search to narrow results.`, { duration: 5000 });
           }
-        } else if (tasksData === null) toast.error("You don't have permission to view tasks.");
+        } else if (tasksData === null && isLoadActive()) toast.error("You don't have permission to view tasks.");
       } else {
-        if (tasksResult.reason?.response?.status === 403)
+        if (tasksResult.reason?.response?.status === 403 && isLoadActive())
           toast.error("You don't have permission to view tasks.");
-        else console.error('Tasks fetch error:', tasksResult.reason);
+        else if (isLoadActive()) console.error('Tasks fetch error:', tasksResult.reason);
       }
+      if (!isLoadActive()) return;
       setDataLoading(false);
 
       // users
-      if (usersResult.status === 'fulfilled' && Array.isArray(usersResult.value)) {
+      if (usersResult.status === 'fulfilled' && Array.isArray(usersResult.value) && isLoadActive()) {
         setUsers(usersResult.value);
       }
+      if (!isLoadActive()) return;
       setUsersLoading(false);
 
       // clients — fetchAllClients always returns an array
-      if (clientsResult.status === 'fulfilled' && Array.isArray(clientsResult.value)) {
+      if (clientsResult.status === 'fulfilled' && Array.isArray(clientsResult.value) && isLoadActive()) {
         setClients(clientsResult.value);
       }
 
       // rankings
       if (rankResult.status === 'fulfilled') {
         const rankData = rankResult.value;
-        if (Array.isArray(rankData) && rankData.length > 0) {
+        if (Array.isArray(rankData) && rankData.length > 0 && isLoadActive()) {
           const mine = rankData.find(r => r.user_id === user?.id) || rankData[0];
           const ranking = { ...mine, totalUsers: rankData.length, rankings: rankData };
           setMyRanking(ranking);
@@ -1144,23 +1200,26 @@ export default function Tasks() {
           const tasksArrayForCache = tasksResult.status === 'fulfilled'
             ? (Array.isArray(tasksResult.value) ? tasksResult.value : (tasksResult.value?.tasks || []))
             : [];
-          setTasksCache({
-            tasks: tasksArrayForCache,
-            users: usersResult.status === 'fulfilled' && Array.isArray(usersResult.value) ? usersResult.value : [],
-            clients: clientsResult.status === 'fulfilled' && Array.isArray(clientsResult.value) ? clientsResult.value : [],
-            ranking,
-            rankings: rankData,
-          });
+          if (isLoadActive()) {
+            setTasksCache({
+              tasks: tasksArrayForCache,
+              users: usersResult.status === 'fulfilled' && Array.isArray(usersResult.value) ? usersResult.value : [],
+              clients: clientsResult.status === 'fulfilled' && Array.isArray(clientsResult.value) ? clientsResult.value : [],
+              ranking,
+              rankings: rankData,
+            });
+          }
         }
-      } else {
+      } else if (isLoadActive()) {
         console.error('Tasks ranking fetch error:', rankResult.reason);
       }
     };
 
     const loadAll = async () => {
+      if (!isLoadActive()) return;
       // Serve from cache first (instant revisit) then background-refresh once
       const cached = getTasksCache();
-      if (cached) {
+      if (cached && isLoadActive()) {
         if (Array.isArray(cached.tasks)) setTasks(cached.tasks);
         if (Array.isArray(cached.users)) { setUsers(cached.users); setUsersLoading(false); }
         if (Array.isArray(cached.clients)) setClients(cached.clients);
@@ -1175,26 +1234,22 @@ export default function Tasks() {
         if (cachedRanking) { setMyRanking(cachedRanking); setRankingsLoaded(true); }
         setDataLoading(false);
         // Silently background-refresh from the network exactly once so data
-        // stays fresh (previously this called loadAll() again, which kept
-        // re-reading the still-valid cache and rescheduling itself every
-        // 150ms for the whole cache TTL — causing the page/dialog to appear
-        // to reload repeatedly). The timer is cancelled on unmount below so
-        // navigating away (e.g. back to Dashboard) doesn't leave an orphaned
-        // fetch that fires after we've already left the Tasks page.
+        // stays fresh. The timer is cancelled and the request is aborted on
+        // unmount/navigation, so another page never competes with this load.
         bgRefreshTimeoutId = setTimeout(() => {
-          if (isMounted) fetchFresh(false);
+          if (isLoadActive()) fetchFresh(false);
         }, 150);
         return;
       }
       await fetchFresh(true);
     };
 
-    let isMounted = true;
-    let bgRefreshTimeoutId = null;
     loadAll();
     return () => {
       isMounted = false;
       if (bgRefreshTimeoutId) clearTimeout(bgRefreshTimeoutId);
+      // Abort every Task-page request immediately when leaving this route.
+      loadAbortController.abort();
     };
   }, [apiFetch]);
 
@@ -1634,6 +1689,18 @@ export default function Tasks() {
       scanAbortRef.current = null;
     }
   };
+
+  // PAGE-SAFETY FIX: duplicate-detection requests must also die with the
+  // Tasks page. Otherwise a long AI scan can continue after navigation and
+  // compete with Dashboard/Attendance/Reports requests.
+  useEffect(() => {
+    return () => {
+      if (scanAbortRef.current) {
+        try { scanAbortRef.current.abort(); } catch {}
+        scanAbortRef.current = null;
+      }
+    };
+  }, []);
 
   const handleDetectDuplicates = async () => {
     if (detectingDuplicates) return;
@@ -2264,18 +2331,31 @@ export default function Tasks() {
               {/* Dialog stays mounted even while permissions/data are still loading —
                   gating the whole <Dialog> made it unmount + remount (form flashed closed
                   then re-opened) when auth permissions resolved after navigation. */}
-                <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm(); }}>
+                <Dialog
+                  open={dialogOpen}
+                  onOpenChange={(open) => {
+                    setDialogOpen(open);
+                    if (!open) resetForm();
+                  }}
+                >
                   {/* GLITCH FIX: creating your own task must always be available —
                       it must not be hidden behind the universal can_edit_tasks flag,
                       which an admin may have turned off for this user without
                       intending to block them from their own tasks. */}
-                  <DialogTrigger asChild>
-                    <Button size="sm" onClick={() => { setEditingTask(null); setFormData({ ...EMPTY_FORM }); }}
-                      className="h-8 px-4 text-xs rounded-xl font-semibold gap-1.5"
-                      style={{ background: 'rgba(255,255,255,0.2)', border: '1px solid rgba(255,255,255,0.35)', color: 'white' }}>
-                      <Plus className="h-3.5 w-3.5" /> New Task
-                    </Button>
-                  </DialogTrigger>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => {
+                      setEditingTask(null);
+                      setFormData({ ...EMPTY_FORM });
+                      setDialogOpen(true);
+                    }}
+                    className="h-8 px-4 text-xs rounded-xl font-semibold gap-1.5"
+                    style={{ background: 'rgba(255,255,255,0.2)', border: '1px solid rgba(255,255,255,0.35)', color: 'white' }}
+                    data-testid="create-task-btn"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> New Task
+                  </Button>
 
                   {/* Dialog form — premium redesign */}
                   <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden p-0 gap-0 flex flex-col rounded-2xl shadow-2xl">
@@ -3654,17 +3734,13 @@ export default function Tasks() {
           <div className="flex-1 min-w-0 relative">
             {/* Multi-select Dept dropdown */}
             {(() => {
-              const [open, setOpen] = React.useState(false);
-              const ref = React.useRef(null);
-              React.useEffect(() => {
-                const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-                document.addEventListener('mousedown', handler);
-                return () => document.removeEventListener('mousedown', handler);
-              }, []);
               const toggleVal = (val) => {
                 setFilterCategory(prev => prev.includes(val) ? prev.filter(v => v !== val) : prev.length < 2 ? [...prev, val] : prev);
               };
               const label = filterCategory.length === 0 ? 'All Depts' : filterCategory.map(getCategoryLabel).join(' + ');
+              const open = departmentFilterOpen;
+              const setOpen = setDepartmentFilterOpen;
+              const ref = departmentFilterRef;
               return (
                 <div ref={ref} className="relative w-full">
                   <button type="button" onClick={() => setOpen(o => !o)}
@@ -3711,13 +3787,9 @@ export default function Tasks() {
           <div className="flex-1 min-w-0 relative">
             {/* Multi-select Assignee dropdown */}
             {(() => {
-              const [open, setOpen] = React.useState(false);
-              const ref = React.useRef(null);
-              React.useEffect(() => {
-                const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-                document.addEventListener('mousedown', handler);
-                return () => document.removeEventListener('mousedown', handler);
-              }, []);
+              const open = assigneeFilterOpen;
+              const setOpen = setAssigneeFilterOpen;
+              const ref = assigneeFilterRef;
               const toggleVal = (val) => {
                 setFilterAssignee(prev => prev.includes(val) ? prev.filter(v => v !== val) : prev.length < 2 ? [...prev, val] : prev);
               };
