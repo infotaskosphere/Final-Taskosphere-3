@@ -1001,6 +1001,106 @@ export default function Reports() {
 
   const cursorStyle={fill:dark?'rgba(255,255,255,0.04)':'rgba(0,0,0,0.03)'};
 
+  // ── Overview intelligence — executive health metrics ───────────────────────
+  const overviewTaskMetrics = useMemo(()=>{
+    const now = new Date();
+    const soonEnd = new Date(now);
+    soonEnd.setDate(soonEnd.getDate()+7);
+
+    let timely=0, delayed=0, noDue=0, dueSoon=0, completedWithTiming=0;
+    let completionDaysTotal=0, completionDaysCount=0;
+
+    fTasks.forEach(task=>{
+      const due = task.due_date ? new Date(task.due_date) : null;
+      const completedAt = task.completed_at ? new Date(task.completed_at) : null;
+      const hasDue = due && !Number.isNaN(due.getTime());
+      const hasCompletedAt = completedAt && !Number.isNaN(completedAt.getTime());
+
+      if (task.status === 'completed') {
+        if (hasDue && hasCompletedAt) {
+          completedWithTiming++;
+          if (completedAt.getTime() <= due.getTime()) timely++;
+          else delayed++;
+        } else {
+          noDue++;
+        }
+
+        const created = task.created_at ? new Date(task.created_at) : null;
+        if (created && hasCompletedAt && !Number.isNaN(created.getTime()) &&
+            completedAt.getTime() >= created.getTime()) {
+          completionDaysTotal += (completedAt.getTime()-created.getTime())/86400000;
+          completionDaysCount++;
+        }
+      } else if (hasDue && due.getTime() >= now.getTime() && due.getTime() <= soonEnd.getTime()) {
+        dueSoon++;
+      }
+    });
+
+    const onTimeRate = completedWithTiming ? Math.round((timely/completedWithTiming)*100) : 0;
+    const delayedRate = completedWithTiming ? Math.round((delayed/completedWithTiming)*100) : 0;
+    const overdueRate = fTasks.length ? Math.round((overdue.length/fTasks.length)*100) : 0;
+    const avgCompletionDays = completionDaysCount ? Math.round((completionDaysTotal/completionDaysCount)*10)/10 : 0;
+
+    return {
+      timely, delayed, noDue, dueSoon, onTimeRate, delayedRate, overdueRate,
+      avgCompletionDays,
+      completionQuality: Math.max(0, Math.min(100, Math.round((compRate*0.55)+(onTimeRate*0.30)+((100-overdueRate)*0.15))))
+    };
+  },[fTasks,overdue,compRate]);
+
+  const overviewAttendanceMetrics = useMemo(()=>{
+    const missingOut = fAtt.filter(a=>a.punch_in && !a.punch_out).length;
+    const earlyOut = fAtt.filter(a=>a.early_out).length;
+    const present = fAtt.filter(a=>a.status==='present' && a.punch_in).length;
+    const avgHours = presDays ? Math.round((totMins/presDays)/60*10)/10 : 0;
+    const attendanceRate = fAtt.length ? Math.round((present/fAtt.length)*100) : 0;
+    return {missingOut,earlyOut,present,avgHours,attendanceRate};
+  },[fAtt,presDays,totMins]);
+
+  const overviewUserLeaderboard = useMemo(()=>(
+    taskUserRows
+      .filter(r=>r.total>0)
+      .map(r=>({
+        ...r,
+        health:Math.max(0,Math.min(100,
+          Math.round((r.completionPct*0.55)+(r.timelyPct*0.30)+
+          ((r.total-r.overdue)/r.total*100*0.15))
+        ))
+      }))
+      .sort((a,b)=>b.health-a.health || b.completed-a.completed)
+      .slice(0,8)
+  ),[taskUserRows]);
+
+  const overviewDepartmentData = useMemo(()=>{
+    const map={};
+    allUsers.forEach(u=>{
+      if(selCompany!=='all' && String(u.company_id)!==String(selCompany)) return;
+      const key=u.department||u.department_name||'Unassigned';
+      map[key]=(map[key]||0);
+    });
+    taskUserRows.forEach(r=>{
+      const key=r.department||'Unassigned';
+      map[key]=(map[key]||0)+r.total;
+    });
+    return Object.entries(map)
+      .map(([name,tasks],i)=>({name,tasks,fill:PALETTE[i%PALETTE.length]}))
+      .filter(d=>d.tasks>0)
+      .sort((a,b)=>b.tasks-a.tasks)
+      .slice(0,8);
+  },[allUsers,taskUserRows,selCompany]);
+
+  const overviewDueSoon = useMemo(()=>{
+    const now=new Date();
+    const end=new Date(now); end.setDate(end.getDate()+7);
+    return fTasks
+      .filter(t=>{
+        if(t.status==='completed'||!t.due_date) return false;
+        const d=new Date(t.due_date);
+        return !Number.isNaN(d.getTime()) && d>=now && d<=end;
+      })
+      .sort((a,b)=>new Date(a.due_date)-new Date(b.due_date))
+      .slice(0,8);
+  },[fTasks]);
   // ── JSX ───────────────────────────────────────────────────────────────────
   return (
    <>
@@ -1142,6 +1242,191 @@ export default function Reports() {
         {/* ──────── OVERVIEW ──────── */}
         {tab==='overview'&&(
           <motion.div key="ov" variants={cV} initial="hidden" animate="visible" exit={{opacity:0}} className="space-y-4">
+            {/* ══ EXECUTIVE OVERVIEW — detailed operational health ══ */}
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                {[
+                  {label:'Completion Rate',value:`${compRate}%`,sub:`${done.length}/${fTasks.length} tasks`,color:C.emeraldGreen},
+                  {label:'On-Time Rate',value:`${overviewTaskMetrics.onTimeRate}%`,sub:`${overviewTaskMetrics.timely} timely`,color:C.mediumBlue},
+                  {label:'Delayed',value:overviewTaskMetrics.delayed,sub:`${overviewTaskMetrics.delayedRate}% of completed`,color:'#ea580c'},
+                  {label:'Overdue',value:overdue.length,sub:`${overviewTaskMetrics.overdueRate}% of tasks`,color:'#dc2626'},
+                  {label:'Due Next 7 Days',value:overviewTaskMetrics.dueSoon,sub:'Upcoming workload',color:C.amber},
+                  {label:'Avg Completion',value:overviewTaskMetrics.avgCompletionDays?`${overviewTaskMetrics.avgCompletionDays}d`:'—',sub:'Creation → completion',color:C.deepBlue},
+                ].map((k,i)=>(
+                  <div key={i} className="rounded-2xl p-3 border shadow-sm" style={{background:t.card,borderColor:t.border}}>
+                    <p className="text-[9px] font-bold uppercase tracking-wider" style={{color:t.textMute}}>{k.label}</p>
+                    <p className="text-xl font-black mt-1" style={{color:k.color}}>{k.value}</p>
+                    <p className="text-[9px] mt-0.5" style={{color:t.textSub}}>{k.sub}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <Sec title="Operational Health" desc="Overall task and attendance health" dark={dark}>
+                  <div className="space-y-3">
+                    {[
+                      ['Task Completion',compRate,C.emeraldGreen],
+                      ['On-Time Completion',overviewTaskMetrics.onTimeRate,C.mediumBlue],
+                      ['Attendance Rate',overviewAttendanceMetrics.attendanceRate,C.deepBlue],
+                      ['Overall Quality',overviewTaskMetrics.completionQuality,C.amber],
+                    ].map(([label,value,color])=>(
+                      <div key={label}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[10px] font-semibold" style={{color:t.textSub}}>{label}</span>
+                          <span className="text-[10px] font-black" style={{color}}>{value}%</span>
+                        </div>
+                        <div className="h-2 rounded-full overflow-hidden" style={{background:dark?'#1e293b':'#eef2f7'}}>
+                          <div className="h-full rounded-full transition-all" style={{width:`${Math.max(0,Math.min(100,value))}%`,background:color}}/>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Sec>
+
+                <Sec title="Attendance Health" desc="Attendance exceptions in the selected scope" dark={dark}>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      ['Present Days',overviewAttendanceMetrics.present,C.emeraldGreen],
+                      ['Late Days',lateDays,C.amber],
+                      ['Early Out',overviewAttendanceMetrics.earlyOut,'#ea580c'],
+                      ['Missing Out',overviewAttendanceMetrics.missingOut,'#dc2626'],
+                    ].map(([label,value,color])=>(
+                      <div key={label} className="rounded-xl p-3 border" style={{background:t.card2,borderColor:t.border}}>
+                        <p className="text-[9px] uppercase font-bold" style={{color:t.textMute}}>{label}</p>
+                        <p className="text-lg font-black mt-1" style={{color}}>{value}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-3 flex items-center justify-between text-[10px]">
+                    <span style={{color:t.textSub}}>Average working time</span>
+                    <b style={{color:C.deepBlue}}>{overviewAttendanceMetrics.avgHours}h/day</b>
+                  </div>
+                </Sec>
+
+                <Sec title="Task Quality Mix" desc="Completed task quality" dark={dark}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="relative w-28 h-28 flex-shrink-0">
+                      <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
+                        <circle cx="50" cy="50" r="40" fill="none" strokeWidth="10" style={{stroke:dark?'#1e293b':'#eef2f7'}}/>
+                        <circle cx="50" cy="50" r="40" fill="none" strokeWidth="10" strokeLinecap="round"
+                          stroke={C.emeraldGreen}
+                          strokeDasharray={`${2.513*overviewTaskMetrics.onTimeRate} 251.3`}/>
+                      </svg>
+                      <div className="absolute inset-0 flex flex-col items-center justify-center">
+                        <span className="text-xl font-black" style={{color:C.deepBlue}}>{overviewTaskMetrics.onTimeRate}%</span>
+                        <span className="text-[8px] font-bold uppercase" style={{color:t.textMute}}>On Time</span>
+                      </div>
+                    </div>
+                    <div className="flex-1 space-y-2">
+                      {[
+                        ['Timely',overviewTaskMetrics.timely,C.emeraldGreen],
+                        ['Delayed',overviewTaskMetrics.delayed,'#ea580c'],
+                        ['No Due Date',overviewTaskMetrics.noDue,t.textSub],
+                      ].map(([label,value,color])=>(
+                        <div key={label} className="flex items-center justify-between text-[10px]">
+                          <span style={{color:t.textSub}}>{label}</span>
+                          <b style={{color}}>{value}</b>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </Sec>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <Sec title="User Performance Snapshot" desc="Top users by completion quality in the selected scope" dark={dark}>
+                  {overviewUserLeaderboard.length>0 ? (
+                    <div className="space-y-2">
+                      {overviewUserLeaderboard.map((r,i)=>(
+                        <div key={r.user_id||i} className="grid grid-cols-[28px_minmax(0,1fr)_52px_52px] items-center gap-2 rounded-xl px-2.5 py-2 border"
+                          style={{background:t.card2,borderColor:t.border}}>
+                          <span className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-black"
+                            style={{background:i===0?'#fef3c7':t.card,color:i===0?'#92400e':C.deepBlue}}>
+                            {i+1}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-bold truncate" style={{color:t.text}}>{r.user_name}</p>
+                            <p className="text-[8px] truncate" style={{color:t.textMute}}>{r.department} • {r.total} tasks</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[10px] font-black" style={{color:C.emeraldGreen}}>{r.completed}</p>
+                            <p className="text-[8px]" style={{color:t.textMute}}>done</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[10px] font-black" style={{color:r.health>=80?C.emeraldGreen:r.health>=60?C.amber:'#dc2626'}}>{r.health}%</p>
+                            <p className="text-[8px]" style={{color:t.textMute}}>health</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : <Empty icon={Users} text="No user task data" dark={dark}/>}
+                </Sec>
+
+                <Sec title="Workload by Department" desc="Task concentration across departments" dark={dark}>
+                  {overviewDepartmentData.length>0 ? (
+                    <ResponsiveContainer width="100%" height={250}>
+                      <BarChart data={overviewDepartmentData} layout="vertical" barSize={14}>
+                        <XAxis type="number" tick={{fontSize:9,fill:t.textSub}} axisLine={false} tickLine={false}/>
+                        <YAxis dataKey="name" type="category" width={78} tick={{fontSize:9,fill:t.textSub}} axisLine={false} tickLine={false}/>
+                        <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
+                        <Bar dataKey="tasks" name="Tasks" radius={[0,6,6,0]}>
+                          {overviewDepartmentData.map((d,i)=><Cell key={i} fill={d.fill}/>)}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : <Empty icon={Users} text="No department workload data" dark={dark}/>}
+                </Sec>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <Sec title="Next 7 Days" desc="Upcoming task deadlines requiring attention" dark={dark}>
+                  {overviewDueSoon.length>0 ? (
+                    <div className="space-y-2">
+                      {overviewDueSoon.map((task,i)=>{
+                        const due=new Date(task.due_date);
+                        const daysLeft=Math.max(0,Math.ceil((due-new Date())/86400000));
+                        return (
+                          <div key={task.id||i} className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 border"
+                            style={{background:t.card2,borderColor:t.border}}>
+                            <div className="min-w-0">
+                              <p className="text-[10px] font-bold truncate" style={{color:t.text}}>{task.title||task.name||'Untitled Task'}</p>
+                              <p className="text-[8px] mt-0.5" style={{color:t.textMute}}>
+                                {task.assigned_to_name||task.assignee_name||'Unassigned'} • {due.toLocaleDateString('en-IN',{day:'2-digit',month:'short'})}
+                              </p>
+                            </div>
+                            <span className="text-[9px] font-black whitespace-nowrap"
+                              style={{color:daysLeft<=1?'#dc2626':daysLeft<=3?C.amber:C.mediumBlue}}>
+                              {daysLeft===0?'Due today':`${daysLeft}d left`}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : <Empty icon={Calendar} text="No deadlines in the next 7 days" dark={dark}/>}
+                </Sec>
+
+                <Sec title="Activity Snapshot" desc="Task completion and attendance movement over the last 7 days" dark={dark}>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <AreaChart data={weeklyData.map((d,i)=>({...d,hours:attTrend[i]?.hours||0}))}>
+                      <defs>
+                        <linearGradient id="go" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={C.emeraldGreen} stopOpacity={0.3}/>
+                          <stop offset="100%" stopColor={C.emeraldGreen} stopOpacity={0.02}/>
+                        </linearGradient>
+                      </defs>
+                      <XAxis dataKey="name" tick={{fontSize:9,fill:t.textSub}} axisLine={false} tickLine={false}/>
+                      <YAxis yAxisId="tasks" tick={{fontSize:9,fill:t.textSub}} axisLine={false} tickLine={false}/>
+                      <YAxis yAxisId="hours" orientation="right" tick={{fontSize:9,fill:t.textSub}} axisLine={false} tickLine={false}/>
+                      <Tooltip content={<ChartTip dark={dark}/>} cursor={cursorStyle}/>
+                      <Legend wrapperStyle={{fontSize:9,color:t.textSub}}/>
+                      <Area yAxisId="tasks" type="monotone" dataKey="completed" stroke={C.emeraldGreen} strokeWidth={2} fill="url(#go)" name="Completed Tasks"/>
+                      <Area yAxisId="tasks" type="monotone" dataKey="pending" stroke={C.mediumBlue} strokeWidth={2} fill="none" name="New/Pending"/>
+                      <Area yAxisId="hours" type="monotone" dataKey="hours" stroke={C.amber} strokeWidth={2} fill="none" name="Hours"/>
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </Sec>
+              </div>
+            </div>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
               {/* Task status donut */}
