@@ -7,6 +7,7 @@ import ModuleGate from '@/components/ModuleGate.jsx';
 import { PageGuard } from '@/components/governance/GovernanceGuards.jsx';
 import GifLoader, { ContentLoader } from '@/components/ui/GifLoader.jsx';
 import RouteErrorBoundary from '@/components/layout/RouteErrorBoundary.jsx';
+import { pageTransition } from '@/lib/animations.js';
 
 /* ── Auth pages (no sidebar) ─────────────────────────────────────────── */
 const Login = lazy(() => import('./pages/Login.jsx'));
@@ -121,10 +122,7 @@ function AnimatedOutlet() {
       <motion.div
         key={location.pathname}
         className="taskosphere-page-transition"
-        initial={{ opacity: 0, y: 10, scale: 0.992, filter: 'blur(2px)' }}
-        animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
-        exit={{ opacity: 0, y: -6, scale: 0.996, filter: 'blur(1px)' }}
-        transition={{ duration: 0.34, ease: [0.22, 1, 0.36, 1] }}
+        {...pageTransition}
       >
         <Suspense fallback={<ContentLoader />}>
           <Outlet />
@@ -140,9 +138,7 @@ function PageTransition({ children }) {
     <motion.div
       key={location.pathname}
       className="taskosphere-page-transition taskosphere-page-transition--standalone"
-      initial={{ opacity: 0, y: 10, scale: 0.992, filter: 'blur(2px)' }}
-      animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
-      transition={{ duration: 0.34, ease: [0.22, 1, 0.36, 1] }}
+      {...pageTransition}
     >
       {children}
     </motion.div>
