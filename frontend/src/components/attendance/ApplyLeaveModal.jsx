@@ -38,6 +38,8 @@ const DEFAULT_D = {
  * @param isDark         current theme
  * @param colors, tokens optional style overrides — defaults match the Attendance / Leave page palette so the modal looks the same everywhere
  * @param seed           optional { leaveType, leaveFrom, leaveTo } to prefill when the modal opens (e.g. the Attendance page's "Half Day" / "Tomorrow" shortcut buttons)
+ * @param monthLeaveCount   optional — how many days of leave the user has already taken this calendar month. Omit if unknown; the banner just won't render.
+ * @param monthLeaveRecords optional — array of { date, leave_type, reason } for this month's leave, shown as a compact list under the count.
  */
 export default function ApplyLeaveModal({
   open,
@@ -47,6 +49,8 @@ export default function ApplyLeaveModal({
   colors = DEFAULT_COLORS,
   tokens = DEFAULT_D,
   seed = null,
+  monthLeaveCount = null,
+  monthLeaveRecords = [],
 }) {
   const COLORS = { ...DEFAULT_COLORS, ...colors };
   const D = { ...DEFAULT_D, ...tokens };
@@ -127,6 +131,46 @@ export default function ApplyLeaveModal({
             </div>
 
             <div className="p-6 space-y-5">
+              {/* This month's leave so far — helps the person decide with context,
+                  instead of submitting blind. Renders only when the caller passes
+                  a count (Attendance page / People Matrix → Leave both do). */}
+              {monthLeaveCount !== null && (
+                <div className="rounded-xl border px-4 py-3"
+                  style={{
+                    backgroundColor: isDark ? `${COLORS.deepBlue}15` : `${COLORS.deepBlue}08`,
+                    borderColor: isDark ? 'rgba(31,111,178,0.3)' : `${COLORS.deepBlue}20`,
+                  }}>
+                  <div className="flex items-center gap-2">
+                    <CalendarIcon className="w-4 h-4 flex-shrink-0" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }} />
+                    <p className="text-sm font-semibold" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
+                      {monthLeaveCount === 0
+                        ? "You haven't taken any leave this month yet"
+                        : `You've taken ${monthLeaveCount} day${monthLeaveCount !== 1 ? 's' : ''} of leave this month`}
+                    </p>
+                  </div>
+                  {monthLeaveCount > 0 && monthLeaveRecords?.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {monthLeaveRecords.slice(0, 6).map((r) => (
+                        <span key={r.date} className="text-[11px] font-medium px-2 py-1 rounded-lg"
+                          style={{
+                            backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#ffffff',
+                            color: isDark ? D.muted : '#475569',
+                            border: `1px solid ${isDark ? D.border : '#e2e8f0'}`,
+                          }}>
+                          {format(new Date(r.date), 'MMM d')}
+                          {r.leave_type && r.leave_type !== 'full_day' ? ` · ${LEAVE_TYPES.find(lt => lt.value === r.leave_type)?.label || r.leave_type}` : ''}
+                        </span>
+                      ))}
+                      {monthLeaveRecords.length > 6 && (
+                        <span className="text-[11px] font-medium px-2 py-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                          +{monthLeaveRecords.length - 6} more
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Leave type */}
               <div>
                 <p className="text-sm font-semibold mb-2.5" style={{ color: isDark ? D.muted : '#374151' }}>Leave Type</p>
