@@ -1439,7 +1439,7 @@ export default function Reports() {
                   style={{background:'rgba(15,23,42,.62)',backdropFilter:'blur(5px)'}}>
                   <motion.div
                     initial={{opacity:0,y:18,scale:.98}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:18,scale:.98}}
-                    className="w-full max-w-[86vw] max-h-[78vh] min-h-0 rounded-2xl overflow-hidden flex flex-col"
+                    className="w-full max-w-[72vw] max-h-[64vh] min-h-0 rounded-2xl overflow-hidden flex flex-col"
                     style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:'0 24px 70px rgba(0,0,0,.30)'}}>
                     <div className="px-5 py-4 flex items-center justify-between gap-4 shrink-0 sticky top-0 z-30"
                       style={{borderBottom:'1px solid rgba(255,255,255,.18)',background:`linear-gradient(135deg, ${C.deepBlue} 0%, ${C.mediumBlue} 100%)`,boxShadow:'0 4px 14px rgba(13,59,102,.22)'}}>
@@ -1549,7 +1549,7 @@ export default function Reports() {
                   style={{background:'rgba(15,23,42,.58)',backdropFilter:'blur(4px)'}}>
                   <motion.div
                     initial={{opacity:0,y:18,scale:.98}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:18,scale:.98}}
-                    className="w-full max-w-[86vw] max-h-[78vh] min-h-0 rounded-2xl overflow-hidden flex flex-col"
+                    className="w-full max-w-[72vw] max-h-[64vh] min-h-0 rounded-2xl overflow-hidden flex flex-col"
                     style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:'0 24px 70px rgba(0,0,0,.28)'}}>
                     <div className="px-5 py-4 flex items-center justify-between gap-4 shrink-0 sticky top-0 z-30"
                       style={{borderBottom:'1px solid rgba(255,255,255,.18)',background:`linear-gradient(135deg, ${C.deepBlue} 0%, ${C.mediumBlue} 100%)`,boxShadow:'0 4px 14px rgba(13,59,102,.22)'}}>
