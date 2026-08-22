@@ -10,7 +10,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -2264,18 +2264,31 @@ export default function Tasks() {
               {/* Dialog stays mounted even while permissions/data are still loading —
                   gating the whole <Dialog> made it unmount + remount (form flashed closed
                   then re-opened) when auth permissions resolved after navigation. */}
-                <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm(); }}>
+                <Dialog
+                  open={dialogOpen}
+                  onOpenChange={(open) => {
+                    setDialogOpen(open);
+                    if (!open) resetForm();
+                  }}
+                >
                   {/* GLITCH FIX: creating your own task must always be available —
                       it must not be hidden behind the universal can_edit_tasks flag,
                       which an admin may have turned off for this user without
                       intending to block them from their own tasks. */}
-                  <DialogTrigger asChild>
-                    <Button size="sm" onClick={() => { setEditingTask(null); setFormData({ ...EMPTY_FORM }); }}
-                      className="h-8 px-4 text-xs rounded-xl font-semibold gap-1.5"
-                      style={{ background: 'rgba(255,255,255,0.2)', border: '1px solid rgba(255,255,255,0.35)', color: 'white' }}>
-                      <Plus className="h-3.5 w-3.5" /> New Task
-                    </Button>
-                  </DialogTrigger>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => {
+                      setEditingTask(null);
+                      setFormData({ ...EMPTY_FORM });
+                      setDialogOpen(true);
+                    }}
+                    className="h-8 px-4 text-xs rounded-xl font-semibold gap-1.5"
+                    style={{ background: 'rgba(255,255,255,0.2)', border: '1px solid rgba(255,255,255,0.35)', color: 'white' }}
+                    data-testid="create-task-btn"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> New Task
+                  </Button>
 
                   {/* Dialog form — premium redesign */}
                   <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden p-0 gap-0 flex flex-col rounded-2xl shadow-2xl">
