@@ -28,8 +28,11 @@ export function PageTransition({ children, standalone = false }) {
 export function AnimatedOutlet() {
   const location = useLocation();
 
+  // Wait guarantees that only one routed page is mounted at a time. This
+  // prevents duplicate-looking dashboard/card layers while keeping each
+  // page's own interaction animations untouched.
   return (
-    <AnimatePresence mode="sync" initial={false}>
+    <AnimatePresence mode="wait" initial={false}>
       <PageTransition key={location.pathname}>
         <Suspense fallback={<ContentLoader />}>
           <Outlet />
