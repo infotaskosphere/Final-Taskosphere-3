@@ -986,9 +986,6 @@ export default function Reports() {
     } catch(e){console.error(e);toast.error('PDF failed');}
   };
 
-  // ── Loading ───────────────────────────────────────────────────────────────
-  if (loading) return <MiniLoader height={400} />;
-
   const tabs=[
     {id:'overview',   label:'Overview',    icon:BarChart3 },
     {id:'tasks',      label:'Tasks',       icon:Target    },
@@ -1101,6 +1098,12 @@ export default function Reports() {
       .sort((a,b)=>new Date(a.due_date)-new Date(b.due_date))
       .slice(0,8);
   },[fTasks]);
+
+  // ── Loading ───────────────────────────────────────────────────────────────
+  // Keep this guard after ALL hooks so every render executes the same hooks.
+  // This fixes React error #310 when loading changes after API data arrives.
+  if (loading) return <MiniLoader height={400} />;
+
   // ── JSX ───────────────────────────────────────────────────────────────────
   return (
    <>
