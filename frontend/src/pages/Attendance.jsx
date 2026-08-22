@@ -1310,7 +1310,7 @@ function AttendanceProofModal({ onClose, onSave, isDark, existingProof = null })
 
   return (
     <motion.div
-      className="fixed inset-0 z-[9999] flex items-start justify-center p-3 sm:p-4 pt-4 sm:pt-6 overflow-y-auto"
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
       style={{ background: isDark ? 'rgba(0,0,0,0.85)' : 'rgba(15,23,42,0.75)', backdropFilter: 'blur(8px)' }}
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       onClick={onClose}
@@ -5188,12 +5188,12 @@ export default function Attendance() {
         {/* Leave Form Modal */}
         <AnimatePresence>
           {showLeaveForm && (
-             <motion.div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+             <motion.div className="fixed inset-0 z-[9999] flex items-start justify-center p-3 sm:p-4 pt-4 sm:pt-5 overflow-y-auto"
               style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', background: isDark ? 'rgba(0,0,0,0.85)' : 'rgba(15,23,42,0.75)', backdropFilter: 'blur(8px)' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={(e) => { if (e.target === e.currentTarget) setShowLeaveForm(false); }}>
               <motion.div
-                className="w-full max-w-3xl rounded-3xl shadow-2xl overflow-hidden max-h-[72vh] overflow-y-auto"
+                className="w-full max-w-3xl rounded-3xl shadow-2xl overflow-hidden max-h-[68vh] overflow-y-auto"
                 style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0' }}
                 initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
                 transition={{ type: 'spring', stiffness: 220, damping: 20 }}
