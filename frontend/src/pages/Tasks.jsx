@@ -999,6 +999,28 @@ export default function Tasks() {
   const [sortBy,                  setSortBy]                  = useState('due_date');
   const [sortDirection,           setSortDirection]           = useState('asc');
   const [showMyTasksOnly,         setShowMyTasksOnly]         = useState(false);
+
+  // FIX: These dropdowns previously used useState/useRef/useEffect inside
+  // inline JSX IIFEs. Those are conditional/nested hook calls and can cause
+  // React error #310 when the Tasks page rerenders (notably when New Task opens).
+  // Keep the same UI, but make their hook state stable at component level.
+  const [departmentFilterOpen, setDepartmentFilterOpen] = useState(false);
+  const [assigneeFilterOpen, setAssigneeFilterOpen] = useState(false);
+  const departmentFilterRef = useRef(null);
+  const assigneeFilterRef = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (departmentFilterRef.current && !departmentFilterRef.current.contains(e.target)) {
+        setDepartmentFilterOpen(false);
+      }
+      if (assigneeFilterRef.current && !assigneeFilterRef.current.contains(e.target)) {
+        setAssigneeFilterOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
   const [taskChecklists,          setTaskChecklists]          = useState({});
   const [showWorkflowLibrary,     setShowWorkflowLibrary]     = useState(false);
   const [workflowSearch,          setWorkflowSearch]          = useState('');
@@ -3667,17 +3689,13 @@ export default function Tasks() {
           <div className="flex-1 min-w-0 relative">
             {/* Multi-select Dept dropdown */}
             {(() => {
-              const [open, setOpen] = React.useState(false);
-              const ref = React.useRef(null);
-              React.useEffect(() => {
-                const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-                document.addEventListener('mousedown', handler);
-                return () => document.removeEventListener('mousedown', handler);
-              }, []);
               const toggleVal = (val) => {
                 setFilterCategory(prev => prev.includes(val) ? prev.filter(v => v !== val) : prev.length < 2 ? [...prev, val] : prev);
               };
               const label = filterCategory.length === 0 ? 'All Depts' : filterCategory.map(getCategoryLabel).join(' + ');
+              const open = departmentFilterOpen;
+              const setOpen = setDepartmentFilterOpen;
+              const ref = departmentFilterRef;
               return (
                 <div ref={ref} className="relative w-full">
                   <button type="button" onClick={() => setOpen(o => !o)}
@@ -3724,13 +3742,9 @@ export default function Tasks() {
           <div className="flex-1 min-w-0 relative">
             {/* Multi-select Assignee dropdown */}
             {(() => {
-              const [open, setOpen] = React.useState(false);
-              const ref = React.useRef(null);
-              React.useEffect(() => {
-                const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-                document.addEventListener('mousedown', handler);
-                return () => document.removeEventListener('mousedown', handler);
-              }, []);
+              const open = assigneeFilterOpen;
+              const setOpen = setAssigneeFilterOpen;
+              const ref = assigneeFilterRef;
               const toggleVal = (val) => {
                 setFilterAssignee(prev => prev.includes(val) ? prev.filter(v => v !== val) : prev.length < 2 ? [...prev, val] : prev);
               };
