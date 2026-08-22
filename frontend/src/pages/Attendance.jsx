@@ -3022,24 +3022,6 @@ export default function Attendance() {
     return streak;
   }, [attendanceHistory, displayTodayAttendance, holidays]);
 
-  // ── FEATURE ENHANCEMENT: My Leave This Month ────────────────────────────────
-  // Always reflects the LOGGED-IN user's own leave, regardless of whose
-  // attendance is currently being viewed (admin viewing another user, or the
-  // "everyone" aggregate view) — filters attendanceHistory down to the
-  // current user's own records rather than relying on the page's selected
-  // user. Powers both the "Leave (This Month)" stat card below and the
-  // "already taken this month" banner inside the Apply Leave modal, so a
-  // person has that context before submitting a new request.
-  const myMonthLeave = useMemo(() => {
-    const monthStr = format(new Date(), 'yyyy-MM');
-    const safeHistory = Array.isArray(attendanceHistory) ? attendanceHistory : [];
-    const records = safeHistory
-      .filter(r => (!r.user_id || r.user_id === user?.id) && r.status === 'leave' && (r.date || '').startsWith(monthStr))
-      .map(r => ({ date: r.date, leave_type: r.leave_type || 'full_day', reason: r.leave_reason }))
-      .sort((a, b) => (a.date < b.date ? 1 : -1));
-    return { count: records.length, records };
-  }, [attendanceHistory, user?.id]);
-
   // ── FEATURE ENHANCEMENT: Average Daily Hours ───────────────────────────────
   const avgDailyHours = useMemo(() => {
     const presentDays = monthAttendance.filter(a => a.punch_in && a.status === 'present' && a.duration_minutes > 0);
@@ -4343,11 +4325,6 @@ export default function Attendance() {
           <StatCard isDark={isDark} icon={Flame}
             label="Streak" value={attendanceStreak} unit="consecutive days" color="#f59e0b"
             trend={attendanceStreak >= 5 ? 'Keep it up!' : 'Build momentum'} />
-          {!isEveryoneView && !isViewingOther && (
-            <StatCard isDark={isDark} icon={CalendarOff}
-              label="Leave" value={myMonthLeave.count} unit="this month" color={COLORS.amber}
-              trend={myMonthLeave.count === 0 ? 'None taken yet' : `Last: ${myMonthLeave.records[0]?.date ? format(new Date(myMonthLeave.records[0].date), 'MMM d') : '—'}`} />
-          )}
           <StatCard isDark={isDark} icon={TrendingUp}
             label={isEveryoneView ? 'Avg Hours' : isViewingOther ? 'Their Rank' : 'Your Rank'}
             value={isEveryoneView ? `${avgDailyHours}h` : myRank} unit={isEveryoneView ? 'per day' : 'overall'} color={COLORS.mediumBlue}
@@ -5195,8 +5172,6 @@ export default function Attendance() {
           colors={COLORS}
           tokens={D}
           seed={leaveFormSeed}
-          monthLeaveCount={myMonthLeave.count}
-          monthLeaveRecords={myMonthLeave.records}
         />
 
         {/* Add Holiday Modal */}
