@@ -1,5 +1,15 @@
 // src/lib/animations.js
-// Reusable Framer Motion variants for consistent animations across the app
+// Reusable Framer Motion variants for consistent animations across the app.
+// Page navigation has its own shared contract; interaction variants below
+// intentionally remain independent so hover, tap, modal, and status feedback
+// are not flattened into the page transition.
+
+export const pageTransition = {
+  initial: { opacity: 0, y: 10, scale: 0.992, filter: "blur(2px)" },
+  animate: { opacity: 1, y: 0, scale: 1, filter: "blur(0px)" },
+  exit: { opacity: 0, y: -6, scale: 0.996, filter: "blur(1px)" },
+  transition: { duration: 0.34, ease: [0.22, 1, 0.36, 1] },
+};
 
 /**
  * Container variant - used for parent elements that contain staggered children
@@ -36,14 +46,14 @@ export const itemVariants = {
  * Page-level fade-in (good for full page wrappers or main content sections)
  */
 export const pageFadeVariants = {
-  hidden: { opacity: 0 },
+  hidden: { opacity: 0, y: 10, scale: 0.992, filter: "blur(2px)" },
   visible: {
-    opacity: 1,
-    transition: { duration: 0.5, ease: "easeOut" },
+    opacity: 1, y: 0, scale: 1, filter: "blur(0px)",
+    transition: { duration: 0.34, ease: [0.22, 1, 0.36, 1] },
   },
   exit: {
-    opacity: 0,
-    transition: { duration: 0.3 },
+    opacity: 0, y: -6, scale: 0.996, filter: "blur(1px)",
+    transition: { duration: 0.24, ease: [0.4, 0, 1, 1] },
   },
 };
 
