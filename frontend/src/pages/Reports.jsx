@@ -1439,7 +1439,7 @@ export default function Reports() {
                   style={{background:'rgba(15,23,42,.62)',backdropFilter:'blur(5px)'}}>
                   <motion.div
                     initial={{opacity:0,y:18,scale:.98}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:18,scale:.98}}
-                    className="w-full max-w-[72vw] max-h-[64vh] min-h-0 rounded-2xl overflow-hidden flex flex-col"
+                    className="w-full max-w-[60vw] max-h-[64vh] min-h-0 rounded-2xl overflow-hidden flex flex-col"
                     style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:'0 24px 70px rgba(0,0,0,.30)'}}>
                     <div className="px-5 py-4 flex items-center justify-between gap-4 shrink-0 sticky top-0 z-30"
                       style={{borderBottom:'1px solid rgba(255,255,255,.18)',background:`linear-gradient(135deg, ${C.deepBlue} 0%, ${C.mediumBlue} 100%)`,boxShadow:'0 4px 14px rgba(13,59,102,.22)'}}>
@@ -1492,11 +1492,11 @@ export default function Reports() {
                     <div className="flex-1 overflow-auto p-4">
                       {summaryPopupRows.length>0 ? (
                         <div className="overflow-x-auto rounded-xl" style={{border:`1px solid ${t.border}`}}>
-                          <table className="w-full text-sm min-w-[1350px]">
+                          <table className="w-full text-sm min-w-[1050px]">
                             <thead>
                               <tr style={{background:t.card2}}>
                                 {['Date','Employee','Emp. ID','Company','Department','Role','Status','Exact Login','Exact Logout','Duration','Late','Early Out','Missing Out','Auto','Mode','Remarks'].map(h=>(
-                                  <th key={h} className="px-3 py-2.5 text-left text-[9px] font-bold uppercase tracking-wider whitespace-nowrap" style={{color:t.textMute}}>{h}</th>
+                                  <th key={h} className="px-2 py-2 text-left text-[9px] font-bold uppercase tracking-wider whitespace-nowrap" style={{color:t.textMute}}>{h}</th>
                                 ))}
                               </tr>
                             </thead>
@@ -1509,24 +1509,24 @@ export default function Reports() {
                                   :{bg:dark?'rgba(245,158,11,.12)':'#fffbeb',col:C.amber};
                                 return (
                                   <tr key={`${a._idx}-${i}`} style={{borderTop:`1px solid ${t.border2}`}}>
-                                    <td className="px-3 py-2 text-xs whitespace-nowrap" style={{color:t.text}}>{a.date||'—'}</td>
-                                    <td className="px-3 py-2 text-xs font-semibold whitespace-nowrap" style={{color:t.text}}>{a._employeeName}</td>
-                                    <td className="px-3 py-2 text-[10px] whitespace-nowrap" style={{color:t.textSub}}>{a._employeeId||'—'}</td>
-                                    <td className="px-3 py-2 text-[10px] whitespace-nowrap" style={{color:t.textSub}}>{a._companyName||'—'}</td>
-                                    <td className="px-3 py-2 text-[10px] whitespace-nowrap" style={{color:t.textSub}}>{a._department||'—'}</td>
-                                    <td className="px-3 py-2 text-[10px] whitespace-nowrap" style={{color:t.textSub}}>{a._role||'—'}</td>
+                                    <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{color:t.text}}>{a.date||'—'}</td>
+                                    <td className="px-2 py-1.5 text-xs font-semibold whitespace-nowrap" style={{color:t.text}}>{a._employeeName}</td>
+                                    <td className="px-2 py-1.5 text-[10px whitespace-nowrap" style={{color:t.textSub}}>{a._employeeId||'—'}</td>
+                                    <td className="px-2 py-1.5 text-[10px whitespace-nowrap" style={{color:t.textSub}}>{a._companyName||'—'}</td>
+                                    <td className="px-2 py-1.5 text-[10px whitespace-nowrap" style={{color:t.textSub}}>{a._department||'—'}</td>
+                                    <td className="px-2 py-1.5 text-[10px whitespace-nowrap" style={{color:t.textSub}}>{a._role||'—'}</td>
                                     <td className="px-3 py-2">
                                       <span className="text-[9px] font-bold px-2 py-0.5 rounded-md capitalize whitespace-nowrap" style={{background:sc.bg,color:sc.col}}>{a._status}</span>
                                     </td>
-                                    <td className="px-3 py-2 text-[10px] font-semibold whitespace-nowrap" style={{color:t.textSub}}>{exactDateTime(a.punch_in)}</td>
-                                    <td className="px-3 py-2 text-[10px] font-semibold whitespace-nowrap" style={{color:t.textSub}}>{exactDateTime(a.punch_out)}</td>
-                                    <td className="px-3 py-2 text-xs font-bold whitespace-nowrap" style={{color:C.deepBlue}}>{fmt(a.duration_minutes||0)}</td>
-                                    <td className="px-3 py-2 text-[9px] font-bold" style={{color:a._late?'#dc2626':t.textMute}}>{a._late?'YES':'—'}</td>
-                                    <td className="px-3 py-2 text-[9px] font-bold" style={{color:a._early?'#ea580c':t.textMute}}>{a._early?'YES':'—'}</td>
-                                    <td className="px-3 py-2 text-[9px] font-bold" style={{color:a._missingOut?'#dc2626':t.textMute}}>{a._missingOut?'YES':'—'}</td>
-                                    <td className="px-3 py-2 text-[9px] font-bold" style={{color:a._auto?C.mediumBlue:t.textMute}}>{a._auto?'YES':'—'}</td>
-                                    <td className="px-3 py-2 text-[9px] whitespace-nowrap" style={{color:t.textSub}}>{a.work_mode||a.attendance_type||(a._wfh?'WFH':'Office')}</td>
-                                    <td className="px-3 py-2 text-[9px] max-w-[220px]" style={{color:t.textMute}}>{a.leave_reason||a.notes||'—'}</td>
+                                    <td className="px-2 py-1.5 text-[10px font-semibold whitespace-nowrap" style={{color:t.textSub}}>{exactDateTime(a.punch_in)}</td>
+                                    <td className="px-2 py-1.5 text-[10px font-semibold whitespace-nowrap" style={{color:t.textSub}}>{exactDateTime(a.punch_out)}</td>
+                                    <td className="px-2 py-1.5 text-xs font-bold whitespace-nowrap" style={{color:C.deepBlue}}>{fmt(a.duration_minutes||0)}</td>
+                                    <td className="px-2 py-1.5 text-[9px font-bold" style={{color:a._late?'#dc2626':t.textMute}}>{a._late?'YES':'—'}</td>
+                                    <td className="px-2 py-1.5 text-[9px font-bold" style={{color:a._early?'#ea580c':t.textMute}}>{a._early?'YES':'—'}</td>
+                                    <td className="px-2 py-1.5 text-[9px font-bold" style={{color:a._missingOut?'#dc2626':t.textMute}}>{a._missingOut?'YES':'—'}</td>
+                                    <td className="px-2 py-1.5 text-[9px font-bold" style={{color:a._auto?C.mediumBlue:t.textMute}}>{a._auto?'YES':'—'}</td>
+                                    <td className="px-2 py-1.5 text-[9px whitespace-nowrap" style={{color:t.textSub}}>{a.work_mode||a.attendance_type||(a._wfh?'WFH':'Office')}</td>
+                                    <td className="px-2 py-1.5 text-[9px max-w-[220px]" style={{color:t.textMute}}>{a.leave_reason||a.notes||'—'}</td>
                                   </tr>
                                 );
                               })}
@@ -1549,7 +1549,7 @@ export default function Reports() {
                   style={{background:'rgba(15,23,42,.58)',backdropFilter:'blur(4px)'}}>
                   <motion.div
                     initial={{opacity:0,y:18,scale:.98}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:18,scale:.98}}
-                    className="w-full max-w-[72vw] max-h-[64vh] min-h-0 rounded-2xl overflow-hidden flex flex-col"
+                    className="w-full max-w-[60vw] max-h-[64vh] min-h-0 rounded-2xl overflow-hidden flex flex-col"
                     style={{background:t.card,border:`1px solid ${t.border}`,boxShadow:'0 24px 70px rgba(0,0,0,.28)'}}>
                     <div className="px-5 py-4 flex items-center justify-between gap-4 shrink-0 sticky top-0 z-30"
                       style={{borderBottom:'1px solid rgba(255,255,255,.18)',background:`linear-gradient(135deg, ${C.deepBlue} 0%, ${C.mediumBlue} 100%)`,boxShadow:'0 4px 14px rgba(13,59,102,.22)'}}>
@@ -1596,10 +1596,10 @@ export default function Reports() {
 
                     <div className="flex-1 overflow-auto p-4">
                       <div className="overflow-x-auto rounded-xl" style={{border:`1px solid ${t.border}`}}>
-                        <table className="w-full text-sm min-w-[1250px]">
+                        <table className="w-full text-sm min-w-[900px]">
                           <thead><tr style={{background:t.card2}}>
                             {['Date','Status','Exact Login','Exact Logout','Duration','Late','Early Out','Missing Out','Auto','Mode','Location','Remarks'].map(h=>(
-                              <th key={h} className="px-3 py-2.5 text-left text-[9px] font-bold uppercase tracking-wider whitespace-nowrap" style={{color:t.textMute}}>{h}</th>
+                              <th key={h} className="px-2 py-2 text-left text-[9px] font-bold uppercase tracking-wider whitespace-nowrap" style={{color:t.textMute}}>{h}</th>
                             ))}
                           </tr></thead>
                           <tbody>
@@ -1611,18 +1611,18 @@ export default function Reports() {
                                 :{bg:dark?'rgba(245,158,11,.12)':'#fffbeb',col:C.amber};
                               return (
                                 <tr key={`${a._idx}-${i}`} style={{borderTop:`1px solid ${t.border2}`}}>
-                                  <td className="px-3 py-2 text-xs whitespace-nowrap" style={{color:t.text}}>{a.date||'—'}</td>
+                                  <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{color:t.text}}>{a.date||'—'}</td>
                                   <td className="px-3 py-2"><span className="text-[9px] font-bold px-2 py-0.5 rounded-md capitalize whitespace-nowrap" style={{background:sc.bg,color:sc.col}}>{a._status}</span></td>
-                                  <td className="px-3 py-2 text-[10px] font-semibold whitespace-nowrap" style={{color:t.textSub}}>{exactDateTime(a.punch_in)}</td>
-                                  <td className="px-3 py-2 text-[10px] font-semibold whitespace-nowrap" style={{color:t.textSub}}>{exactDateTime(a.punch_out)}</td>
-                                  <td className="px-3 py-2 text-xs font-bold whitespace-nowrap" style={{color:C.deepBlue}}>{fmt(a.duration_minutes||0)}</td>
-                                  <td className="px-3 py-2 text-[9px] font-bold" style={{color:a._late?'#dc2626':t.textMute}}>{a._late?'YES':'—'}</td>
-                                  <td className="px-3 py-2 text-[9px] font-bold" style={{color:a._early?'#ea580c':t.textMute}}>{a._early?'YES':'—'}</td>
-                                  <td className="px-3 py-2 text-[9px] font-bold" style={{color:a._missingOut?'#dc2626':t.textMute}}>{a._missingOut?'YES':'—'}</td>
-                                  <td className="px-3 py-2 text-[9px] font-bold" style={{color:a._auto?C.mediumBlue:t.textMute}}>{a._auto?'YES':'—'}</td>
-                                  <td className="px-3 py-2 text-[9px] whitespace-nowrap" style={{color:t.textSub}}>{a.work_mode||a.attendance_type||(a._wfh?'WFH':'Office')}</td>
-                                  <td className="px-3 py-2 text-[9px] whitespace-nowrap" style={{color:t.textSub}}>{a.latitude??'—'}, {a.longitude??'—'}</td>
-                                  <td className="px-3 py-2 text-[9px] max-w-[220px]" style={{color:t.textMute}}>{a.leave_reason||a.notes||'—'}</td>
+                                  <td className="px-2 py-1.5 text-[10px font-semibold whitespace-nowrap" style={{color:t.textSub}}>{exactDateTime(a.punch_in)}</td>
+                                  <td className="px-2 py-1.5 text-[10px font-semibold whitespace-nowrap" style={{color:t.textSub}}>{exactDateTime(a.punch_out)}</td>
+                                  <td className="px-2 py-1.5 text-xs font-bold whitespace-nowrap" style={{color:C.deepBlue}}>{fmt(a.duration_minutes||0)}</td>
+                                  <td className="px-2 py-1.5 text-[9px font-bold" style={{color:a._late?'#dc2626':t.textMute}}>{a._late?'YES':'—'}</td>
+                                  <td className="px-2 py-1.5 text-[9px font-bold" style={{color:a._early?'#ea580c':t.textMute}}>{a._early?'YES':'—'}</td>
+                                  <td className="px-2 py-1.5 text-[9px font-bold" style={{color:a._missingOut?'#dc2626':t.textMute}}>{a._missingOut?'YES':'—'}</td>
+                                  <td className="px-2 py-1.5 text-[9px font-bold" style={{color:a._auto?C.mediumBlue:t.textMute}}>{a._auto?'YES':'—'}</td>
+                                  <td className="px-2 py-1.5 text-[9px whitespace-nowrap" style={{color:t.textSub}}>{a.work_mode||a.attendance_type||(a._wfh?'WFH':'Office')}</td>
+                                  <td className="px-2 py-1.5 text-[9px whitespace-nowrap" style={{color:t.textSub}}>{a.latitude??'—'}, {a.longitude??'—'}</td>
+                                  <td className="px-2 py-1.5 text-[9px max-w-[220px]" style={{color:t.textMute}}>{a.leave_reason||a.notes||'—'}</td>
                                 </tr>
                               );
                             })}
