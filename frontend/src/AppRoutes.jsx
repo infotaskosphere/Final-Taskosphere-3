@@ -5,6 +5,7 @@ import DashboardLayout from '@/components/layout/DashboardLayout.jsx';
 import ModuleGate from '@/components/ModuleGate.jsx';
 import { PageGuard } from '@/components/governance/GovernanceGuards.jsx';
 import GifLoader, { ContentLoader } from '@/components/ui/GifLoader.jsx';
+import RouteErrorBoundary from '@/components/layout/RouteErrorBoundary.jsx';
 
 /* ── Auth pages (no sidebar) ─────────────────────────────────────────── */
 const Login = lazy(() => import('./pages/Login.jsx'));
@@ -95,13 +96,16 @@ function AuthLoading() {
 
 function ProtectedLayout() {
   const { user, loading } = useAuth();
+  const location = useLocation();
   if (loading) return <AuthLoading />;
   if (!user) return <Navigate to="/login" replace />;
   return (
     <DashboardLayout>
-      <Suspense fallback={<ContentLoader />}>
-        <AnimatedOutlet />
-      </Suspense>
+      <RouteErrorBoundary resetKey={location.pathname}>
+        <Suspense fallback={<ContentLoader />}>
+          <AnimatedOutlet />
+        </Suspense>
+      </RouteErrorBoundary>
     </DashboardLayout>
   );
 }
