@@ -1119,9 +1119,11 @@ export default function Tasks() {
     // Fetch every page of clients until exhausted — identical to Clients.jsx strategy
     const fetchAllClients = async (signal = loadSignal) => {
       const PAGE = 200;
+      const MAX_PAGES = 25;
       let page = 1;
       let all = [];
-      while (true) {
+      let previousPageSignature = '';
+      while (page <= MAX_PAGES) {
         if (!isLoadActive() || signal.aborted) return all;
         const res = await api.get('/clients', {
           params: { page, page_size: PAGE },
@@ -1129,9 +1131,13 @@ export default function Tasks() {
           timeout: 12000,
         });
         const batch = Array.isArray(res.data) ? res.data : [];
+        if (!batch.length) break;
+        const pageSignature = batch.map(c => String(c?.id ?? c?._id ?? '')).join('|');
+        if (page > 1 && pageSignature && pageSignature === previousPageSignature) break;
+        previousPageSignature = pageSignature;
         all = [...all, ...batch];
         if (batch.length < PAGE) break;
-        page++;
+        page += 1;
       }
       return all;
     };
@@ -1250,6 +1256,8 @@ export default function Tasks() {
       if (bgRefreshTimeoutId) clearTimeout(bgRefreshTimeoutId);
       // Abort every Task-page request immediately when leaving this route.
       loadAbortController.abort();
+      setDialogOpen(false);
+      setClientPopoverOpen(false);
     };
   }, [apiFetch]);
 
@@ -2345,7 +2353,9 @@ export default function Tasks() {
                   <Button
                     type="button"
                     size="sm"
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
                       setEditingTask(null);
                       setFormData({ ...EMPTY_FORM });
                       setDialogOpen(true);
