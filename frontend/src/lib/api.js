@@ -457,9 +457,24 @@ api.interceptors.response.use(
       error.response?.status === 503 ||
       error.response?.status === 504;
 
+    // FIX: a plain 404 means "this resource/route doesn't exist" — it is NOT
+    // evidence the backend is cold-starting. Only 502/503/504 (or no response
+    // at all, handled elsewhere via _reportNetworkResult) are real signs the
+    // server itself isn't up yet. Previously ANY 404 anywhere in the app —
+    // even a harmless "task not found" — reset the single shared readiness
+    // flag, which forced every other in-flight and future request across the
+    // ENTIRE app (every page, not just the one that got the 404) to sit and
+    // wait through the ~75s backoff sequence in ensureBackendReady() before
+    // proceeding. That produced exactly the symptom of "one page loads fine,
+    // then every other page goes blank for a long time with no console error."
+    const isColdStartStatus =
+      error.response?.status === 502 ||
+      error.response?.status === 503 ||
+      error.response?.status === 504;
+
     // Mark backend as not ready once.
     if (
-      transientStatus &&
+      isColdStartStatus &&
       !error.config?._coldStartAttempt
     ) {
       markBackendNotReady();
