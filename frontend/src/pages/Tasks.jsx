@@ -10,7 +10,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -999,28 +999,6 @@ export default function Tasks() {
   const [sortBy,                  setSortBy]                  = useState('due_date');
   const [sortDirection,           setSortDirection]           = useState('asc');
   const [showMyTasksOnly,         setShowMyTasksOnly]         = useState(false);
-
-  // FIX: These dropdowns previously used useState/useRef/useEffect inside
-  // inline JSX IIFEs. Those are conditional/nested hook calls and can cause
-  // React error #310 when the Tasks page rerenders (notably when New Task opens).
-  // Keep the same UI, but make their hook state stable at component level.
-  const [departmentFilterOpen, setDepartmentFilterOpen] = useState(false);
-  const [assigneeFilterOpen, setAssigneeFilterOpen] = useState(false);
-  const departmentFilterRef = useRef(null);
-  const assigneeFilterRef = useRef(null);
-
-  useEffect(() => {
-    const handler = (e) => {
-      if (departmentFilterRef.current && !departmentFilterRef.current.contains(e.target)) {
-        setDepartmentFilterOpen(false);
-      }
-      if (assigneeFilterRef.current && !assigneeFilterRef.current.contains(e.target)) {
-        setAssigneeFilterOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
   const [taskChecklists,          setTaskChecklists]          = useState({});
   const [showWorkflowLibrary,     setShowWorkflowLibrary]     = useState(false);
   const [workflowSearch,          setWorkflowSearch]          = useState('');
@@ -2286,31 +2264,18 @@ export default function Tasks() {
               {/* Dialog stays mounted even while permissions/data are still loading —
                   gating the whole <Dialog> made it unmount + remount (form flashed closed
                   then re-opened) when auth permissions resolved after navigation. */}
-                <Dialog
-                  open={dialogOpen}
-                  onOpenChange={(open) => {
-                    setDialogOpen(open);
-                    if (!open) resetForm();
-                  }}
-                >
+                <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm(); }}>
                   {/* GLITCH FIX: creating your own task must always be available —
                       it must not be hidden behind the universal can_edit_tasks flag,
                       which an admin may have turned off for this user without
                       intending to block them from their own tasks. */}
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() => {
-                      setEditingTask(null);
-                      setFormData({ ...EMPTY_FORM });
-                      setDialogOpen(true);
-                    }}
-                    className="h-8 px-4 text-xs rounded-xl font-semibold gap-1.5"
-                    style={{ background: 'rgba(255,255,255,0.2)', border: '1px solid rgba(255,255,255,0.35)', color: 'white' }}
-                    data-testid="create-task-btn"
-                  >
-                    <Plus className="h-3.5 w-3.5" /> New Task
-                  </Button>
+                  <DialogTrigger asChild>
+                    <Button size="sm" onClick={() => { setEditingTask(null); setFormData({ ...EMPTY_FORM }); }}
+                      className="h-8 px-4 text-xs rounded-xl font-semibold gap-1.5"
+                      style={{ background: 'rgba(255,255,255,0.2)', border: '1px solid rgba(255,255,255,0.35)', color: 'white' }}>
+                      <Plus className="h-3.5 w-3.5" /> New Task
+                    </Button>
+                  </DialogTrigger>
 
                   {/* Dialog form — premium redesign */}
                   <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden p-0 gap-0 flex flex-col rounded-2xl shadow-2xl">
@@ -3689,13 +3654,17 @@ export default function Tasks() {
           <div className="flex-1 min-w-0 relative">
             {/* Multi-select Dept dropdown */}
             {(() => {
+              const [open, setOpen] = React.useState(false);
+              const ref = React.useRef(null);
+              React.useEffect(() => {
+                const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+                document.addEventListener('mousedown', handler);
+                return () => document.removeEventListener('mousedown', handler);
+              }, []);
               const toggleVal = (val) => {
                 setFilterCategory(prev => prev.includes(val) ? prev.filter(v => v !== val) : prev.length < 2 ? [...prev, val] : prev);
               };
               const label = filterCategory.length === 0 ? 'All Depts' : filterCategory.map(getCategoryLabel).join(' + ');
-              const open = departmentFilterOpen;
-              const setOpen = setDepartmentFilterOpen;
-              const ref = departmentFilterRef;
               return (
                 <div ref={ref} className="relative w-full">
                   <button type="button" onClick={() => setOpen(o => !o)}
@@ -3742,9 +3711,13 @@ export default function Tasks() {
           <div className="flex-1 min-w-0 relative">
             {/* Multi-select Assignee dropdown */}
             {(() => {
-              const open = assigneeFilterOpen;
-              const setOpen = setAssigneeFilterOpen;
-              const ref = assigneeFilterRef;
+              const [open, setOpen] = React.useState(false);
+              const ref = React.useRef(null);
+              React.useEffect(() => {
+                const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+                document.addEventListener('mousedown', handler);
+                return () => document.removeEventListener('mousedown', handler);
+              }, []);
               const toggleVal = (val) => {
                 setFilterAssignee(prev => prev.includes(val) ? prev.filter(v => v !== val) : prev.length < 2 ? [...prev, val] : prev);
               };
