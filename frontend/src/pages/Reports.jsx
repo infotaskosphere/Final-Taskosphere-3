@@ -779,6 +779,105 @@ export default function Reports() {
     ].filter(d=>d.value>0);
   },[fTasks]);
 
+  // ── Exact per-user task distribution ─────────────────────────────────────
+  // Timely = completed on/before due date.
+  // Delayed = completed after due date.
+  // Overdue = incomplete task whose due date has passed.
+  // No Due Date = completed task where timing cannot be determined safely.
+  const taskUserRows = useMemo(()=>{
+    const now = new Date();
+    const userMap = new Map();
+
+    allUsers
+      .filter(u => selCompany === 'all' || String(u.company_id) === String(selCompany))
+      .forEach(u=>{
+        const id = String(u.id || u._id || '');
+        if (!id) return;
+        userMap.set(id,{
+          user_id:id,
+          user_name:u.full_name || u.name || 'Unknown User',
+          department:u.department || u.department_name || '—',
+          company:u.company_name || u.company || '—',
+          total:0, completed:0, timely:0, delayed:0, overdue:0,
+          inProgress:0, pending:0, noDueDate:0, delayDays:0
+        });
+      });
+
+    tasks.forEach(task=>{
+      const id = String(task.assigned_to || task.assigned_to_id || '');
+      if (!id) return;
+      if (selUser !== 'all' && id !== String(selUser)) return;
+
+      if (!userMap.has(id)) {
+        userMap.set(id,{
+          user_id:id,
+          user_name:task.assigned_to_name || task.assignee_name || 'Unknown User',
+          department:task.assigned_to_department || task.department || '—',
+          company:task.company_name || task.company || '—',
+          total:0, completed:0, timely:0, delayed:0, overdue:0,
+          inProgress:0, pending:0, noDueDate:0, delayDays:0
+        });
+      }
+
+      const row = userMap.get(id);
+      row.total++;
+
+      const status = String(task.status || '').toLowerCase();
+      const due = task.due_date ? new Date(task.due_date) : null;
+      const completedAt = task.completed_at ? new Date(task.completed_at) : null;
+      const hasDue = due && !Number.isNaN(due.getTime());
+      const hasCompletion = completedAt && !Number.isNaN(completedAt.getTime());
+
+      if (status === 'completed') {
+        row.completed++;
+
+        if (!hasDue || !hasCompletion) {
+          row.noDueDate++;
+        } else if (completedAt.getTime() <= due.getTime()) {
+          row.timely++;
+        } else {
+          row.delayed++;
+          row.delayDays += Math.max(0, Math.ceil(
+            (completedAt.getTime() - due.getTime()) / 86400000
+          ));
+        }
+      } else {
+        if (status === 'in_progress') row.inProgress++;
+        else row.pending++;
+
+        if (hasDue && due.getTime() < now.getTime()) row.overdue++;
+      }
+    });
+
+    let rows = Array.from(userMap.values());
+
+    if (selUser !== 'all') {
+      rows = rows.filter(r => r.user_id === String(selUser));
+    }
+
+    return rows
+      .map(r=>({
+        ...r,
+        completionPct:r.total ? Math.round((r.completed/r.total)*100) : 0,
+        timelyPct:r.completed ? Math.round((r.timely/r.completed)*100) : 0,
+        avgDelayDays:r.delayed ? Math.round((r.delayDays/r.delayed)*10)/10 : 0,
+      }))
+      .sort((a,b)=>b.total-a.total || b.completed-a.completed || a.user_name.localeCompare(b.user_name));
+  },[tasks,allUsers,selCompany,selUser]);
+
+  const taskDistributionSummary = useMemo(()=>(
+    taskUserRows.reduce((s,r)=>({
+      total:s.total+r.total,
+      completed:s.completed+r.completed,
+      timely:s.timely+r.timely,
+      delayed:s.delayed+r.delayed,
+      overdue:s.overdue+r.overdue,
+      inProgress:s.inProgress+r.inProgress,
+      pending:s.pending+r.pending,
+      noDueDate:s.noDueDate+r.noDueDate,
+    }),{total:0,completed:0,timely:0,delayed:0,overdue:0,inProgress:0,pending:0,noDueDate:0})
+  ),[taskUserRows]);
+
   const radarData = useMemo(()=>{
     const p=performers[0]; if(!p) return [];
     return [
@@ -1177,6 +1276,81 @@ export default function Reports() {
                 ):<Empty icon={Target} text="No task data" dark={dark}/>}
               </Sec>
             </div>
+
+            {/* Exact task distribution by user */}
+            <Sec
+              title="Task Distribution by User"
+              desc="Exact workload and completion quality for every visible user"
+              dark={dark}
+            >
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+                  {[
+                    ['Total Tasks',taskDistributionSummary.total,C.deepBlue],
+                    ['Completed',taskDistributionSummary.completed,C.emeraldGreen],
+                    ['Timely',taskDistributionSummary.timely,C.emeraldGreen],
+                    ['Delayed',taskDistributionSummary.delayed,'#ea580c'],
+                    ['Overdue',taskDistributionSummary.overdue,'#dc2626'],
+                    ['In Progress',taskDistributionSummary.inProgress,C.mediumBlue],
+                    ['Pending',taskDistributionSummary.pending,C.amber],
+                    ['No Due Date',taskDistributionSummary.noDueDate,t.textSub],
+                  ].map(([label,value,color])=>(
+                    <div key={label} className="rounded-xl p-2.5" style={{background:t.card2,border:`1px solid ${t.border}`}}>
+                      <p className="text-[9px] font-bold uppercase tracking-wider" style={{color:t.textMute}}>{label}</p>
+                      <p className="text-lg font-black mt-1" style={{color}}>{value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="rounded-xl border overflow-x-auto" style={{borderColor:t.border}}>
+                  <table className="w-full text-[10px] min-w-[1120px]">
+                    <thead>
+                      <tr style={{background:t.card2,borderBottom:`1px solid ${t.border}`}}>
+                        {[
+                          'User','Department','Total','Completed','Timely','Delayed',
+                          'Overdue','In Progress','Pending','Completion %','On-Time %','Avg Delay'
+                        ].map(h=>(
+                          <th key={h} className="px-2.5 py-2 text-left font-bold whitespace-nowrap" style={{color:t.textSub}}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {taskUserRows.length>0 ? taskUserRows.map((r,i)=>(
+                        <tr key={r.user_id||i} className="border-t" style={{borderColor:t.border}}>
+                          <td className="px-2.5 py-2 font-bold whitespace-nowrap" style={{color:t.text}}>{r.user_name}</td>
+                          <td className="px-2.5 py-2 whitespace-nowrap" style={{color:t.textSub}}>{r.department}</td>
+                          <td className="px-2.5 py-2 font-bold" style={{color:C.deepBlue}}>{r.total}</td>
+                          <td className="px-2.5 py-2 font-bold" style={{color:C.emeraldGreen}}>{r.completed}</td>
+                          <td className="px-2.5 py-2 font-bold" style={{color:C.emeraldGreen}}>{r.timely}</td>
+                          <td className="px-2.5 py-2 font-bold" style={{color:'#ea580c'}}>{r.delayed}</td>
+                          <td className="px-2.5 py-2 font-bold" style={{color:'#dc2626'}}>{r.overdue}</td>
+                          <td className="px-2.5 py-2" style={{color:C.mediumBlue}}>{r.inProgress}</td>
+                          <td className="px-2.5 py-2" style={{color:C.amber}}>{r.pending}</td>
+                          <td className="px-2.5 py-2 font-bold" style={{color:t.text}}>{r.completionPct}%</td>
+                          <td className="px-2.5 py-2 font-bold" style={{color:r.timelyPct>=80?C.emeraldGreen:r.timelyPct>=50?C.amber:'#dc2626'}}>{r.timelyPct}%</td>
+                          <td className="px-2.5 py-2 whitespace-nowrap" style={{color:r.avgDelayDays>0?'#ea580c':t.textSub}}>
+                            {r.avgDelayDays>0?`${r.avgDelayDays}d`:'—'}
+                          </td>
+                        </tr>
+                      )) : (
+                        <tr>
+                          <td colSpan={12} className="px-3 py-8 text-center" style={{color:t.textMute}}>
+                            No user-level task data available for the selected filters.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[9px]" style={{color:t.textMute}}>
+                  <span><b style={{color:C.emeraldGreen}}>Timely</b> = completed on/before due date</span>
+                  <span><b style={{color:'#ea580c'}}>Delayed</b> = completed after due date</span>
+                  <span><b style={{color:'#dc2626'}}>Overdue</b> = still incomplete after due date</span>
+                  <span><b>No Due Date</b> = timing could not be determined safely</span>
+                </div>
+              </div>
+            </Sec>
 
             {overdue.length>0&&(
               <Sec title={`Overdue Tasks (${overdue.length})`} desc="Past due — immediate attention required" dark={dark}>
