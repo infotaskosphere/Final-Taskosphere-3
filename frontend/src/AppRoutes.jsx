@@ -1,13 +1,12 @@
 import React, { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
-import { AnimatePresence, motion } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import DashboardLayout from '@/components/layout/DashboardLayout.jsx';
 import ModuleGate from '@/components/ModuleGate.jsx';
 import { PageGuard } from '@/components/governance/GovernanceGuards.jsx';
 import GifLoader, { ContentLoader } from '@/components/ui/GifLoader.jsx';
 import RouteErrorBoundary from '@/components/layout/RouteErrorBoundary.jsx';
-import { pageTransition } from '@/lib/animations.js';
+import { AnimatedOutlet as RouteAnimatedOutlet, PageTransition } from '@/components/layout/PageTransition.jsx';
 
 /* ── Auth pages (no sidebar) ─────────────────────────────────────────── */
 const Login = lazy(() => import('./pages/Login.jsx'));
@@ -104,44 +103,9 @@ function ProtectedLayout() {
   return (
     <DashboardLayout>
       <RouteErrorBoundary resetKey={location.pathname}>
-        <AnimatedOutlet />
+        <RouteAnimatedOutlet />
       </RouteErrorBoundary>
     </DashboardLayout>
-  );
-}
-
-/*
- * One shared transition keeps every protected page feeling like the same
- * product. Sync mode lets the next page begin immediately while the previous
- * surface softly leaves, instead of blocking navigation behind a loader.
- */
-function AnimatedOutlet() {
-  const location = useLocation();
-  return (
-    <AnimatePresence mode="sync" initial={false}>
-      <motion.div
-        key={location.pathname}
-        className="taskosphere-page-transition"
-        {...pageTransition}
-      >
-        <Suspense fallback={<ContentLoader />}>
-          <Outlet />
-        </Suspense>
-      </motion.div>
-    </AnimatePresence>
-  );
-}
-
-function PageTransition({ children }) {
-  const location = useLocation();
-  return (
-    <motion.div
-      key={location.pathname}
-      className="taskosphere-page-transition taskosphere-page-transition--standalone"
-      {...pageTransition}
-    >
-      {children}
-    </motion.div>
   );
 }
 
