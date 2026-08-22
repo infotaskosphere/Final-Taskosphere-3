@@ -329,15 +329,25 @@ const springSnap = { type: 'spring', stiffness: 500, damping: 28 };
 const springMed  = { type: 'spring', stiffness: 400, damping: 24 };
 const springSoft = { type: 'spring', stiffness: 300, damping: 20 };
 
+// NOTE: intentionally opacity-only (no x/y/scale/rotate). Framer Motion
+// implements any of those via an inline CSS `transform` on this wrapper,
+// and since every routed page's content — including its `position: fixed`
+// modals (Punch In, Apply Leave, reminders, etc.) — renders as a
+// descendant of this element, a transform here would make `fixed`
+// position relative to THIS box instead of the viewport (per the CSS
+// containing-block spec). That's what was causing popups across the app
+// to appear off-center and scroll away with the page instead of staying
+// put. Keep this opacity-only unless the fixed-modal issue is fixed some
+// other way (e.g. portaling every modal to document.body).
 const PAGE_VARIANTS = {
-  initial: { opacity: 0, y: 18 },
+  initial: { opacity: 0 },
   animate: {
-    opacity: 1, y: 0,
-    transition: { type: 'spring', stiffness: 320, damping: 28, mass: 0.9 },
+    opacity: 1,
+    transition: { duration: 0.22, ease: 'easeOut' },
   },
   exit: {
-    opacity: 0, y: -8,
-    transition: { duration: 0.16, ease: 'easeIn' },
+    opacity: 0,
+    transition: { duration: 0.14, ease: 'easeIn' },
   },
 };
 
