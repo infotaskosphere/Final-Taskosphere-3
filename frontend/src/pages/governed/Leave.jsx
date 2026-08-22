@@ -359,6 +359,22 @@ export default function Leave() {
     return buckets;
   }, [leaveRecords]);
 
+  // "Apply Leave" always applies for the logged-in user themselves (see
+  // backend/server.py apply_leave — it uses current_user.id, not whatever
+  // user this page happens to be showing), so only compute this when
+  // viewUserId is actually 'me'. If an admin is browsing someone else's
+  // leave, count stays null and the modal's banner simply doesn't render —
+  // showing that other person's leave count in "your" Apply Leave form
+  // would be misleading.
+  const myMonthLeaveForModal = useMemo(() => {
+    if (viewUserId !== 'me') return { count: null, records: [] };
+    const monthStr = format(new Date(), 'yyyy-MM');
+    const records = leaveRecords
+      .filter((r) => (r.date || '').startsWith(monthStr))
+      .map((r) => ({ date: r.date, leave_type: r.leave_type || 'full_day', reason: r.leave_reason }));
+    return { count: records.length, records };
+  }, [leaveRecords, viewUserId]);
+
   const stats = useMemo(() => {
     const thisMonth = format(new Date(), 'yyyy-MM');
     return {
@@ -588,6 +604,8 @@ export default function Leave() {
         isDark={isDark}
         colors={COLORS}
         tokens={D}
+        monthLeaveCount={myMonthLeaveForModal.count}
+        monthLeaveRecords={myMonthLeaveForModal.records}
       />
     </div>
   );
