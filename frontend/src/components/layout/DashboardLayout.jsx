@@ -329,28 +329,6 @@ const springSnap = { type: 'spring', stiffness: 500, damping: 28 };
 const springMed  = { type: 'spring', stiffness: 400, damping: 24 };
 const springSoft = { type: 'spring', stiffness: 300, damping: 20 };
 
-// NOTE: intentionally opacity-only (no x/y/scale/rotate). Framer Motion
-// implements any of those via an inline CSS `transform` on this wrapper,
-// and since every routed page's content — including its `position: fixed`
-// modals (Punch In, Apply Leave, reminders, etc.) — renders as a
-// descendant of this element, a transform here would make `fixed`
-// position relative to THIS box instead of the viewport (per the CSS
-// containing-block spec). That's what was causing popups across the app
-// to appear off-center and scroll away with the page instead of staying
-// put. Keep this opacity-only unless the fixed-modal issue is fixed some
-// other way (e.g. portaling every modal to document.body).
-const PAGE_VARIANTS = {
-  initial: { opacity: 0 },
-  animate: {
-    opacity: 1,
-    transition: { duration: 0.22, ease: 'easeOut' },
-  },
-  exit: {
-    opacity: 0,
-    transition: { duration: 0.14, ease: 'easeIn' },
-  },
-};
-
 const DashboardLayout = ({ children }) => {
   const { user, logout, hasPermission, loading } = useAuth();
   const navigate = useNavigate();
@@ -1006,18 +984,31 @@ const DashboardLayout = ({ children }) => {
             className="mx-auto w-full min-w-0"
             style={{ maxWidth: 'var(--content-max, 1400px)' }}
           >
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.div
-                key={location.pathname}
-                variants={PAGE_VARIANTS}
-                initial="initial"
-                animate="animate"
-                exit="exit"
-                className="w-full min-w-0"
-              >
-                {children}
-              </motion.div>
-            </AnimatePresence>
+            {/*
+             * NOTE: this used to be wrapped in <AnimatePresence mode="wait">
+             * + <motion.div variants={PAGE_VARIANTS}>. That wrapper is what
+             * AppRoutes.jsx's AnimatedOutlet comment refers to as "the
+             * previous implementation" — it was supposed to have been
+             * replaced by AnimatedOutlet's plain CSS opacity animation, but
+             * this leftover copy stuck around here too.
+             *
+             * Framer Motion's AnimatePresence does not reliably support a
+             * <Suspense> boundary inside its animated child (children here
+             * is <Suspense fallback={<ContentLoader/>}><AnimatedOutlet/></Suspense>
+             * from ProtectedLayout). mode="wait" holds the outgoing page
+             * mounted until it sees an exit-complete signal; if that signal
+             * is missed because the incoming lazy-loaded page suspends
+             * mid-transition, AnimatePresence gets stuck "waiting" forever —
+             * the sidebar/header (outside this block) keep working since
+             * they're unaffected, but every route rendered through here
+             * stays permanently blank for the rest of the session. This is
+             * the root cause of the "Tasks page opens, everything after it
+             * is blank" bug. AnimatedOutlet already provides the intended
+             * fade — just render children directly here.
+             */}
+            <div className="w-full min-w-0">
+              {children}
+            </div>
           </div>
         </main>
       </div>
