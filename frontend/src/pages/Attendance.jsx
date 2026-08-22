@@ -1,6 +1,5 @@
 import { useDark } from '@/hooks/useDark';
 import AttendanceReportModal from './AttendanceReportModal';
-import ApplyLeaveModal from '@/components/attendance/ApplyLeaveModal';
 import React, { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatInTimeZone } from 'date-fns-tz';
@@ -12,7 +11,6 @@ import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import api from '@/lib/api';
-import { normalizeCompanies } from "@/lib/companies";
 import { toast } from 'sonner';
 import { getJsPDF } from '@/lib/lazyLibs';
 import {
@@ -1927,12 +1925,8 @@ export default function Attendance() {
   const [selectedAttendanceDetail, setSelectedAttendanceDetail] = useState(null);
   const [dataError,          setDataError]          = useState(null);
   const absentWarningShownRef = useRef(false);
-  // Apply Leave now uses the shared <ApplyLeaveModal /> (see
-  // components/attendance/ApplyLeaveModal.jsx) so this page and People
-  // Matrix → Leave always produce the exact same result. `leaveFormSeed`
-  // just carries what a quick-action button (Half Day / Early Leave /
-  // Tomorrow / 3 Days / 1 Week) pre-fills when it opens the modal.
-  const [leaveFormSeed,      setLeaveFormSeed]      = useState(null);
+  const [leaveType,          setLeaveType]          = useState('full_day');
+  const [earlyLeaveTime,     setEarlyLeaveTime]     = useState('');
   const [showPunchInModal,  setShowPunchInModal]  = useState(false);
   const [modalActionDone,   setModalActionDone]   = useState(false);
   // Tracks if user hit "Ignore" today — stored in sessionStorage so it
@@ -1955,6 +1949,9 @@ export default function Attendance() {
   const [showLeaveForm,     setShowLeaveForm]     = useState(false);
   const [showHolidayModal,  setShowHolidayModal]  = useState(false);
   const [calendarOpenIdx,   setCalendarOpenIdx]   = useState(null);
+  const [leaveFrom,         setLeaveFrom]         = useState(null);
+  const [leaveTo,           setLeaveTo]           = useState(null);
+  const [leaveReason,       setLeaveReason]       = useState('');
   const [holidayRows,       setHolidayRows]       = useState([{ name: '', date: format(new Date(), 'yyyy-MM-dd') }]);
   const [liveDuration,      setLiveDuration]      = useState('0h 0m');
 
@@ -2365,7 +2362,7 @@ export default function Attendance() {
       } catch {}
 
       // Process companies for report filter
-      setAllCompanies(normalizeCompanies(companiesRes));
+      setAllCompanies(Array.isArray(companiesRes.data) ? companiesRes.data : []);
 
       const history = historyRes.data || [];
       setAttendanceHistory(Array.isArray(history) ? history : []);
@@ -2565,6 +2562,34 @@ export default function Attendance() {
       toast.error(error.response?.data?.detail || 'Failed to record attendance');
     } finally { setLoading(false); }
   }, [fetchData, checkGeofence, isMachineSynced]);
+
+  // ── Leave ──────────────────────────────────────────────────────────────────
+  const handleApplyLeave = useCallback(async () => {
+    if (!leaveFrom) { toast.error('Select a leave start date'); return; }
+    if (!leaveReason.trim()) {
+      toast.error('Please enter the reason/details for your leave');
+      return;
+    }
+    if (leaveType === 'early_leave' && !earlyLeaveTime) {
+      toast.error('Please specify your early departure time'); return;
+    }
+    const isPartialDay = leaveType !== 'full_day'; // half_day + early_leave are partial
+    const effectiveTo = isPartialDay ? leaveFrom : (leaveTo || leaveFrom);
+    try {
+      await api.post('/attendance/apply-leave', {
+        from_date:        format(leaveFrom, 'yyyy-MM-dd'),
+        to_date:          format(effectiveTo, 'yyyy-MM-dd'),
+        reason:           leaveReason.trim(),
+        leave_type:       leaveType,
+        early_leave_time: leaveType === 'early_leave' ? earlyLeaveTime : undefined,
+      });
+      toast.success('Leave request submitted');
+      setShowLeaveForm(false);
+      setLeaveFrom(null); setLeaveTo(null); setLeaveReason('');
+      setLeaveType('full_day'); setEarlyLeaveTime('');
+      await fetchData();
+    } catch { toast.error('Failed to submit leave request'); }
+  }, [leaveFrom, leaveTo, leaveReason, leaveType, earlyLeaveTime, fetchData]);
 
   // ── Holidays ───────────────────────────────────────────────────────────────
   const handleAddHolidays = useCallback(async () => {
@@ -4791,7 +4816,7 @@ export default function Attendance() {
                         )}
                         <motion.button
                           whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                          onClick={() => { setLeaveFormSeed(null); setShowLeaveForm(true); }}
+                          onClick={() => setShowLeaveForm(true)}
                           className="flex items-center justify-center gap-2.5 w-full py-3.5 rounded-xl text-sm font-bold transition-all border-2"
                           style={{
                             borderColor: isDark ? ATT_COLORS.absent.borderDark : `${ATT_COLORS.absent.fg}40`,
@@ -4804,7 +4829,7 @@ export default function Attendance() {
                         <div className="grid grid-cols-2 gap-2">
                           <motion.button
                             whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}
-                            onClick={() => { setLeaveFormSeed({ leaveType: 'half_day_morning' }); setShowLeaveForm(true); }}
+                            onClick={() => { setLeaveType('half_day_morning'); setShowLeaveForm(true); }}
                             className="flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all border"
                             style={{
                               borderColor: isDark ? 'rgba(139,92,246,0.3)' : '#ddd6fe',
@@ -4816,7 +4841,7 @@ export default function Attendance() {
                           </motion.button>
                           <motion.button
                             whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}
-                            onClick={() => { setLeaveFormSeed({ leaveType: 'early_leave' }); setShowLeaveForm(true); }}
+                            onClick={() => { setLeaveType('early_leave'); setShowLeaveForm(true); }}
                             className="flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all border"
                             style={{
                               borderColor: isDark ? 'rgba(245,158,11,0.3)' : '#fde68a',
@@ -4839,8 +4864,7 @@ export default function Attendance() {
                                 from.setDate(from.getDate() + (label === 'Tomorrow' ? 1 : 0));
                                 const to = new Date(from);
                                 to.setDate(from.getDate() + days - 1);
-                                setLeaveFormSeed({ leaveType: 'full_day', leaveFrom: from, leaveTo: to });
-                                setShowLeaveForm(true);
+                                setLeaveFrom(from); setLeaveTo(to); setShowLeaveForm(true);
                               }}
                               className="text-xs font-semibold px-3 py-2.5 rounded-xl border transition-all hover:shadow-sm active:scale-95 text-center"
                               style={{
@@ -5161,18 +5185,286 @@ export default function Attendance() {
           )}
         </AnimatePresence>
 
-        {/* Apply Leave — shared modal, see components/attendance/ApplyLeaveModal.jsx.
-            Using the same component People Matrix → Leave uses guarantees
-            applying leave here produces exactly the same result either way. */}
-        <ApplyLeaveModal
-          open={showLeaveForm}
-          onClose={() => setShowLeaveForm(false)}
-          onSubmitted={fetchData}
-          isDark={isDark}
-          colors={COLORS}
-          tokens={D}
-          seed={leaveFormSeed}
-        />
+        {/* Leave Form Modal */}
+        <AnimatePresence>
+          {showLeaveForm && (
+             <motion.div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+              style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', background: isDark ? 'rgba(0,0,0,0.85)' : 'rgba(15,23,42,0.75)', backdropFilter: 'blur(8px)' }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={(e) => { if (e.target === e.currentTarget) setShowLeaveForm(false); }}>
+              <motion.div
+                className="w-full max-w-3xl rounded-3xl shadow-2xl overflow-hidden max-h-[82vh] overflow-y-auto"
+                style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0' }}
+                initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
+                transition={{ type: 'spring', stiffness: 220, damping: 20 }}
+              >
+                {/* Header */}
+                <div className="px-7 py-5 flex items-center justify-between"
+                  style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
+                  <div>
+                    <h2 className="text-xl font-black text-white">Apply Leave</h2>
+                    <p className="text-blue-200 text-sm mt-0.5">Select type and dates below</p>
+                  </div>
+                  <button onClick={() => setShowLeaveForm(false)}
+                    className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center">
+                    <X className="w-4 h-4 text-white" />
+                  </button>
+                </div>
+          
+                <div className="p-6 space-y-5">
+          
+                  {/* ── Leave Type Picker ── */}
+                  <div>
+                    <p className="text-sm font-semibold mb-2.5" style={{ color: isDark ? D.muted : '#374151' }}>Leave Type</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {LEAVE_TYPES.map(lt => (
+                        <motion.button
+                          key={lt.value}
+                          whileTap={{ scale: 0.97 }}
+                          onClick={() => setLeaveType(lt.value)}
+                        >
+                          <span style={{ fontSize: 18, lineHeight: 1 }}>{lt.icon}</span>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold leading-snug truncate"
+                              style={{ color: leaveType === lt.value ? (isDark ? '#60a5fa' : COLORS.deepBlue) : isDark ? D.text : '#1e293b' }}>
+                              {lt.label}
+                            </p>
+                            <p className="text-[11px] leading-snug mt-0.5" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>
+                              {lt.desc}
+                            </p>
+                          </div>
+                          {leaveType === lt.value && (
+                            <div className="ml-auto flex-shrink-0 w-4 h-4 rounded-full flex items-center justify-center"
+                              style={{ backgroundColor: COLORS.deepBlue }}>
+                              <div className="w-1.5 h-1.5 rounded-full bg-white" />
+                            </div>
+                          )}
+                        </motion.button>
+                      ))}
+                    </div>
+                  </div>
+          
+                  {/* ── Early leave time picker ── */}
+                  {leaveType === 'early_leave' && (
+                    <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}>
+                      <label className="text-sm font-semibold mb-2.5 block" style={{ color: isDark ? D.muted : '#374151' }}>
+                        Departure Time
+                      </label>
+                      <div className="flex items-center gap-3">
+                        {/* Hour selector */}
+                        <div className="flex-1">
+                          <p className="text-[11px] font-medium mb-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Hour</p>
+                          <div className="grid grid-cols-6 gap-1">
+                            {Array.from({ length: 12 }, (_, i) => i + 1).map(h => {
+                              const hStr = String(h).padStart(2, '0');
+                              const currentH = earlyLeaveTime ? earlyLeaveTime.split(':')[0] : '';
+                              const is12 = currentH === '00' && h === 12;
+                              const isSelected = currentH === hStr || is12;
+                              return (
+                                <button key={h} type="button"
+                                  onClick={() => {
+                                    const mins = earlyLeaveTime ? earlyLeaveTime.split(':')[1] || '00' : '00';
+                                    const isPM = earlyLeaveTime ? parseInt(earlyLeaveTime.split(':')[0]) >= 12 : true;
+                                    let h24 = h;
+                                    if (isPM && h !== 12) h24 = h + 12;
+                                    if (!isPM && h === 12) h24 = 0;
+                                    setEarlyLeaveTime(`${String(h24).padStart(2, '0')}:${mins}`);
+                                  }}
+                                  className="py-1.5 rounded-lg text-xs font-semibold transition-all"
+                                  style={{
+                                    backgroundColor: isSelected ? COLORS.deepBlue : isDark ? D.raised : '#f1f5f9',
+                                    color: isSelected ? '#ffffff' : isDark ? D.text : '#374151',
+                                    border: `1px solid ${isSelected ? COLORS.deepBlue : isDark ? D.border : '#e2e8f0'}`,
+                                  }}>
+                                  {h}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                        {/* Minute selector */}
+                        <div className="w-24">
+                          <p className="text-[11px] font-medium mb-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Minute</p>
+                          <div className="grid grid-cols-2 gap-1">
+                            {[0, 15, 30, 45].map(m => {
+                              const mStr = String(m).padStart(2, '0');
+                              const currentM = earlyLeaveTime ? earlyLeaveTime.split(':')[1] : '';
+                              const isSelected = currentM === mStr;
+                              return (
+                                <button key={m} type="button"
+                                  onClick={() => {
+                                    const hrs = earlyLeaveTime ? earlyLeaveTime.split(':')[0] : '13';
+                                    setEarlyLeaveTime(`${hrs}:${mStr}`);
+                                  }}
+                                  className="py-1.5 rounded-lg text-xs font-semibold transition-all"
+                                  style={{
+                                    backgroundColor: isSelected ? COLORS.mediumBlue : isDark ? D.raised : '#f1f5f9',
+                                    color: isSelected ? '#ffffff' : isDark ? D.text : '#374151',
+                                    border: `1px solid ${isSelected ? COLORS.mediumBlue : isDark ? D.border : '#e2e8f0'}`,
+                                  }}>
+                                  :{mStr}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                        {/* AM/PM toggle */}
+                        <div className="w-14">
+                          <p className="text-[11px] font-medium mb-1" style={{ color: isDark ? D.dimmer : '#94a3b8' }}>Period</p>
+                          <div className="flex flex-col gap-1">
+                            {['AM', 'PM'].map(period => {
+                              const currentH = earlyLeaveTime ? parseInt(earlyLeaveTime.split(':')[0]) : 13;
+                              const isPM = currentH >= 12;
+                              const isSelected = (period === 'PM' && isPM) || (period === 'AM' && !isPM);
+                              return (
+                                <button key={period} type="button"
+                                  onClick={() => {
+                                    if (!earlyLeaveTime) {
+                                      setEarlyLeaveTime(period === 'AM' ? '09:00' : '13:00');
+                                      return;
+                                    }
+                                    let h = parseInt(earlyLeaveTime.split(':')[0]);
+                                    const mins = earlyLeaveTime.split(':')[1];
+                                    if (period === 'PM' && h < 12) h += 12;
+                                    if (period === 'AM' && h >= 12) h -= 12;
+                                    setEarlyLeaveTime(`${String(h).padStart(2, '0')}:${mins}`);
+                                  }}
+                                  className="py-1.5 rounded-lg text-xs font-bold transition-all"
+                                  style={{
+                                    backgroundColor: isSelected ? COLORS.deepBlue : isDark ? D.raised : '#f1f5f9',
+                                    color: isSelected ? '#ffffff' : isDark ? D.text : '#374151',
+                                    border: `1px solid ${isSelected ? COLORS.deepBlue : isDark ? D.border : '#e2e8f0'}`,
+                                  }}>
+                                  {period}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                      {earlyLeaveTime && (
+                        <div className="flex items-center gap-2 mt-2.5 px-3 py-2 rounded-xl"
+                          style={{ backgroundColor: isDark ? `${COLORS.deepBlue}15` : `${COLORS.deepBlue}08` }}>
+                          <Clock className="w-4 h-4" style={{ color: COLORS.mediumBlue }} />
+                          <p className="text-sm font-semibold" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
+                            Leaving at {(() => {
+                              const [h, m] = earlyLeaveTime.split(':').map(Number);
+                              const ampm = h >= 12 ? 'PM' : 'AM';
+                              const h12 = h % 12 || 12;
+                              return `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
+                            })()}
+                          </p>
+                        </div>
+                      )}
+                    </motion.div>
+                  )}
+          
+                  {/* ── Date pickers — full day only shows range; partial shows 2-month calendar ── */}
+                  {leaveType === 'full_day' ? (
+                    <>
+                      <div className="flex flex-wrap gap-2">
+                        {[1, 3, 7, 15, 30].map(days => (
+                          <Button key={days} variant="outline" size="sm"
+                            onClick={() => {
+                              const from = new Date(), to = new Date();
+                              to.setDate(from.getDate() + days - 1);
+                              setLeaveFrom(from); setLeaveTo(to);
+                            }}
+                            className="rounded-lg font-semibold text-xs"
+                            style={{ borderColor: isDark ? D.border : '#e2e8f0', color: isDark ? D.text : '#374151', backgroundColor: isDark ? D.raised : undefined }}>
+                            {days === 1 ? '1 Day' : `${days} Days`}
+                          </Button>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                          <label className="text-sm font-semibold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>From Date</label>
+                          <Calendar mode="single" selected={leaveFrom} onSelect={setLeaveFrom}
+                            disabled={date => isBefore(date, startOfDay(new Date()))}
+                            className="rounded-xl border w-full pointer-events-auto [&_.rdp-months]:w-full [&_.rdp-month]:w-full [&_.rdp-table]:w-full [&_.rdp-head_row]:flex [&_.rdp-head_row]:justify-between [&_.rdp-row]:flex [&_.rdp-row]:justify-between"
+                            style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : undefined }} />
+                        </div>
+                        <div>
+                          <label className="text-sm font-semibold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>To Date</label>
+                          <Calendar mode="single" selected={leaveTo} onSelect={setLeaveTo}
+                            disabled={date => leaveFrom ? isBefore(date, leaveFrom) : true}
+                            className="rounded-xl border w-full pointer-events-auto [&_.rdp-months]:w-full [&_.rdp-month]:w-full [&_.rdp-table]:w-full [&_.rdp-head_row]:flex [&_.rdp-head_row]:justify-between [&_.rdp-row]:flex [&_.rdp-row]:justify-between"
+                            style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : undefined }} />
+                        </div>
+                      </div>
+                      {leaveFrom && (
+                        <div className="relative px-4 py-3 pl-5 rounded-xl overflow-hidden"
+                          style={{ backgroundColor: isDark ? `${COLORS.deepBlue}18` : `${COLORS.deepBlue}08` }}>
+                          <div className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: COLORS.deepBlue }} />
+                          <p className="text-xs text-slate-400 mb-0.5">Total Duration</p>
+                          <p className="text-2xl font-black" style={{ color: isDark ? '#60a5fa' : COLORS.deepBlue }}>
+                            {Math.max(1, leaveTo
+                              ? Math.ceil((leaveTo.getTime() - leaveFrom.getTime()) / 86400000) + 1
+                              : 1)} days
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    /* 2-month calendar for half-day / early leave */
+                    <div>
+                      <label className="text-sm font-semibold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>Select Date</label>
+                      <Calendar mode="single" selected={leaveFrom} onSelect={setLeaveFrom}
+                        numberOfMonths={2}
+                        disabled={date => isBefore(date, startOfDay(new Date()))}
+                        className="rounded-xl border w-full pointer-events-auto [&_.rdp-months]:w-full [&_.rdp-months]:flex [&_.rdp-months]:gap-4 [&_.rdp-month]:flex-1 [&_.rdp-table]:w-full [&_.rdp-head_row]:flex [&_.rdp-head_row]:justify-between [&_.rdp-row]:flex [&_.rdp-row]:justify-between"
+                        style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : undefined }} />
+                      {leaveFrom && (
+                        <div className="flex items-center gap-2 mt-3 px-3 py-2.5 rounded-xl border text-sm font-semibold"
+                          style={{
+                            backgroundColor: isDark ? `${COLORS.deepBlue}12` : `${COLORS.deepBlue}06`,
+                            borderColor: isDark ? 'rgba(31,111,178,0.3)' : `${COLORS.deepBlue}25`,
+                            color: isDark ? '#60a5fa' : COLORS.deepBlue,
+                          }}>
+                          <CalendarIcon className="w-4 h-4 flex-shrink-0" />
+                          {format(leaveFrom, 'EEEE, MMMM d, yyyy')}
+                        </div>
+                      )}
+                    </div>
+                  )}
+          
+                  {/* Reason — compulsory for every leave type */}
+                  <div>
+                    <label className="text-sm font-semibold mb-2 block" style={{ color: isDark ? D.muted : '#374151' }}>
+                      Reason / Details <span className="text-red-500">*</span>
+                    </label>
+                    <textarea value={leaveReason} onChange={e => setLeaveReason(e.target.value)}
+                      placeholder="Please enter the reason/details for your leave…"
+                      required
+                      className={`${inputCls} min-h-[80px] resize-none`}
+                      style={inputStyle} />
+                    {!leaveReason.trim() && (
+                      <p className="text-[11px] mt-1.5 text-red-500">Reason / Details is compulsory for all leave applications.</p>
+                    )}
+                  </div>
+                </div>
+          
+                {/* Footer */}
+                <div className="px-6 py-4 flex justify-end gap-2 border-t"
+                  style={{ borderColor: isDark ? D.border : '#e2e8f0', backgroundColor: isDark ? D.raised : '#f8fafc' }}>
+                  <Button variant="ghost" onClick={() => {
+                    setShowLeaveForm(false);
+                    setLeaveType('full_day'); setEarlyLeaveTime('');
+                  }} className="font-semibold rounded-xl" style={{ color: isDark ? D.muted : undefined }}>
+                    Cancel
+                  </Button>
+                  <Button
+                    disabled={!leaveFrom || !leaveReason.trim() || (leaveType === 'early_leave' && !earlyLeaveTime)}
+                    onClick={handleApplyLeave}
+                    className="font-semibold text-white rounded-xl"
+                    style={{ backgroundColor: COLORS.deepBlue }}>
+                    Submit Request
+                  </Button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Add Holiday Modal */}
         <AnimatePresence>
