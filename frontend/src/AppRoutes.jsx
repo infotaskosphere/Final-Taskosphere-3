@@ -1,5 +1,6 @@
 import React, { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import DashboardLayout from '@/components/layout/DashboardLayout.jsx';
 import ModuleGate from '@/components/ModuleGate.jsx';
@@ -102,40 +103,49 @@ function ProtectedLayout() {
   return (
     <DashboardLayout>
       <RouteErrorBoundary resetKey={location.pathname}>
-        <Suspense fallback={<ContentLoader />}>
-          <AnimatedOutlet />
-        </Suspense>
+        <AnimatedOutlet />
       </RouteErrorBoundary>
     </DashboardLayout>
   );
 }
 
 /*
- * Navigation is intentionally opacity-only and does not wait for an exit
- * animation. The previous implementation used AnimatePresence mode="wait",
- * which forced the old page to finish exiting before the next page could
- * mount. That made module switching feel slower than it actually was.
+ * One shared transition keeps every protected page feeling like the same
+ * product. Sync mode lets the next page begin immediately while the previous
+ * surface softly leaves, instead of blocking navigation behind a loader.
  */
 function AnimatedOutlet() {
   const location = useLocation();
   return (
-    <div
+    <AnimatePresence mode="sync" initial={false}>
+      <motion.div
+        key={location.pathname}
+        className="taskosphere-page-transition"
+        initial={{ opacity: 0, y: 10, scale: 0.992, filter: 'blur(2px)' }}
+        animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
+        exit={{ opacity: 0, y: -6, scale: 0.996, filter: 'blur(1px)' }}
+        transition={{ duration: 0.34, ease: [0.22, 1, 0.36, 1] }}
+      >
+        <Suspense fallback={<ContentLoader />}>
+          <Outlet />
+        </Suspense>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
+function PageTransition({ children }) {
+  const location = useLocation();
+  return (
+    <motion.div
       key={location.pathname}
-      style={{
-        width: '100%',
-        minHeight: '100%',
-        animation: 'taskospherePageIn 120ms ease-out',
-        willChange: 'opacity',
-      }}
+      className="taskosphere-page-transition taskosphere-page-transition--standalone"
+      initial={{ opacity: 0, y: 10, scale: 0.992, filter: 'blur(2px)' }}
+      animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
+      transition={{ duration: 0.34, ease: [0.22, 1, 0.36, 1] }}
     >
-      <Outlet />
-      <style>{`
-        @keyframes taskospherePageIn {
-          from { opacity: 0.82; }
-          to { opacity: 1; }
-        }
-      `}</style>
-    </div>
+      {children}
+    </motion.div>
   );
 }
 
@@ -157,13 +167,13 @@ export default function AppRoutes() {
   return (
     <Suspense fallback={<AuthLoading />}>
       <Routes>
-        <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
-        <Route path="/register" element={<PublicOnly><Register /></PublicOnly>} />
-        <Route path="/forgot-password" element={<PublicOnly><ForgotPassword /></PublicOnly>} />
+        <Route path="/login" element={<PageTransition><PublicOnly><Login /></PublicOnly></PageTransition>} />
+        <Route path="/register" element={<PageTransition><PublicOnly><Register /></PublicOnly></PageTransition>} />
+        <Route path="/forgot-password" element={<PageTransition><PublicOnly><ForgotPassword /></PublicOnly></PageTransition>} />
 
         <Route path="/client-portal" element={<Navigate to="/client-portal/login" replace />} />
-        <Route path="/client-portal/login" element={<ClientPortalLogin />} />
-        <Route path="/client-portal/dashboard" element={<ClientPortalDashboard />} />
+        <Route path="/client-portal/login" element={<PageTransition><ClientPortalLogin /></PageTransition>} />
+        <Route path="/client-portal/dashboard" element={<PageTransition><ClientPortalDashboard /></PageTransition>} />
 
         <Route element={<ProtectedLayout />}>
 
