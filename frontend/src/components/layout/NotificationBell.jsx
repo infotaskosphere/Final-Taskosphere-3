@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import {
-  Bell, CheckCheck, Trash2, Info,
+  Bell, CheckCheck, Trash2, Info, ChevronRight,
   CheckSquare, ClipboardList, Users, CalendarOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,17 +14,110 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import api from "@/lib/api";
 import { toast } from "sonner";
 
+// ── App brand blue (matches the dashboard banner / header gradient) ──────────
+const BRAND_DEEP_BLUE   = "#0D3B66";
+const BRAND_MEDIUM_BLUE = "#1F6FB2";
+const HEADER_GRADIENT   = `linear-gradient(120deg, ${BRAND_DEEP_BLUE}, ${BRAND_MEDIUM_BLUE})`;
+
 // ── Icon per notification type ────────────────────────────────────────────────
 const TYPE_META = {
-  task:   { icon: ClipboardList, color: "text-indigo-500",  bg: "bg-indigo-50"  },
-  todo:   { icon: CheckSquare,   color: "text-emerald-500", bg: "bg-emerald-50" },
-  lead:   { icon: Users,         color: "text-amber-500",   bg: "bg-amber-50"   },
+  task:       { icon: ClipboardList, color: "text-indigo-500",  bg: "bg-indigo-50"  },
+  assignment: { icon: ClipboardList, color: "text-indigo-500",  bg: "bg-indigo-50"  },
+  todo:       { icon: CheckSquare,   color: "text-emerald-500", bg: "bg-emerald-50" },
+  lead:               { icon: Users, color: "text-amber-500",   bg: "bg-amber-50"   },
+  follow_up_reminder: { icon: Users, color: "text-amber-500",   bg: "bg-amber-50"   },
   leave:  { icon: CalendarOff,   color: "text-rose-600",    bg: "bg-rose-50"    },
   system: { icon: Info,          color: "text-slate-500",   bg: "bg-slate-100"  },
   dsc:    { icon: Info,          color: "text-purple-500",  bg: "bg-purple-50"  },
 };
 
 const getMeta = (type) => TYPE_META[type] ?? TYPE_META.system;
+
+// ── Where a notification should take the user when clicked ───────────────────
+// Maps a notification `type` to the route that best represents it inside the
+// app. Falls back to the dashboard for anything unmapped so a click never
+// dead-ends.
+const TYPE_ROUTE_MAP = {
+  // Taskosphere
+  task: "/tasks",
+  assignment: "/tasks",
+  todo: "/todos",
+  attendance: "/attendance",
+  reminder: "/reminders",
+  action_center: "/action-center",
+  visit: "/visits",
+  client_visit: "/visits",
+  ai_document_reader: "/ai-reader",
+
+  // Compliance
+  compliance: "/compliance-dashboard",
+  gst: "/gst-reconciliation",
+  trademark: "/trademark-sphere",
+  mis_report: "/mis-report",
+  salary_slip: "/salary-slips",
+  roc: "/roc-sphere",
+
+  // Records
+  dsc: "/dsc",
+  document: "/documents",
+  password: "/passwords",
+  client_approval: "/client-approvals",
+
+  // Client Proposals
+  lead: "/leads",
+  follow_up_reminder: "/leads",
+  quotation: "/quotations",
+  client_discussion: "/client-discussion",
+
+  // Finix
+  invoice: "/invoicing",
+  tax_invoice: "/invoicing",
+  credit_note: "/invoicing",
+  debit_note: "/invoicing",
+  approved_zte_journal: "/zero-touch-entry",
+  purchase: "/purchase",
+  bank: "/bank-accounts",
+  journal_entry: "/journal-entries",
+  renewal_alert: "/due-dates",
+  whatsapp: "/whatsapp-hub",
+
+  // People Matrix
+  hr: "/hr",
+  birthday: "/hr",
+  performance: "/people-matrix",
+  recruitment: "/recruitment",
+  payroll: "/payroll",
+  leave: "/leave",
+  roles: "/roles",
+
+  // Admin / automation / system
+  approval_request: "/automation/approvals",
+  automation_approval: "/automation/approvals",
+  master_data: "/master-data",
+  holding_company: "/master-data",
+  login_failed: "/staff-activity",
+  login_success: "/staff-activity",
+  logout: "/staff-activity",
+  rule: "/action-center",
+  rule_optimization_proposal: "/action-center",
+  workflow_definition: "/action-center",
+  workflow_instance: "/action-center",
+  recommendation_accepted: "/action-center",
+  learning_task_exhausted: "/action-center",
+};
+
+// Build the destination path for a notification click.
+const resolveNotificationPath = (n) => {
+  const base = TYPE_ROUTE_MAP[n.type] || "/dashboard";
+
+  // Task-type notifications: deep-link straight into the task detail when we
+  // have a task_id — Tasks.jsx already knows how to open `?taskId=`.
+  if ((n.type === "task" || n.type === "assignment") && n.task_id) {
+    return `${base}?taskId=${encodeURIComponent(n.task_id)}`;
+  }
+
+  return base;
+};
 
 // ── Relative time ─────────────────────────────────────────────────────────────
 const formatDate = (dateString) => {
@@ -41,6 +135,7 @@ const formatDate = (dateString) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const NotificationBell = () => {
+  const navigate = useNavigate();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount]     = useState(0);
   const [open, setOpen]                   = useState(false);
@@ -145,6 +240,14 @@ export const NotificationBell = () => {
     }
   };
 
+  // ── Click a notification: mark read + jump to the page it refers to ────────
+  const handleNotificationClick = (n) => {
+    if (!n.is_read) markAsRead(n.id);
+    setOpen(false);
+    const path = resolveNotificationPath(n);
+    navigate(path);
+  };
+
   // ── Split leave vs regular so leave shows a distinct colour + count ─────────
   const leaveUnread   = notifications.filter((n) => !n.is_read && n.type === "leave").length;
   const regularUnread = unreadCount - leaveUnread;
@@ -189,29 +292,40 @@ export const NotificationBell = () => {
         className="w-[min(384px,calc(100vw-1.5rem))] p-0 shadow-xl border border-slate-200 rounded-xl overflow-hidden"
         align="end"
       >
-        {/* Header */}
-        <div className="px-4 py-3 bg-white border-b border-slate-100 flex items-center justify-between">
-          <div className="flex items-center gap-2 flex-wrap">
-            <Bell className="h-4 w-4 text-slate-600" />
-            <h3 className="font-semibold text-slate-900 text-sm">Notifications</h3>
+        {/* Header — brand blue, matches the dashboard banner */}
+        <div
+          className="px-4 py-3.5 flex items-center justify-between relative overflow-hidden"
+          style={{ background: HEADER_GRADIENT }}
+        >
+          {/* subtle decorative glow, echoes the dashboard banner treatment */}
+          <div
+            className="pointer-events-none absolute -top-8 -right-10 w-32 h-32 rounded-full opacity-20"
+            style={{ background: "radial-gradient(circle, white 0%, transparent 70%)" }}
+          />
+
+          <div className="flex items-center gap-2 flex-wrap relative">
+            <div className="w-7 h-7 rounded-full bg-white/15 flex items-center justify-center">
+              <Bell className="h-4 w-4 text-white" />
+            </div>
+            <h3 className="font-semibold text-white text-sm">Notifications</h3>
             {regularUnread > 0 && (
-              <span className="bg-indigo-100 text-indigo-700 text-xs font-semibold px-2 py-0.5 rounded-full">
+              <span className="bg-white/20 text-white text-xs font-semibold px-2 py-0.5 rounded-full backdrop-blur-sm">
                 {regularUnread} new
               </span>
             )}
             {leaveUnread > 0 && (
-              <span className="bg-rose-100 text-rose-700 text-xs font-semibold px-2 py-0.5 rounded-full">
+              <span className="bg-rose-500/90 text-white text-xs font-semibold px-2 py-0.5 rounded-full">
                 {leaveUnread} leave
               </span>
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3 relative">
             {unreadCount > 0 && (
               <button
                 onClick={markAllRead}
                 disabled={loading}
-                className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium disabled:opacity-50 transition-colors"
+                className="flex items-center gap-1 text-xs text-white/90 hover:text-white font-medium disabled:opacity-50 transition-colors"
               >
                 <CheckCheck className="h-3.5 w-3.5" />
                 {loading ? "Marking…" : "Mark all read"}
@@ -220,7 +334,7 @@ export const NotificationBell = () => {
             {notifications.length > 0 && (
               <button
                 onClick={clearAll}
-                className="flex items-center gap-1 text-xs text-red-400 hover:text-red-600 font-medium transition-colors"
+                className="flex items-center gap-1 text-xs text-white/80 hover:text-white font-medium transition-colors"
               >
                 <Trash2 className="h-3.5 w-3.5" />
                 Clear all
@@ -250,18 +364,27 @@ export const NotificationBell = () => {
                 return (
                   <div
                     key={n.id}
+                    role="button"
+                    tabIndex={0}
                     className={`group relative flex gap-3 px-4 py-3.5 cursor-pointer transition-colors ${
                       isLeave ? "hover:bg-rose-50/70" : "hover:bg-white"
                     } ${
                       !n.is_read
                         ? isLeave
                           ? "bg-rose-50 border-l-4 border-l-rose-500"
-                          : "bg-white border-l-2 border-l-indigo-500"
+                          : "bg-white border-l-2"
                         : isLeave
                         ? "bg-rose-50/40"
                         : "bg-slate-50"
                     }`}
-                    onClick={() => !n.is_read && markAsRead(n.id)}
+                    style={!n.is_read && !isLeave ? { borderLeftColor: BRAND_MEDIUM_BLUE } : undefined}
+                    onClick={() => handleNotificationClick(n)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        handleNotificationClick(n);
+                      }
+                    }}
                     data-testid={`notification-item-${n.id}`}
                   >
                     {/* Type icon */}
@@ -292,12 +415,14 @@ export const NotificationBell = () => {
                       </p>
                     </div>
 
+                    {/* Clickable affordance */}
+                    <ChevronRight className="flex-shrink-0 h-4 w-4 text-slate-300 mt-1.5 group-hover:text-slate-400 group-hover:translate-x-0.5 transition-all" />
+
                     {/* Unread dot */}
                     {!n.is_read && (
                       <div
-                        className={`flex-shrink-0 w-2 h-2 rounded-full mt-1.5 ${
-                          isLeave ? "bg-rose-500" : "bg-indigo-500"
-                        }`}
+                        className={`flex-shrink-0 w-2 h-2 rounded-full mt-1.5 ${isLeave ? "bg-rose-500" : ""}`}
+                        style={!isLeave ? { backgroundColor: BRAND_MEDIUM_BLUE } : undefined}
                       />
                     )}
 
