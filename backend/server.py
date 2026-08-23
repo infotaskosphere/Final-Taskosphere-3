@@ -996,9 +996,48 @@ async def startup_event():
 
 
 # ====================== HEALTH ======================
+# BUILD_MARKER — bump this string on every deploy-verification change.
+# If a request to /health ever shows a DIFFERENT marker than the one you
+# just committed, the browser/CDN/Render is NOT serving this exact commit —
+# stop looking for a code bug and go fix the deploy instead.
+BUILD_MARKER = "client-groups-deploy-check-2026-08-23"
+
+
+def _health_route_paths():
+    """Best-effort scan of every currently-registered /api/* path, walking
+    into sub-routers. Never raises — /health must always answer even if
+    route introspection fails for some reason."""
+    seen_ids = set()
+
+    def walk(routes):
+        for r in routes:
+            path = getattr(r, "path", None)
+            if path and id(r) not in seen_ids:
+                seen_ids.add(id(r))
+                if path.startswith("/api"):
+                    yield path
+            sub = getattr(r, "routes", None)
+            if sub:
+                yield from walk(sub)
+
+    try:
+        return sorted(set(walk(app.routes)))
+    except Exception as e:
+        return [f"__route_scan_failed__: {e}"]
+
+
 @app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
-    return JSONResponse({"status": "ok", "cors": "configured correctly"})
+    all_paths = _health_route_paths()
+    return JSONResponse({
+        "status": "ok",
+        "cors": "configured correctly",
+        "build_marker": BUILD_MARKER,
+        "client_groups_routes_present": any(
+            p.startswith("/api/client-groups") for p in all_paths
+        ),
+        "total_api_routes": len(all_paths),
+    })
 
 
 @app.get("/")
