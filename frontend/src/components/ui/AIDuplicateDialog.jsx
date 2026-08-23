@@ -145,7 +145,7 @@ export default function AIDuplicateDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[92vw] sm:max-w-xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle className="text-xl font-bold flex items-center gap-2" style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>
             <Sparkles className="h-5 w-5 text-violet-500" />
@@ -201,46 +201,50 @@ export default function AIDuplicateDialog({
             return (
               <div key={gi} className={`border rounded-xl overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
                 {/* Group header */}
-                <div className={`px-4 py-3 flex items-center justify-between gap-2 ${isDark ? 'bg-slate-800' : 'bg-slate-50'}`}>
-                  <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                    <span className="text-xs font-bold text-slate-400">GROUP {gi + 1}</span>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${cs.bg}`}>
-                      <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1 ${cs.dot}`} />
-                      {cs.label}
-                    </span>
-                    {group.score && (
-                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
-                        Score: {group.score}
+                <div className={`px-4 py-3 flex flex-col gap-2 ${isDark ? 'bg-slate-800' : 'bg-slate-50'}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                      <span className="text-xs font-bold text-slate-400">GROUP {gi + 1}</span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${cs.bg}`}>
+                        <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1 ${cs.dot}`} />
+                        {cs.label}
                       </span>
-                    )}
-                    <span className={`text-[11px] truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{group.reason}</span>
-                    {group.confidence === 'related' && (
-                      <span className={`text-[10px] italic ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                        — appears related, not a duplicate. Not blocked, review only.
-                      </span>
-                    )}
+                      {group.score && (
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+                          Score: {group.score}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {compareFields && (
+                        <button
+                          onClick={() => {
+                            const ids = groupItems.slice(0, 2).map((i) => String(i.id));
+                            setCompareIds(ids);
+                            setCompareMode(true);
+                          }}
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all ${isDark ? 'bg-slate-700 border-slate-600 text-slate-300 hover:border-emerald-500 hover:text-emerald-400' : 'bg-white border-slate-300 text-slate-600 hover:border-emerald-400 hover:text-emerald-600'}`}
+                        >
+                          ⇄ Compare
+                        </button>
+                      )}
+                      {canMerge && onMerge && groupItems.length >= 2 && group.confidence !== 'related' && (
+                        <button
+                          onClick={() => onMerge({ ...group, item_ids: groupItems.map((i) => i.id) })}
+                          className="text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all flex items-center gap-1 bg-white border-violet-300 text-violet-600 hover:bg-violet-50 hover:border-violet-400"
+                          title={`Merge these ${groupItems.length} ${entityLabel.toLowerCase()}s into one`}
+                        >
+                          <Merge className="h-2.5 w-2.5" /> Merge
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  {compareFields && (
-                    <button
-                      onClick={() => {
-                        const ids = groupItems.slice(0, 2).map((i) => String(i.id));
-                        setCompareIds(ids);
-                        setCompareMode(true);
-                      }}
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex-shrink-0 transition-all ${isDark ? 'bg-slate-700 border-slate-600 text-slate-300 hover:border-emerald-500 hover:text-emerald-400' : 'bg-white border-slate-300 text-slate-600 hover:border-emerald-400 hover:text-emerald-600'}`}
-                    >
-                      ⇄ Compare
-                    </button>
-                  )}
-                  {canMerge && onMerge && groupItems.length >= 2 && group.confidence !== 'related' && (
-                    <button
-                      onClick={() => onMerge({ ...group, item_ids: groupItems.map((i) => i.id) })}
-                      className="text-[10px] font-bold px-2 py-0.5 rounded-full border flex-shrink-0 transition-all flex items-center gap-1 bg-white border-violet-300 text-violet-600 hover:bg-violet-50 hover:border-violet-400"
-                      title={`Merge these ${groupItems.length} ${entityLabel.toLowerCase()}s into one`}
-                    >
-                      <Merge className="h-2.5 w-2.5" /> Merge
-                    </button>
-                  )}
+                  <p className={`text-[11px] break-words ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    {group.reason}
+                    {group.confidence === 'related' && (
+                      <span className={`italic ${isDark ? 'text-slate-500' : 'text-slate-400'}`}> — appears related, not a duplicate. Not blocked, review only.</span>
+                    )}
+                  </p>
                 </div>
 
                 {/* Items */}
