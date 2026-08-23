@@ -4787,6 +4787,7 @@ export default function Clients() {
   // ── Merge Clients state ──────────────────────────────────────────────────
   const [showMergeDialog,  setShowMergeDialog]  = useState(false);
   const [mergeDupGroups,   setMergeDupGroups]   = useState([]);
+  const [mergeStartIdx,    setMergeStartIdx]    = useState(0);
   // ── Client Groups state ──────────────────────────────────────────────────
   const [showGroupsPanel,  setShowGroupsPanel]  = useState(false);
   const [activeGroupId,    setActiveGroupId]    = useState(null);
@@ -7769,7 +7770,9 @@ export default function Clients() {
         canMerge={canEditClients}
         onMerge={(group) => {
           setShowDupDialog(false);
-          setMergeDupGroups([group]);
+          const idx = dupGroups.findIndex((g) => g === group || (g.item_ids || []).join(',') === (group.item_ids || []).join(','));
+          setMergeDupGroups(dupGroups);
+          setMergeStartIdx(idx >= 0 ? idx : 0);
           setShowMergeDialog(true);
         }}
       />
@@ -7780,6 +7783,7 @@ export default function Clients() {
         onClose={() => setShowMergeDialog(false)}
         clients={clients}
         groups={mergeDupGroups}
+        startIndex={mergeStartIdx}
         onMerge={handleMergeClients}
         isDark={isDark}
       />
