@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   ShieldCheck, ArrowLeftRight, Shield, AlertTriangle, CalendarClock,
-  CheckCircle2, Layers, ListChecks, FileBarChart2, Receipt,
+  CheckCircle2, Layers, ListChecks, FileBarChart2, Receipt, Landmark,
 } from 'lucide-react';
 import api from '@/lib/api';
 import useDark from '@/hooks/useDark';
@@ -28,6 +28,11 @@ const MODULES = [
     color: '#7C3AED', permission: 'can_view_trademark_sphere',
   },
   {
+    path: '/roc-sphere', icon: Landmark, label: 'ROC Sphere',
+    description: 'Company master data, board resolutions, meeting notices and ROC compliance checklists.',
+    color: '#0D9488', permission: 'can_view_roc_sphere',
+  },
+  {
     path: '/mis-report', icon: FileBarChart2, label: 'MIS Report',
     description: 'Financial Dashboard, Receivables, Payables, Revenue, Expense and Profitability MIS per client.',
     color: '#0EA5E9', permission: 'can_view_mis_report',
@@ -45,6 +50,11 @@ export default function ComplianceDashboard() {
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState(null);
 
+  // Per-module quick-glance stats, keyed by path. Each module's card shows
+  // whatever lands here once its (independent, best-effort) fetch resolves.
+  const [moduleStats, setModuleStats] = useState({});
+  const [moduleStatsLoading, setModuleStatsLoading] = useState(true);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -59,6 +69,83 @@ export default function ComplianceDashboard() {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // Pull a lightweight summary from each compliance module so its card can
+  // show real numbers instead of just a description. Every call is fired in
+  // parallel and fails silently (a module the user can't access, or one
+  // that's simply offline, just won't show a stats strip on its card).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setModuleStatsLoading(true);
+      const [gst, tm, roc, mis, salary] = await Promise.allSettled([
+        api.get('/gst-reconciliation/dashboard-summary', { _silent: true }),
+        // Trademark Sphere's stats route is mounted un-prefixed on the
+        // backend (router prefix="" in trademark_sphere.py), so its real
+        // path is just /api/stats rather than /api/trademark-sphere/stats.
+        api.get('/stats', { _silent: true }),
+        api.get('/roc-sphere/companies', { _silent: true }),
+        api.get('/mis/clients', { _silent: true }),
+        api.get('/compliance/salary-slips/dashboard-summary', { _silent: true }),
+      ]);
+      if (cancelled) return;
+
+      const next = {};
+
+      if (summary) {
+        next['/compliance'] = [
+          { label: 'Assignments', value: summary.total_assignments ?? 0 },
+          { label: 'Filed', value: summary.completed_or_filed ?? 0 },
+          { label: 'Overdue', value: summary.overdue ?? 0 },
+        ];
+      }
+
+      if (gst.status === 'fulfilled' && gst.value?.data) {
+        const d = gst.value.data;
+        next['/gst-reconciliation'] = [
+          { label: 'Sessions', value: d.total_sessions ?? 0 },
+          { label: 'High Risk', value: d.total_high_risk_vendors ?? 0 },
+          { label: 'Reversals', value: d.total_itc_reversals ?? 0 },
+        ];
+      }
+
+      if (tm.status === 'fulfilled' && tm.value?.data) {
+        const d = tm.value.data;
+        next['/trademark-sphere'] = [
+          { label: 'Total', value: d.total ?? 0 },
+          { label: 'Registered', value: d.registered ?? 0 },
+          { label: 'Expiring', value: d.expiring_soon ?? 0 },
+        ];
+      }
+
+      if (roc.status === 'fulfilled' && Array.isArray(roc.value?.data)) {
+        next['/roc-sphere'] = [
+          { label: 'Companies', value: roc.value.data.length },
+        ];
+      }
+
+      if (mis.status === 'fulfilled' && Array.isArray(mis.value?.data)) {
+        next['/mis-report'] = [
+          { label: 'Clients', value: mis.value.data.length },
+        ];
+      }
+
+      if (salary.status === 'fulfilled' && salary.value?.data) {
+        const d = salary.value.data;
+        next['/salary-slips'] = [
+          { label: 'Employees', value: d.total_employees ?? 0 },
+          { label: 'Slips', value: d.total_slips ?? 0 },
+          { label: 'This Month', value: d.slips_this_month ?? 0 },
+        ];
+      }
+
+      setModuleStats(next);
+      setModuleStatsLoading(false);
+    })();
+    return () => { cancelled = true; };
+    // Re-run once `summary` (the Compliance Tracker's own numbers) lands too,
+    // so its card's stats strip fills in alongside the others.
+  }, [summary]);
 
   const canSee = (m) => {
     if (!m.permission) return true;
@@ -102,7 +189,13 @@ export default function ComplianceDashboard() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {visibleModules.map((m) => (
-            <LinkCard key={m.path} {...m} isDark={isDark} />
+            <LinkCard
+              key={m.path}
+              {...m}
+              isDark={isDark}
+              stats={moduleStats[m.path]}
+              statsLoading={moduleStatsLoading && !moduleStats[m.path]}
+            />
           ))}
         </div>
       )}
