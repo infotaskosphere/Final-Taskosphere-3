@@ -55,13 +55,19 @@ const MERGE_FIELDS = [
   { key: 'referred_by', label: 'Referred By' },
   { key: 'website',     label: 'Website' },
   { key: 'cin',         label: 'CIN' },
+  { key: 'llpin',       label: 'LLPIN' },
+  { key: 'msme_number', label: 'Udyam / MSME No.' },
+  { key: 'proprietor_name', label: 'Proprietor Name' },
   { key: 'notes',       label: 'Notes', type: 'textarea' },
 ];
 
 const CONF_STYLE = {
-  high:   { bg: '#FEF2F2', border: '#FECACA', text: '#DC2626', dot: '#EF4444', label: 'HIGH MATCH' },
-  medium: { bg: '#FFFBEB', border: '#FDE68A', text: '#D97706', dot: '#F59E0B', label: 'SIMILAR' },
-  low:    { bg: '#EFF6FF', border: '#BFDBFE', text: '#2563EB', dot: '#60A5FA', label: 'POSSIBLE' },
+  high:      { bg: '#FEF2F2', border: '#FECACA', text: '#DC2626', dot: '#EF4444', label: 'HIGH MATCH' },
+  medium:    { bg: '#FFFBEB', border: '#FDE68A', text: '#D97706', dot: '#F59E0B', label: 'SIMILAR' },
+  low:       { bg: '#EFF6FF', border: '#BFDBFE', text: '#2563EB', dot: '#60A5FA', label: 'POSSIBLE' },
+  duplicate: { bg: '#FEF2F2', border: '#FECACA', text: '#DC2626', dot: '#EF4444', label: '🔴 DUPLICATE' },
+  possible:  { bg: '#FFFBEB', border: '#FDE68A', text: '#D97706', dot: '#F59E0B', label: '🟠 POSSIBLE DUPLICATE' },
+  related:   { bg: '#EFF6FF', border: '#BFDBFE', text: '#2563EB', dot: '#60A5FA', label: '🔵 RELATED CLIENT' },
 };
 
 function ClientChip({ client, isPrimary, onClick, isDark }) {
