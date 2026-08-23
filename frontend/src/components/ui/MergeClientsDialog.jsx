@@ -8,11 +8,23 @@
  * merge is confirmed. Quick-fill chips let you grab a value from one
  * of the duplicates with one click, then keep editing by hand.
  *
+ * Supports 3+ clients per group: click a chip to load it as the primary,
+ * or hit "Remove" on a chip to exclude that client from this merge
+ * entirely (it's left untouched — useful when only 2 of 3+ matched
+ * clients are actually the same entity).
+ *
+ * After a successful merge the dialog stays open and automatically
+ * advances to the next remaining duplicate group, so a whole batch of
+ * duplicates can be cleared without reopening the AI Duplicate Detection
+ * dialog each time. It only closes when every group has been resolved
+ * or the user explicitly closes it.
+ *
  * Props:
  *   open       — boolean
  *   onClose    — () => void
  *   clients    — full clients array
  *   groups     — duplicate groups from detectClientDuplicates (each has item_ids)
+ *   startIndex — optional index into `groups` to open on (default 0)
  *   onMerge    — async (primaryId, secondaryIds, fieldOverrides) => void
  *   isDark     — boolean
  */
@@ -23,7 +35,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import {
-  Merge, AlertTriangle, Crown, Loader2, Pencil,
+  Merge, AlertTriangle, Crown, Loader2, Pencil, X, RotateCcw, CheckCircle2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -70,51 +82,73 @@ const CONF_STYLE = {
   related:   { bg: '#EFF6FF', border: '#BFDBFE', text: '#2563EB', dot: '#60A5FA', label: '🔵 RELATED CLIENT' },
 };
 
-function ClientChip({ client, isPrimary, onClick, isDark }) {
+function ClientChip({ client, isPrimary, isExcluded, onClick, onToggleExclude, isDark }) {
   const initials = (client.company_name || '?').slice(0, 2).toUpperCase();
   return (
-    <button
-      onClick={onClick}
-      className={`flex items-center gap-2 px-3 py-2 rounded-xl border-2 transition-all text-left ${
-        isPrimary
-          ? 'border-blue-500 bg-blue-50'
-          : isDark ? 'border-slate-600 bg-slate-700 hover:border-slate-500' : 'border-slate-200 bg-white hover:border-slate-300'
+    <div
+      className={`flex items-center gap-2 pl-3 pr-2 py-2 rounded-xl border-2 transition-all ${
+        isExcluded
+          ? isDark ? 'border-slate-700 bg-slate-800/40 opacity-50' : 'border-slate-200 bg-slate-100/60 opacity-50'
+          : isPrimary
+            ? 'border-blue-500 bg-blue-50'
+            : isDark ? 'border-slate-600 bg-slate-700' : 'border-slate-200 bg-white'
       }`}
-      title="Click to load this client's details into the merge form"
     >
-      <span
-        className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
-        style={{ background: isPrimary ? 'linear-gradient(135deg, #1D4ED8, #3B82F6)' : 'linear-gradient(135deg, #475569, #64748B)' }}
-      >{initials}</span>
-      <div className="min-w-0">
-        <p className={`text-xs font-bold truncate max-w-[140px] ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
-          {client.company_name}
-        </p>
-        <p className="text-[10px] text-slate-400 truncate max-w-[140px]">{client.phone || client.email || '—'}</p>
-      </div>
-      {isPrimary && (
-        <span className="flex items-center gap-0.5 text-[9px] font-bold bg-blue-500 text-white px-1.5 py-0.5 rounded-full flex-shrink-0">
-          <Crown className="w-2.5 h-2.5" /> KEEPING
-        </span>
-      )}
-    </button>
+      <button
+        onClick={onClick}
+        disabled={isExcluded}
+        className="flex items-center gap-2 text-left disabled:cursor-not-allowed"
+        title={isExcluded ? 'Excluded from this merge' : "Click to load this client's details into the merge form"}
+      >
+        <span
+          className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+          style={{ background: isPrimary && !isExcluded ? 'linear-gradient(135deg, #1D4ED8, #3B82F6)' : 'linear-gradient(135deg, #475569, #64748B)' }}
+        >{initials}</span>
+        <div className="min-w-0">
+          <p className={`text-xs font-bold truncate max-w-[140px] ${isExcluded ? 'line-through' : ''} ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+            {client.company_name}
+          </p>
+          <p className="text-[10px] text-slate-400 truncate max-w-[140px]">{client.phone || client.email || '—'}</p>
+        </div>
+        {isPrimary && !isExcluded && (
+          <span className="flex items-center gap-0.5 text-[9px] font-bold bg-blue-500 text-white px-1.5 py-0.5 rounded-full flex-shrink-0">
+            <Crown className="w-2.5 h-2.5" /> KEEPING
+          </span>
+        )}
+      </button>
+      <button
+        onClick={onToggleExclude}
+        title={isExcluded ? 'Add back to this merge' : 'Remove from this merge (leave untouched)'}
+        className={`flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center transition-colors ${
+          isExcluded
+            ? isDark ? 'text-emerald-400 hover:bg-emerald-900/30' : 'text-emerald-600 hover:bg-emerald-50'
+            : isDark ? 'text-slate-400 hover:bg-red-900/30 hover:text-red-400' : 'text-slate-400 hover:bg-red-50 hover:text-red-600'
+        }`}
+      >
+        {isExcluded ? <RotateCcw className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
+      </button>
+    </div>
   );
 }
 
 export default function MergeClientsDialog({
-  open, onClose, clients = [], groups = [], onMerge, isDark = false,
+  open, onClose, clients = [], groups = [], startIndex = 0, onMerge, isDark = false,
 }) {
+  const [localGroups, setLocalGroups] = useState([]);
   const [selectedGroupIdx, setSelectedGroupIdx] = useState(0);
   const [primaryId, setPrimaryId] = useState(null);
+  const [excludedIds, setExcludedIds] = useState([]);
   const [editedFields, setEditedFields] = useState({});
   const [merging, setMerging] = useState(false);
 
-  // Build group data
+  // Build group data from whichever groups list is currently active locally
+  // (starts as a copy of the `groups` prop, then shrinks as merges complete —
+  // this is what lets the dialog stay open and move to the next group).
   const groupsWithClients = useMemo(() =>
-    groups.map(g => ({
+    localGroups.map(g => ({
       ...g,
       clients: (g.item_ids || []).map(id => clients.find(c => c.id === id)).filter(Boolean),
-    })), [groups, clients]);
+    })), [localGroups, clients]);
 
   const activeGroup = groupsWithClients[selectedGroupIdx];
 
@@ -126,36 +160,51 @@ export default function MergeClientsDialog({
     setEditedFields(initial);
   }, []);
 
-  // Reset group index and form whenever the dialog is (re)opened or the
-  // set of groups passed in changes (e.g. opened for a single scanned group).
+  // Reset local groups + start index whenever the dialog (re)opens.
   React.useEffect(() => {
     if (!open) return;
-    setSelectedGroupIdx(0);
-    const first = groupsWithClients[0]?.clients?.[0];
+    setLocalGroups(groups);
+    const startAt = Math.min(Math.max(startIndex, 0), Math.max(groups.length - 1, 0));
+    setSelectedGroupIdx(startAt);
+    setExcludedIds([]);
+    const g = groups[startAt];
+    const first = (g?.item_ids || []).map(id => clients.find(c => c.id === id)).filter(Boolean)[0];
     if (first) {
       setPrimaryId(first.id);
       loadIntoForm(first);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, groups]);
+  }, [open]);
 
   // Re-seed the form when the user switches which group they're merging
   React.useEffect(() => {
+    setExcludedIds([]);
     if (activeGroup?.clients?.length) {
       const first = activeGroup.clients[0];
       setPrimaryId(first.id);
       loadIntoForm(first);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedGroupIdx]);
+  }, [selectedGroupIdx, localGroups.length]);
 
   const primaryClient = useMemo(() =>
     activeGroup?.clients?.find(c => c.id === primaryId) || activeGroup?.clients?.[0],
     [activeGroup, primaryId]);
 
+  // Only non-excluded, non-primary clients are actually merged/deleted.
+  // Excluded clients stay in the group visually (so they can be added back)
+  // but are left completely untouched by the merge.
   const secondaryClients = useMemo(() =>
-    (activeGroup?.clients || []).filter(c => c.id !== primaryId),
-    [activeGroup, primaryId]);
+    (activeGroup?.clients || []).filter(c => c.id !== primaryId && !excludedIds.includes(c.id)),
+    [activeGroup, primaryId, excludedIds]);
+
+  const toggleExclude = useCallback((clientId) => {
+    if (clientId === primaryId) {
+      toast.error('The client being kept can\'t be removed — pick a different one to keep first.');
+      return;
+    }
+    setExcludedIds(prev => prev.includes(clientId) ? prev.filter(id => id !== clientId) : [...prev, clientId]);
+  }, [primaryId]);
 
   // For a given field, other values present among this group's clients —
   // shown as quick-fill chips under the input.
@@ -178,6 +227,10 @@ export default function MergeClientsDialog({
       toast.error('Client name is required');
       return;
     }
+    if (secondaryClients.length === 0) {
+      toast.error('Nothing to merge — all other clients in this group are removed.');
+      return;
+    }
     setMerging(true);
     try {
       const secondaryIds = secondaryClients.map(c => c.id);
@@ -187,15 +240,20 @@ export default function MergeClientsDialog({
       MERGE_FIELDS.forEach(f => { overrides[f.key] = (editedFields[f.key] ?? '').toString(); });
       await onMerge(primaryClient.id, secondaryIds, overrides);
       toast.success(`Merged ${secondaryIds.length + 1} clients into "${overrides.company_name}"`);
-      onClose();
+
+      // Stay open — drop this group from the local list and move to the next
+      // one automatically, so a whole batch can be cleared without reopening
+      // the AI Duplicate Detection dialog each time.
+      setLocalGroups(prev => prev.filter((_, i) => i !== selectedGroupIdx));
+      setSelectedGroupIdx(prev => Math.max(0, Math.min(prev, groupsWithClients.length - 2)));
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Merge failed. Please try again.');
     } finally {
       setMerging(false);
     }
-  }, [primaryClient, secondaryClients, editedFields, onMerge, onClose]);
+  }, [primaryClient, secondaryClients, editedFields, onMerge, selectedGroupIdx, groupsWithClients.length]);
 
-  if (!groups.length) return null;
+  if (!open) return null;
 
   const fieldCls = (extra = '') => `w-full px-3 py-2 rounded-lg border text-sm outline-none transition-colors focus:border-blue-400 focus:ring-1 focus:ring-blue-100 ${
     isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200 text-slate-800'
@@ -216,7 +274,9 @@ export default function MergeClientsDialog({
             <div>
               <DialogTitle className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>Merge Duplicate Clients</DialogTitle>
               <DialogDescription className="text-xs text-slate-400 mt-0.5">
-                {groups.length} duplicate group{groups.length !== 1 ? 's' : ''} · Pick a starting record, then edit any field before merging
+                {localGroups.length > 0
+                  ? `${localGroups.length} duplicate group${localGroups.length !== 1 ? 's' : ''} remaining · Pick a starting record, then edit any field before merging`
+                  : 'All duplicate groups resolved'}
               </DialogDescription>
             </div>
           </div>
@@ -224,7 +284,7 @@ export default function MergeClientsDialog({
 
         <div className="flex flex-1 min-h-0 overflow-hidden">
           {/* Left: group list */}
-          {groups.length > 1 && (
+          {groupsWithClients.length > 1 && (
             <div className={`w-48 flex-shrink-0 border-r overflow-y-auto ${isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-100 bg-slate-50'}`}>
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 px-3 py-2">Groups</p>
               {groupsWithClients.map((g, i) => {
@@ -254,6 +314,15 @@ export default function MergeClientsDialog({
 
           {/* Right: merge workspace */}
           <div className="flex-1 overflow-y-auto p-5 space-y-5">
+            {!activeGroup && (
+              <div className="flex flex-col items-center justify-center h-full text-center py-16">
+                <div className="w-14 h-14 rounded-2xl bg-emerald-50 flex items-center justify-center mb-3">
+                  <CheckCircle2 className="h-7 w-7 text-emerald-500" />
+                </div>
+                <p className={`font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>All duplicate groups resolved!</p>
+                <p className="text-sm text-slate-400 mt-1">Nothing left to merge in this batch.</p>
+              </div>
+            )}
             {activeGroup && (
               <>
                 {/* Confidence badge */}
@@ -272,10 +341,12 @@ export default function MergeClientsDialog({
                   );
                 })()}
 
-                {/* Client chips — click to load that client's data into the form */}
+                {/* Client chips — click to load that client's data into the form.
+                    3+ clients in a group? Hit the ✕ on any chip to remove it from
+                    this merge (it's left untouched) while the rest still merge. */}
                 <div>
                   <p className={`text-xs font-bold mb-2 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                    Click a client to load its details as the starting point below
+                    Click a client to load its details as the starting point below{activeGroup.clients.length > 2 ? ' · use ✕ to remove one from this merge' : ''}
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {activeGroup.clients.map(c => (
@@ -283,7 +354,9 @@ export default function MergeClientsDialog({
                         key={c.id}
                         client={c}
                         isPrimary={c.id === primaryId}
+                        isExcluded={excludedIds.includes(c.id)}
                         onClick={() => { setPrimaryId(c.id); loadIntoForm(c); }}
+                        onToggleExclude={() => toggleExclude(c.id)}
                         isDark={isDark}
                       />
                     ))}
