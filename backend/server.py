@@ -14441,6 +14441,9 @@ async def merge_clients(payload: dict, current_user: User = Depends(get_current_
     payload: { primary_id: str, secondary_ids: [str], field_overrides: {field: value} }
     - Copies all non-null fields from secondaries into primary (primary wins on conflict unless overridden).
     - Merges services, dsc_details, assignments, contact_persons arrays.
+    - Re-links tasks, leads, invoices, passwords and due-dates from the secondary
+      client id(s) to the primary id, so nothing linked to a deleted duplicate
+      goes orphaned.
     - Deletes secondary clients after merge.
     - Requires can_edit_clients permission.
     """
@@ -14501,7 +14504,15 @@ async def merge_clients(payload: dict, current_user: User = Depends(get_current_
         "tally_group",
         "credit_limit",
         "opening_balance",
+        "opening_balance_type",
         "default_payment_terms",
+        "proprietor_name",
+        "date_of_incorporation",
+        "client_type_label",
+        "mca_fetch_date",
+        "assigned_to",
+        "is_itr_client",
+        "itr_data",
     ]
     for sc in secondaries:
         for f in scalar_fields:
@@ -14586,13 +14597,23 @@ async def merge_clients(payload: dict, current_user: User = Depends(get_current_
     merged.pop("_id", None)
     await db.clients.update_one({"id": primary_id}, {"$set": merged})
 
-    # Migrate tasks/leads that reference secondary clients to primary
+    # Migrate tasks/leads/invoices/passwords/due-dates that reference secondary
+    # clients to the primary — so no linked records go orphaned after the merge.
     for sid in secondary_ids:
         await db.tasks.update_many(
             {"client_id": sid}, {"$set": {"client_id": primary_id}}
         )
         await db.leads.update_many(
             {"converted_client_id": sid}, {"$set": {"converted_client_id": primary_id}}
+        )
+        await db.invoices.update_many(
+            {"client_id": sid}, {"$set": {"client_id": primary_id}}
+        )
+        await db.passwords.update_many(
+            {"client_id": sid}, {"$set": {"client_id": primary_id}}
+        )
+        await db.due_dates.update_many(
+            {"client_id": sid}, {"$set": {"client_id": primary_id}}
         )
 
     # Delete secondaries
