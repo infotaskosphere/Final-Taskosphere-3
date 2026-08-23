@@ -83,7 +83,7 @@ export function StatCard({ icon: Icon, label, value, loading, color, isDark }) {
  * LinkCard — clickable module tile that routes into one of the pages
  * belonging to this section (e.g. Compliance Tracker, GST Reconciliation…).
  */
-export function LinkCard({ icon: Icon, label, description, path, color, isDark, badge }) {
+export function LinkCard({ icon: Icon, label, description, path, color, isDark, badge, stats, statsLoading }) {
   const navigate = useNavigate();
   return (
     <motion.button
@@ -117,6 +117,29 @@ export function LinkCard({ icon: Icon, label, description, path, color, isDark, 
           </p>
         )}
       </div>
+
+      {/* Summary strip — quick-glance numbers pulled live from that module,
+          so the card tells you what's inside before you even open it. */}
+      {Array.isArray(stats) && stats.length > 0 && (
+        <div
+          className={`grid gap-2 rounded-xl border px-3 py-2 ${
+            isDark ? 'bg-slate-900/40 border-slate-700/60' : 'bg-slate-50 border-slate-100'
+          }`}
+          style={{ gridTemplateColumns: `repeat(${stats.length}, minmax(0,1fr))` }}
+        >
+          {stats.map((s, i) => (
+            <div key={i} className="min-w-0 text-center">
+              <p className={`text-sm font-extrabold leading-tight truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                {statsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin mx-auto" style={{ color }} /> : s.value}
+              </p>
+              <p className={`text-[9.5px] font-semibold uppercase tracking-wide truncate ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                {s.label}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div
         className={`flex items-center gap-1 text-xs font-bold mt-auto pt-1 ${
           isDark ? 'text-blue-400' : 'text-blue-600'
