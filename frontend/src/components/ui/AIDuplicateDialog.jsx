@@ -145,19 +145,22 @@ export default function AIDuplicateDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="w-[92vw] sm:max-w-xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
-        <DialogHeader>
-          <DialogTitle className="text-xl font-bold flex items-center gap-2" style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>
-            <Sparkles className="h-5 w-5 text-violet-500" />
+      <DialogContent className="w-[95vw] sm:max-w-3xl max-h-[90vh] overflow-y-auto overflow-x-hidden p-0 gap-0 [&>button]:text-white [&>button]:opacity-90 [&>button]:hover:opacity-100 [&>button]:hover:bg-white/15 [&>button]:rounded-full [&>button]:top-5 [&>button]:right-5">
+        <DialogHeader
+          className="px-6 py-5 rounded-t-xl"
+          style={{ background: 'linear-gradient(135deg, #0D3B66 0%, #1F6FB2 100%)' }}
+        >
+          <DialogTitle className="text-xl font-bold flex items-center gap-2 text-white">
+            <Sparkles className="h-5 w-5 text-white" />
             AI Duplicate Detection — {entityLabel}s
           </DialogTitle>
-          <DialogDescription className="text-sm text-slate-500 flex items-center gap-2 flex-wrap">
+          <DialogDescription className="text-sm text-blue-100 flex items-center gap-2 flex-wrap">
             <span>
               {displayGroups.length
                 ? `Found ${displayGroups.length} group${displayGroups.length !== 1 ? 's' : ''} of potential duplicate ${entityLabel.toLowerCase()}s.`
                 : `No duplicate ${entityLabel.toLowerCase()}s detected.`}
             </span>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-violet-50 text-violet-700 border-violet-200">
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border border-white/30 bg-white/15 text-white">
               ⚡ Local AI Scan
             </span>
             {displayGroups.length > 0 && compareFields && (
@@ -166,7 +169,7 @@ export default function AIDuplicateDialog({
                 className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all ${
                   compareMode
                     ? 'bg-emerald-500 text-white border-emerald-500'
-                    : 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
+                    : 'bg-white/15 text-white border-white/30 hover:bg-white/25'
                 }`}
               >
                 {compareMode ? '✓ Compare Mode ON' : '⇄ Compare Mode'}
@@ -174,6 +177,8 @@ export default function AIDuplicateDialog({
             )}
           </DialogDescription>
         </DialogHeader>
+
+        <div className="px-6 pb-6 pt-4">
 
         {compareMode && compareIds.length < 2 && (
           <div className={`my-2 px-4 py-2 rounded-lg text-xs font-medium text-center ${isDark ? 'bg-emerald-900/30 text-emerald-400 border border-emerald-800' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
@@ -333,6 +338,7 @@ export default function AIDuplicateDialog({
               : `Click titles to view · Enable Compare Mode for side-by-side diff${canMerge && onMerge ? ' · Merge to combine a group into one record' : ''}`}
           </p>
           <Button variant="outline" onClick={onClose} className="h-9 text-sm rounded-xl">Close</Button>
+        </div>
         </div>
       </DialogContent>
     </Dialog>
