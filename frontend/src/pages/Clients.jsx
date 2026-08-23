@@ -31,7 +31,7 @@ import {
   IndianRupee, Save as SaveIcon, Globe, Settings, Clock, Send, Repeat, Link,
   Merge, Layers, Paperclip, Minimize2,
 } from 'lucide-react';
-import { detectClientDuplicates } from '@/lib/aiDuplicateEngine';
+import { detectClientDuplicates, detectRelatedClients } from '@/lib/aiDuplicateEngine';
 import StandaloneGovtFeeDialog from '@/components/StandaloneGovtFeeDialog';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
 import MergeClientsDialog from '@/components/ui/MergeClientsDialog';
@@ -5180,11 +5180,23 @@ export default function Clients() {
     // Run async so spinner renders first
     setTimeout(() => {
       try {
-        const groups = detectClientDuplicates(clients);
+        const dupeGroups = detectClientDuplicates(clients);
+        const relatedGroups = detectRelatedClients(clients);
+        const groups = [...dupeGroups, ...relatedGroups];
         setDupGroups(groups);
         setShowDupDialog(true);
-        if (!groups.length) toast.success(`Scanned ${clients.length} clients — no duplicates found ✓`);
-        else toast.info(`Found ${groups.length} duplicate group${groups.length !== 1 ? 's' : ''}`);
+        if (!groups.length) {
+          toast.success(`Scanned ${clients.length} clients — no duplicates or related clients found ✓`);
+        } else {
+          const dCount = dupeGroups.filter((g) => g.confidence === 'duplicate').length;
+          const pCount = dupeGroups.filter((g) => g.confidence === 'possible').length;
+          const rCount = relatedGroups.length;
+          const parts = [];
+          if (dCount) parts.push(`${dCount} duplicate`);
+          if (pCount) parts.push(`${pCount} possible`);
+          if (rCount) parts.push(`${rCount} related`);
+          toast.info(`Found ${parts.join(', ')} client group${groups.length !== 1 ? 's' : ''}`);
+        }
       } catch (e) {
         toast.error('Duplicate scan failed. Please try again.');
         console.error('Client duplicate detection error:', e);
