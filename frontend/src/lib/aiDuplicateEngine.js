@@ -87,6 +87,88 @@ const bestEntitySim = (a, b) =>
     trigramSim(normEntity(a), normEntity(b))
   );
 
+/**
+ * Address normalisation — canonicalises the common Indian-address abbreviation
+ * pairs (Road/Rd, Street/St, Society/Soc, ...) so "123 MG Road" and
+ * "123 M.G. Rd" compare equal instead of failing on wording alone.
+ */
+const ADDR_CANON = [
+  [/\broad\b/g, 'rd'],
+  [/\bstreet\b/g, 'st'],
+  [/\bavenue\b/g, 'ave'],
+  [/\blane\b/g, 'ln'],
+  [/\bfloor\b/g, 'fl'],
+  [/\bnear\b/g, ''],
+  [/\bopp(osite)?\b/g, ''],
+  [/\bbuilding\b/g, 'bldg'],
+  [/\bapartments?\b/g, 'apt'],
+  [/\bsociety\b/g, 'soc'],
+  [/\bindustrial\b/g, 'ind'],
+  [/\bestate\b/g, 'est'],
+  [/\blimited\b/g, 'ltd'],
+  [/\bprivate\b/g, 'pvt'],
+];
+export const normAddress = (s) => {
+  let a = norm(s);
+  ADDR_CANON.forEach(([re, rep]) => { a = a.replace(re, rep); });
+  return a.replace(/\s+/g, ' ').trim();
+};
+
+/**
+ * Best-match address similarity across every address field a client record
+ * may carry (primary address vs. the GST-certificate address), since the two
+ * duplicate records may each have only one of the two populated.
+ */
+const clientAddressList = (c) => [c.address, c.gst_address].filter(Boolean);
+const addressSim = (a, b) => {
+  const addrsA = clientAddressList(a);
+  const addrsB = clientAddressList(b);
+  if (!addrsA.length || !addrsB.length) return 0;
+  let best = 0;
+  addrsA.forEach((x) => addrsB.forEach((y) => {
+    const s = Math.max(jaccardSim(normAddress(x), normAddress(y)), trigramSim(normAddress(x), normAddress(y)));
+    if (s > best) best = s;
+  }));
+  return best;
+};
+
+/**
+ * Every email / phone a client record carries — the top-level field PLUS
+ * every contact person's email/phone — so two records that share a contact
+ * person's number (not just the "main" one) are still corroborated.
+ */
+const allEmails = (c) => {
+  const set = new Set();
+  if (c.email) set.add(norm(c.email));
+  (c.contact_persons || []).forEach((cp) => cp?.email && set.add(norm(cp.email)));
+  return set;
+};
+const allPhones = (c) => {
+  const set = new Set();
+  if (c.phone) set.add(normPhone(c.phone));
+  (c.contact_persons || []).forEach((cp) => cp?.phone && set.add(normPhone(cp.phone)));
+  return set;
+};
+const sharedValue = (setA, setB) => {
+  for (const v of setA) { if (v && setB.has(v)) return v; }
+  return null;
+};
+
+/**
+ * Detects the classic "same person, middle name added/dropped" pattern —
+ * e.g. "Jayesh Dhanrajani" vs. "Jayesh Kishore Dhanrajani" — WITHOUT
+ * flagging genuinely different family members who merely share a surname
+ * (e.g. "Urvi Jayesh Dhanrajani" is NOT a match for "Jayesh Dhanrajani":
+ * the first tokens differ). Requires the first AND last name token to match
+ * exactly and the token counts to differ (one name has an extra middle part).
+ */
+const sameFirstLastName = (rawA, rawB) => {
+  const ta = normEntity(rawA).split(' ').filter(Boolean);
+  const tb = normEntity(rawB).split(' ').filter(Boolean);
+  if (ta.length < 2 || tb.length < 2 || ta.length === tb.length) return false;
+  return ta[0] === tb[0] && ta[ta.length - 1] === tb[tb.length - 1];
+};
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // GENERIC DUPLICATE GROUPER
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -112,15 +194,25 @@ export const groupDuplicates = (items, scoreAndReason, threshold) => {
 
     items.forEach((b, j) => {
       if (i === j || used.has(b.id)) return;
-      const { score, reasons, exact } = scoreAndReason(a, b);
-      if (!exact && score < threshold) return;
+      const { score, reasons, exact, tier } = scoreAndReason(a, b);
+      if (!exact && !tier && score < threshold) return;
+      if (score <= 0 && !exact && !tier) return;
       group.push(b.id);
-      allR.push({ id: b.id, score: Math.round(score), reasons, exact });
+      allR.push({ id: b.id, score: Math.round(score), reasons, exact, tier });
     });
 
     if (group.length > 1) {
-      const hasHigh   = allR.some((r) => r.exact || r.score >= 70);
-      const confidence = hasHigh ? 'high' : 'medium';
+      // Tiered detectors (e.g. clients) supply an explicit 'duplicate' | 'possible'
+      // | 'related' tier per pair — the group takes on the strongest tier seen.
+      // Untiered detectors fall back to the original high/medium scheme.
+      let confidence;
+      if (allR.some((r) => r.tier)) {
+        const order = ['duplicate', 'possible', 'related'];
+        confidence = order.find((t) => allR.some((r) => r.tier === t)) || 'possible';
+      } else {
+        const hasHigh = allR.some((r) => r.exact || r.score >= 70);
+        confidence = hasHigh ? 'high' : 'medium';
+      }
       const topReason  = allR[0]?.reasons?.join(' · ') || 'Similar records detected';
       groups.push({
         item_ids:   group.map(String),
@@ -140,26 +232,42 @@ export const groupDuplicates = (items, scoreAndReason, threshold) => {
 // CLIENTS
 // ═══════════════════════════════════════════════════════════════════════════════
 /**
- * TRUE DUPLICATE DEFINITION FOR CLIENTS
- * ───────────────────────────────────────
- * A client is a duplicate only when it represents the SAME legal business entity
- * entered more than once.
+ * TRUE DUPLICATE DEFINITION FOR CLIENTS — v2 (multi-parameter)
+ * ──────────────────────────────────────────────────────────────
+ * Checks every identifier a CA/CS practice actually relies on, not just
+ * name + one phone + one email, and reports THREE distinct outcomes
+ * instead of a single high/medium bucket:
  *
- * HARD RULE — name is the gate:
- *   Different companies can share a CA's phone number, a shared email, or even
- *   a common accountant's PAN. Shared contact details alone NEVER qualify.
- *   Name similarity ≥ 70% (after stripping legal suffixes) is required first.
+ *   🔴 duplicate  (score ≥ 85, or any legal-ID exact match)
+ *      Same legal entity beyond reasonable doubt.
  *
- * EXCEPTION — legal IDs bypass the name gate:
- *   GSTIN and PAN are legally unique to one entity in India. If two records
- *   share the same valid GSTIN (15 chars) or PAN (10 chars), they ARE the same
- *   entity regardless of how the name was typed.
+ *   🟠 possible   (score 55–84)
+ *      Strong signal (near-identical name, or normalised-suffix-exact
+ *      name match) but not fully corroborated — needs human review.
+ *      Crucially: a near-identical name is enough to land here on its
+ *      own — it no longer needs a matching phone/email to surface at all,
+ *      which previously caused true duplicates like "Jayesh Medical Store"
+ *      vs. "Jayesh Medical Stores" to be silently dropped.
  *
- * CORROBORATION (after name gate passes):
- *   At least one of email / phone / city+state combo must corroborate.
- *   Name alone at 70–80% similarity is borderline — we need confirmation.
+ * 1. LEGAL-ID GATE (bypasses the name check entirely — legally unique in India)
+ *    PAN · GSTIN · CIN · LLPIN · Udyam/MSME registration number
  *
- * THRESHOLD: 70
+ * 2. NAME MATCH (after stripping legal suffixes — Pvt/Private/Ltd/Limited/LLP/…)
+ *    - Exact match after normalisation (e.g. "ABC Pvt Ltd" ≡ "ABC Private Limited")
+ *    - Jaccard/trigram similarity bands
+ *    - First-name + last-name exact match with an extra middle token
+ *      (e.g. "Jayesh Dhanrajani" vs. "Jayesh Kishore Dhanrajani") — catches
+ *      the same person entered with/without a middle name, without
+ *      conflating different family members who merely share a surname
+ *      ("Urvi Jayesh Dhanrajani" is correctly NOT matched — first token differs)
+ *
+ * 3. CORROBORATION (checked across ALL emails/phones on the record, including
+ *    every contact person, not just the primary one)
+ *    email · phone · WhatsApp · address (primary or GST-certificate address,
+ *    with Road/Rd, Street/St, Society/Soc, etc. normalised) · city+state
+ *
+ * THRESHOLD: 45 (low — the per-pair scorer itself returns 0 to reject a pair;
+ * the tier, not this number, drives what the user sees).
  */
 export const detectClientDuplicates = (clients) =>
   groupDuplicates(
@@ -168,82 +276,156 @@ export const detectClientDuplicates = (clients) =>
       const reasons = [];
       let score = 0;
 
-      // ── Legal ID gate (bypasses everything — legally same entity) ──────────
-      const gA = normId(a.gstin || '');
-      const gB = normId(b.gstin || '');
-      if (gA.length === 15 && gB.length === 15 && gA === gB) {
-        return { score: 98, reasons: ['Identical GSTIN — legally same entity'], exact: true };
+      // ── Legal-ID gate — any ONE exact match is legally conclusive ──────────
+      const idFields = [
+        ['gstin', 15, 'GSTIN'],
+        ['pan', 10, 'PAN'],
+        ['cin', 21, 'CIN'],
+        ['llpin', 7, 'LLPIN'],
+        ['msme_number', 5, 'Udyam/MSME registration number'],
+      ];
+      for (const [field, minLen, label] of idFields) {
+        const vA = normId(a[field] || '');
+        const vB = normId(b[field] || '');
+        if (vA.length >= minLen && vB.length >= minLen && vA === vB) {
+          return { score: 97, reasons: [`Identical ${label} — legally same entity`], exact: true, tier: 'duplicate' };
+        }
       }
 
-      const pA = normId(a.pan || '');
-      const pB = normId(b.pan || '');
-      if (pA.length === 10 && pB.length === 10 && pA === pB) {
-        return { score: 93, reasons: ['Identical PAN — legally same entity'], exact: true };
-      }
-
-      // ── Name gate — must pass before any other field contributes ───────────
+      // ── Name gate ────────────────────────────────────────────────────────
       const rawNameA = a.company_name || a.name || '';
       const rawNameB = b.company_name || b.name || '';
       if (!rawNameA.trim() || !rawNameB.trim()) return { score: 0, reasons: [], exact: false };
 
-      const exactNameRaw  = norm(rawNameA) === norm(rawNameB);
-      const nameSim       = bestEntitySim(rawNameA, rawNameB);
+      const exactNameRaw   = norm(rawNameA) === norm(rawNameB);
+      const exactEntity    = !exactNameRaw && normEntity(rawNameA) && normEntity(rawNameA) === normEntity(rawNameB);
+      const nameSim        = bestEntitySim(rawNameA, rawNameB);
+      const middleNameOnly = sameFirstLastName(rawNameA, rawNameB);
 
-      // Hard stop: name similarity < 70% and names not exact → not a duplicate
-      if (!exactNameRaw && nameSim < 0.70) {
+      // Hard stop: nothing suggests these are the same entity/person
+      if (!exactNameRaw && !exactEntity && !middleNameOnly && nameSim < 0.55) {
         return { score: 0, reasons: [], exact: false };
       }
 
       if (exactNameRaw) {
-        score += 70;
+        score += 82;
         reasons.push('Exact company name');
+      } else if (exactEntity) {
+        score += 78;
+        reasons.push('Same name after normalising Pvt/Private/Ltd/Limited/LLP suffixes');
       } else if (nameSim >= 0.88) {
-        score += 62;
+        score += 68;
         reasons.push(`Company name ${Math.round(nameSim * 100)}% similar`);
       } else if (nameSim >= 0.78) {
-        score += 48;
-        reasons.push(`Company name ${Math.round(nameSim * 100)}% similar — needs corroboration`);
-      } else {
-        // 0.70–0.78: borderline — needs TWO corroborating fields to cross threshold
-        score += 28;
+        score += 58;
+        reasons.push(`Company name ${Math.round(nameSim * 100)}% similar`);
+      } else if (nameSim >= 0.55) {
+        score += 34;
         reasons.push(`Company name loosely similar (${Math.round(nameSim * 100)}%)`);
       }
 
-      // ── Corroborating fields ───────────────────────────────────────────────
-      const eA = norm(a.email || '');
-      const eB = norm(b.email || '');
-      if (eA && eB && eA === eB) {
-        score += 22;
-        reasons.push('Same email address');
+      if (middleNameOnly) {
+        score = Math.max(score, 57);
+        reasons.push('Same first & last name — likely the same person with/without a middle name');
       }
 
-      const phA = normPhone(a.phone || '');
-      const phB = normPhone(b.phone || '');
-      if (phA.length === 10 && phA === phB) {
-        score += 18;
-        reasons.push('Same phone number');
+      // ── Corroborating fields (checked across every email/phone on file) ────
+      const emailHit = sharedValue(allEmails(a), allEmails(b));
+      if (emailHit) { score += 20; reasons.push('Shares an email address'); }
+
+      const phoneHit = sharedValue(allPhones(a), allPhones(b));
+      if (phoneHit) { score += 16; reasons.push('Shares a phone number'); }
+
+      const addrSim = addressSim(a, b);
+      if (addrSim >= 0.75) { score += 14; reasons.push('Same address'); }
+      else if (addrSim >= 0.55) { score += 7; reasons.push('Similar address'); }
+
+      // Proprietor / trade-name cross-check
+      if (a.proprietor_name && b.proprietor_name) {
+        const propSim = bestEntitySim(a.proprietor_name, b.proprietor_name);
+        if (propSim >= 0.85) { score += 12; reasons.push('Same proprietor name'); }
       }
 
       // City + state together (weak individually, meaningful together)
       const sameCity  = a.city  && b.city  && norm(a.city)  === norm(b.city);
       const sameState = a.state && b.state && norm(a.state) === norm(b.state);
-      if (sameCity && sameState) {
-        score += 7;
-        reasons.push(`Same city & state (${a.city}, ${a.state})`);
-      } else if (sameCity) {
-        score += 3;
-        reasons.push(`Same city (${a.city})`);
-      }
+      if (sameCity && sameState) { score += 6; reasons.push(`Same city & state (${a.city}, ${a.state})`); }
+      else if (sameCity) { score += 2; reasons.push(`Same city (${a.city})`); }
 
       // Same client type (minor corroboration)
       if (a.client_type && b.client_type && a.client_type === b.client_type) {
-        score += 4;
+        score += 3;
         reasons.push(`Same type (${a.client_type})`);
       }
 
-      return { score, reasons, exact: exactNameRaw };
+      if (score < 55) return { score: 0, reasons: [], exact: false };
+
+      const tier = score >= 85 ? 'duplicate' : 'possible';
+      const exact = exactNameRaw || exactEntity;
+      return { score: Math.min(score, 100), reasons, exact, tier };
     },
-    70  // Must have strong name similarity + at least one corroborating field
+    45
+  );
+
+/**
+ * 🔵 RELATED CLIENT DETECTION
+ * ───────────────────────────
+ * NOT a duplicate check — a promoter/proprietor commonly runs 10–20
+ * companies/LLPs through the same firm. This flags that relationship
+ * ("this client shares a director/proprietor with an existing client")
+ * WITHOUT blocking creation or suggesting a merge, so it is intentionally
+ * kept separate from detectClientDuplicates and its 'duplicate'/'possible'
+ * groups (which ARE merge-eligible).
+ *
+ * Signals (any one qualifies):
+ *   - A contact person's DIN matches another client's contact person DIN
+ *   - The proprietor_name on one record matches a contact person / the
+ *     proprietor_name on another record
+ *   - A contact person's name+email or name+phone matches another client's
+ *     contact person
+ * ...while the two records' own entity names are NOT already similar
+ * (that case is already covered — and merge-eligible — via detectClientDuplicates).
+ */
+export const detectRelatedClients = (clients) =>
+  groupDuplicates(
+    clients,
+    (a, b) => {
+      const rawNameA = a.company_name || a.name || '';
+      const rawNameB = b.company_name || b.name || '';
+      // Already-similar names are handled (and merge-eligible) elsewhere.
+      if (bestEntitySim(rawNameA, rawNameB) >= 0.55) return { score: 0, reasons: [], exact: false };
+
+      const reasons = [];
+      let matchedPerson = null;
+
+      const dinsA = (a.contact_persons || []).map((cp) => normId(cp?.din || '')).filter((d) => d.length >= 5);
+      const dinsB = (b.contact_persons || []).map((cp) => normId(cp?.din || '')).filter((d) => d.length >= 5);
+      const sharedDin = dinsA.find((d) => dinsB.includes(d));
+      if (sharedDin) reasons.push(`Shared director (DIN ${sharedDin})`);
+
+      const peopleA = [
+        ...(a.proprietor_name ? [a.proprietor_name] : []),
+        ...(a.contact_persons || []).map((cp) => cp?.name).filter(Boolean),
+      ];
+      const peopleB = [
+        ...(b.proprietor_name ? [b.proprietor_name] : []),
+        ...(b.contact_persons || []).map((cp) => cp?.name).filter(Boolean),
+      ];
+      if (!sharedDin) {
+        for (const pa of peopleA) {
+          for (const pb of peopleB) {
+            if (bestEntitySim(pa, pb) >= 0.90) { matchedPerson = pa; break; }
+          }
+          if (matchedPerson) break;
+        }
+        if (matchedPerson) reasons.push(`Same proprietor/director name (${matchedPerson})`);
+      }
+
+      if (!sharedDin && !matchedPerson) return { score: 0, reasons: [], exact: false };
+
+      return { score: 40, reasons, exact: false, tier: 'related' };
+    },
+    35
   );
 
 // ═══════════════════════════════════════════════════════════════════════════════
