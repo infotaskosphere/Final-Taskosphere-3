@@ -32,9 +32,14 @@ import { Button } from '@/components/ui/button';
 import { Sparkles, CheckCircle2, AlertTriangle, X, ArrowLeftRight, Trash2, Edit2, Eye, Merge } from 'lucide-react';
 
 const CONF_STYLE = {
-  high:   { bg: 'bg-red-50 border-red-200 text-red-700',    dot: 'bg-red-500',    label: 'HIGH MATCH' },
-  medium: { bg: 'bg-amber-50 border-amber-200 text-amber-700', dot: 'bg-amber-400', label: 'SIMILAR'    },
-  low:    { bg: 'bg-blue-50 border-blue-200 text-blue-700', dot: 'bg-blue-400',    label: 'POSSIBLE'   },
+  // Untiered detectors (todos, documents, compliance, passwords)
+  high:      { bg: 'bg-red-50 border-red-200 text-red-700',       dot: 'bg-red-500',    label: 'HIGH MATCH' },
+  medium:    { bg: 'bg-amber-50 border-amber-200 text-amber-700', dot: 'bg-amber-400',  label: 'SIMILAR'    },
+  low:       { bg: 'bg-blue-50 border-blue-200 text-blue-700',    dot: 'bg-blue-400',   label: 'POSSIBLE'   },
+  // Tiered client detector — matches the 🔴🟠🔵 three-outcome model
+  duplicate: { bg: 'bg-red-50 border-red-200 text-red-700',       dot: 'bg-red-500',    label: '🔴 DUPLICATE' },
+  possible:  { bg: 'bg-amber-50 border-amber-200 text-amber-700', dot: 'bg-amber-400',  label: '🟠 POSSIBLE DUPLICATE' },
+  related:   { bg: 'bg-blue-50 border-blue-200 text-blue-700',    dot: 'bg-blue-400',   label: '🔵 RELATED CLIENT' },
 };
 
 export default function AIDuplicateDialog({
@@ -209,6 +214,11 @@ export default function AIDuplicateDialog({
                       </span>
                     )}
                     <span className={`text-[11px] truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{group.reason}</span>
+                    {group.confidence === 'related' && (
+                      <span className={`text-[10px] italic ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                        — appears related, not a duplicate. Not blocked, review only.
+                      </span>
+                    )}
                   </div>
                   {compareFields && (
                     <button
@@ -222,7 +232,7 @@ export default function AIDuplicateDialog({
                       ⇄ Compare
                     </button>
                   )}
-                  {canMerge && onMerge && groupItems.length >= 2 && (
+                  {canMerge && onMerge && groupItems.length >= 2 && group.confidence !== 'related' && (
                     <button
                       onClick={() => onMerge({ ...group, item_ids: groupItems.map((i) => i.id) })}
                       className="text-[10px] font-bold px-2 py-0.5 rounded-full border flex-shrink-0 transition-all flex items-center gap-1 bg-white border-violet-300 text-violet-600 hover:bg-violet-50 hover:border-violet-400"
