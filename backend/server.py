@@ -14795,14 +14795,17 @@ async def remove_clients_from_group(
     return updated
 
 
-# ── Client Groups direct collection route safety fix ─────────────────────────
-# The Clients page calls GET /api/client-groups.
-# Register the exact collection endpoint directly on the FastAPI app so it
-# cannot fail because of nested router mounting/order behavior.
+# ── Client Groups direct API route safety ─────────────────────────────────────
+# The Clients page uses:
+#   GET    /api/client-groups
+#   POST   /api/client-groups
+#   PUT    /api/client-groups/{group_id}
+#   DELETE /api/client-groups/{group_id}
 #
-# Keep the existing api_router client-group routes unchanged.
-# This direct registration only guarantees the exact collection GET endpoint.
+# Register the exact routes directly on the main FastAPI app.
+# Keep the original api_router client-group routes unchanged.
 
+# GET - list groups
 app.add_api_route(
     "/api/client-groups",
     list_client_groups,
@@ -14814,6 +14817,51 @@ app.add_api_route(
     "/api/client-groups/",
     list_client_groups,
     methods=["GET"],
+    include_in_schema=False,
+)
+
+# POST - create group
+app.add_api_route(
+    "/api/client-groups",
+    create_client_group,
+    methods=["POST"],
+    include_in_schema=False,
+)
+
+app.add_api_route(
+    "/api/client-groups/",
+    create_client_group,
+    methods=["POST"],
+    include_in_schema=False,
+)
+
+# PUT - update group
+app.add_api_route(
+    "/api/client-groups/{group_id}",
+    update_client_group,
+    methods=["PUT"],
+    include_in_schema=False,
+)
+
+app.add_api_route(
+    "/api/client-groups/{group_id}/",
+    update_client_group,
+    methods=["PUT"],
+    include_in_schema=False,
+)
+
+# DELETE - delete group
+app.add_api_route(
+    "/api/client-groups/{group_id}",
+    delete_client_group,
+    methods=["DELETE"],
+    include_in_schema=False,
+)
+
+app.add_api_route(
+    "/api/client-groups/{group_id}/",
+    delete_client_group,
+    methods=["DELETE"],
     include_in_schema=False,
 )
 
