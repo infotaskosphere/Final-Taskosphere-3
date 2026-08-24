@@ -139,7 +139,13 @@ export default function MergeClientsDialog({
   const [primaryId, setPrimaryId] = useState(null);
   const [excludedIds, setExcludedIds] = useState([]);
   const [editedFields, setEditedFields] = useState({});
-  const [merging, setMerging] = useState(false);
+  // Background merges in flight — each is { id, label, status: 'pending'|'error' }.
+  // "Merge Now" no longer blocks the dialog: the group is removed from view
+  // immediately and the actual API call + refetch happens quietly here while
+  // the dialog stays in the forefront and lets you keep working on the next
+  // group right away.
+  const [backgroundMerges, setBackgroundMerges] = useState([]);
+  const bgIdRef = React.useRef(0);
 
   // Build group data from whichever groups list is currently active locally
   // (starts as a copy of the `groups` prop, then shrinks as merges complete —
@@ -221,7 +227,7 @@ export default function MergeClientsDialog({
 
   const setField = (key, value) => setEditedFields(prev => ({ ...prev, [key]: value }));
 
-  const handleMerge = useCallback(async () => {
+  const handleMerge = useCallback(() => {
     if (!primaryClient) return;
     if (!(editedFields.company_name || '').trim()) {
       toast.error('Client name is required');
@@ -231,27 +237,41 @@ export default function MergeClientsDialog({
       toast.error('Nothing to merge — all other clients in this group are removed.');
       return;
     }
-    setMerging(true);
-    try {
-      const secondaryIds = secondaryClients.map(c => c.id);
-      // Send every edited field as an override so the merged record reflects
-      // exactly what was typed in the form — not just picked from a duplicate.
-      const overrides = {};
-      MERGE_FIELDS.forEach(f => { overrides[f.key] = (editedFields[f.key] ?? '').toString(); });
-      await onMerge(primaryClient.id, secondaryIds, overrides);
-      toast.success(`Merged ${secondaryIds.length + 1} clients into "${overrides.company_name}"`);
 
-      // Stay open — drop this group from the local list and move to the next
-      // one automatically, so a whole batch can be cleared without reopening
-      // the AI Duplicate Detection dialog each time.
-      setLocalGroups(prev => prev.filter((_, i) => i !== selectedGroupIdx));
-      setSelectedGroupIdx(prev => Math.max(0, Math.min(prev, groupsWithClients.length - 2)));
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || 'Merge failed. Please try again.');
-    } finally {
-      setMerging(false);
-    }
-  }, [primaryClient, secondaryClients, editedFields, onMerge, selectedGroupIdx, groupsWithClients.length]);
+    // Snapshot everything needed for this merge BEFORE we advance the UI —
+    // once we move to the next group, primaryClient/secondaryClients/
+    // editedFields will all switch to referring to that next group.
+    const secondaryIds = secondaryClients.map(c => c.id);
+    const overrides = {};
+    MERGE_FIELDS.forEach(f => { overrides[f.key] = (editedFields[f.key] ?? '').toString(); });
+    const mergedLabel = overrides.company_name;
+    const groupBeingMerged = localGroups[selectedGroupIdx];
+    const primaryIdSnapshot = primaryClient.id;
+
+    // Advance the dialog immediately — drop this group from the list and
+    // move to the next one right away. The actual network call + list
+    // refresh happen below without blocking this.
+    setLocalGroups(prev => prev.filter((_, i) => i !== selectedGroupIdx));
+    setSelectedGroupIdx(prev => Math.max(0, Math.min(prev, groupsWithClients.length - 2)));
+
+    const bgId = ++bgIdRef.current;
+    setBackgroundMerges(prev => [...prev, { id: bgId, label: mergedLabel, status: 'pending' }]);
+
+    (async () => {
+      try {
+        await onMerge(primaryIdSnapshot, secondaryIds, overrides);
+        toast.success(`Merged ${secondaryIds.length + 1} clients into "${mergedLabel}"`);
+        setBackgroundMerges(prev => prev.filter(m => m.id !== bgId));
+      } catch (e) {
+        toast.error(`Merge failed for "${mergedLabel}" — ${e?.response?.data?.detail || 'please retry from the list'}`);
+        setBackgroundMerges(prev => prev.filter(m => m.id !== bgId));
+        // Put the group back so it isn't silently lost on failure.
+        if (groupBeingMerged) {
+          setLocalGroups(prev => [...prev, groupBeingMerged]);
+        }
+      }
+    })();
+  }, [primaryClient, secondaryClients, editedFields, onMerge, selectedGroupIdx, groupsWithClients.length, localGroups]);
 
   if (!open) return null;
 
@@ -455,6 +475,23 @@ export default function MergeClientsDialog({
           </div>
         </div>
 
+        {/* Background merge status strip — merges no longer block the dialog;
+            this shows what's still finishing up in the background while you
+            keep working through the next groups. */}
+        {backgroundMerges.length > 0 && (
+          <div className={`flex-shrink-0 px-6 py-2 border-t flex items-center gap-2 flex-wrap ${isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-100 bg-blue-50/60'}`}>
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500 flex-shrink-0" />
+            <span className={`text-[11px] font-semibold ${isDark ? 'text-slate-300' : 'text-blue-700'}`}>
+              Merging in background:
+            </span>
+            {backgroundMerges.map(m => (
+              <span key={m.id} className={`text-[10px] px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-white text-blue-700 border border-blue-200'}`}>
+                {m.label}
+              </span>
+            ))}
+          </div>
+        )}
+
         {/* Footer */}
         <div className={`flex-shrink-0 flex items-center justify-between px-6 py-4 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
           <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
@@ -463,7 +500,7 @@ export default function MergeClientsDialog({
               : 'You can close this dialog now, or reopen AI Duplicate Detection to scan again.'}
           </p>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={onClose} disabled={merging}
+            <Button variant="outline" size="sm" onClick={onClose}
               className={isDark ? 'border-slate-600 text-slate-300' : ''}>
               {activeGroup ? 'Cancel' : 'Close'}
             </Button>
@@ -471,10 +508,10 @@ export default function MergeClientsDialog({
               <Button
                 size="sm"
                 onClick={handleMerge}
-                disabled={!primaryClient || secondaryClients.length === 0 || merging || !(editedFields.company_name || '').trim()}
+                disabled={!primaryClient || secondaryClients.length === 0 || !(editedFields.company_name || '').trim()}
                 className="bg-gradient-to-r from-blue-600 to-violet-600 text-white border-0 min-w-[110px]"
               >
-                {merging ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />Merging…</> : <><Merge className="w-3.5 h-3.5 mr-1" />Merge Now</>}
+                <Merge className="w-3.5 h-3.5 mr-1" />Merge Now
               </Button>
             )}
           </div>
