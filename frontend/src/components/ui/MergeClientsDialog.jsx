@@ -436,10 +436,18 @@ export default function MergeClientsDialog({
                       One client record will be kept, saved with the details entered above
                     </li>
                     <li>
-                      {secondaryClients.map(c => c.company_name).join(', ')} will be deleted
+                      {secondaryClients.length > 0
+                        ? `${secondaryClients.map(c => c.company_name).join(', ')} will be deleted`
+                        : 'Nothing selected to delete — add at least one client back to merge'}
                     </li>
                     <li>Services, DSC details, contacts & assignments from all clients will be combined</li>
                     <li>Tasks and other records linked to deleted clients will be re-linked to the kept client</li>
+                    {excludedIds.length > 0 && (
+                      <li>
+                        {activeGroup.clients.filter(c => excludedIds.includes(c.id)).map(c => c.company_name).join(', ')}
+                        {' '}will be left untouched — not merged, not deleted
+                      </li>
+                    )}
                   </ul>
                 </div>
               </>
@@ -450,21 +458,25 @@ export default function MergeClientsDialog({
         {/* Footer */}
         <div className={`flex-shrink-0 flex items-center justify-between px-6 py-4 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
           <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-            This action <strong>cannot be undone</strong>. Secondary clients will be permanently deleted.
+            {activeGroup
+              ? <>This action <strong>cannot be undone</strong>. Non-excluded duplicates will be permanently deleted.</>
+              : 'You can close this dialog now, or reopen AI Duplicate Detection to scan again.'}
           </p>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={onClose} disabled={merging}
               className={isDark ? 'border-slate-600 text-slate-300' : ''}>
-              Cancel
+              {activeGroup ? 'Cancel' : 'Close'}
             </Button>
-            <Button
-              size="sm"
-              onClick={handleMerge}
-              disabled={!primaryClient || secondaryClients.length === 0 || merging || !(editedFields.company_name || '').trim()}
-              className="bg-gradient-to-r from-blue-600 to-violet-600 text-white border-0 min-w-[110px]"
-            >
-              {merging ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />Merging…</> : <><Merge className="w-3.5 h-3.5 mr-1" />Merge Now</>}
-            </Button>
+            {activeGroup && (
+              <Button
+                size="sm"
+                onClick={handleMerge}
+                disabled={!primaryClient || secondaryClients.length === 0 || merging || !(editedFields.company_name || '').trim()}
+                className="bg-gradient-to-r from-blue-600 to-violet-600 text-white border-0 min-w-[110px]"
+              >
+                {merging ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />Merging…</> : <><Merge className="w-3.5 h-3.5 mr-1" />Merge Now</>}
+              </Button>
+            )}
           </div>
         </div>
       </DialogContent>
