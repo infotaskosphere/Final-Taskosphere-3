@@ -2557,22 +2557,49 @@ const InlineStatusDropdown = ({ inv, onStatusChange, isDark }) => {
   const [paymentMode, setPaymentMode] = React.useState('bank');
   const [fetchingAccounts, setFetchingAccounts] = React.useState(false);
 
+  const recalcPos = React.useCallback(() => {
+    if (!triggerRef.current) return;
+    const r = triggerRef.current.getBoundingClientRect();
+    // Approximate height of dropdown (header + N rows)
+    const dropHeight = INLINE_STATUSES.length * 38 + 38;
+    const spaceBelow = window.innerHeight - r.bottom;
+    // Flip above the trigger if not enough space below
+    const topPos = spaceBelow < dropHeight + 8 ? r.top - dropHeight - 4 : r.bottom + 4;
+    setDropPos({
+      top:  Math.max(4, topPos),
+      left: Math.max(8, r.right - 160),   // 160 = w-40
+    });
+  }, []);
+
   const handleToggle = (e) => {
     e.stopPropagation();
-    if (!open && triggerRef.current) {
-      const r = triggerRef.current.getBoundingClientRect();
-      // Approximate height of dropdown (header + N rows)
-      const dropHeight = INLINE_STATUSES.length * 38 + 38;
-      const spaceBelow = window.innerHeight - r.bottom;
-      // Flip above the trigger if not enough space below
-      const topPos = spaceBelow < dropHeight + 8 ? r.top - dropHeight - 4 : r.bottom + 4;
-      setDropPos({
-        top:  Math.max(4, topPos),
-        left: Math.max(8, r.right - 160),   // 160 = w-40
-      });
-    }
+    if (!open) recalcPos();
     setOpen(v => !v);
   };
+
+  // The dropdown is position:fixed (viewport-relative) so it does NOT move
+  // with the page when the user scrolls after opening it — that's what was
+  // causing it to appear to "jump" up near the top of the page while the
+  // trigger row stayed further down. Keep it glued to the trigger by
+  // recalculating on every scroll/resize while open, and close it if the
+  // trigger scrolls out of view entirely.
+  React.useEffect(() => {
+    if (!open) return;
+    const onScrollOrResize = () => {
+      if (!triggerRef.current) { setOpen(false); return; }
+      const r = triggerRef.current.getBoundingClientRect();
+      if (r.bottom < 0 || r.top > window.innerHeight) { setOpen(false); return; }
+      recalcPos();
+    };
+    // capture: true so this also fires for scroll on any scrollable
+    // ancestor container, not just the window itself.
+    window.addEventListener('scroll', onScrollOrResize, true);
+    window.addEventListener('resize', onScrollOrResize);
+    return () => {
+      window.removeEventListener('scroll', onScrollOrResize, true);
+      window.removeEventListener('resize', onScrollOrResize);
+    };
+  }, [open, recalcPos]);
 
   const handleSelect = async (newStatus) => {
     if (newStatus === inv.status) { setOpen(false); return; }
