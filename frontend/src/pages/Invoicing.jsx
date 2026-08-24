@@ -1,6 +1,7 @@
 import Papa from 'papaparse/papaparse.js';
 import { getJsPDF, getHtml2Canvas, getXLSX } from '@/lib/lazyLibs';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
@@ -2657,8 +2658,13 @@ const InlineStatusDropdown = ({ inv, onStatusChange, isDark }) => {
         <ChevronDown className={`w-2.5 h-2.5 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
-      {/* Dropdown — rendered fixed so it escapes overflow:hidden table containers */}
-      {open && (
+      {/* Dropdown — rendered via portal into document.body so it's always
+          positioned relative to the true viewport. Without this, any
+          transformed ancestor (hover:scale, hover:-translate-y, etc. found
+          elsewhere in this layout) silently becomes the containing block for
+          position:fixed children, which is what was pushing this dropdown to
+          the wrong spot on screen instead of anchoring under the trigger. */}
+      {open && createPortal(
         <>
           {/* Full-screen backdrop to close on outside click */}
           <div className="fixed inset-0 z-[9998]" onClick={() => setOpen(false)} />
@@ -2690,7 +2696,8 @@ const InlineStatusDropdown = ({ inv, onStatusChange, isDark }) => {
               );
             })}
           </div>
-        </>
+        </>,
+        document.body
       )}
 
       {/* Paid Confirmation Dialog */}
