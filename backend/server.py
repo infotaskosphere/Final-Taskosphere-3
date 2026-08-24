@@ -14795,6 +14795,28 @@ async def remove_clients_from_group(
     return updated
 
 
+# ── Client Groups direct collection route safety fix ─────────────────────────
+# The Clients page calls GET /api/client-groups.
+# Register the exact collection endpoint directly on the FastAPI app so it
+# cannot fail because of nested router mounting/order behavior.
+#
+# Keep the existing api_router client-group routes unchanged.
+# This direct registration only guarantees the exact collection GET endpoint.
+
+app.add_api_route(
+    "/api/client-groups",
+    list_client_groups,
+    methods=["GET"],
+    include_in_schema=False,
+)
+
+app.add_api_route(
+    "/api/client-groups/",
+    list_client_groups,
+    methods=["GET"],
+    include_in_schema=False,
+)
+
 app.include_router(api_router)
 
 # ── Recruitment direct API mount ─────────────────────────────────────────────
