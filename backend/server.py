@@ -33,6 +33,7 @@ from backend.gst_portal_sync import router as gst_portal_sync_router, create_gst
 from backend.accounting_lock import router as accounting_lock_router, create_accounting_integrity_indexes
 from backend.reminders_router import router as reminders_router
 from backend.quotations import router as quotation_router
+from backend.pincode_lookup import router as pincode_router
 from backend.purchases import router as purchases_router
 from backend.attendance_identix import identix_router
 from backend.google_auth import router as google_auth_router
@@ -11726,6 +11727,7 @@ async def update_client(
         "address",
         "city",
         "state",
+        "pincode",
         "services",
         "notes",
         "assigned_to",
@@ -14452,6 +14454,7 @@ api_router.include_router(auth_password_reset_router)
 api_router.include_router(visits_router)
 api_router.include_router(website_tracking_router)
 api_router.include_router(quotation_router)
+api_router.include_router(pincode_router)  # /api/pincode/{pincode} — PIN → State/GST-state-code lookup
 api_router.include_router(purchases_router)
 api_router.include_router(telegram_router)
 api_router.include_router(leads_router)
