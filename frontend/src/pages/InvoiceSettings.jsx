@@ -38,6 +38,7 @@ import { Input }    from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch }   from '@/components/ui/switch';
 import api from '@/lib/api';
+import { lookupPincode } from '@/lib/pincode';
 import { mirrorBankToSettings, bankFromCompany } from '@/lib/bankSync';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -104,7 +105,13 @@ export const DEFAULT_INV_SETTINGS = {
   default_notes:         '',
   default_terms:         '',
   default_gst_rate:      18,
+  // Your company's own registered PIN code. Typing a 6-digit PIN here
+  // auto-fills Supply State (and its GST state-code) below, which every
+  // new invoice then uses to auto-decide CGST+SGST vs IGST against the
+  // client's / place-of-supply's state (see frontend/src/lib/pincode.js).
+  supply_pincode:        '',
   supply_state:          '',
+  supply_state_code:     '',
   currency_symbol:       '₹',
   date_format:           'DD/MM/YYYY',
   round_off:             true,
@@ -876,10 +883,28 @@ export default function InvoiceSettings({ open, onClose, companies = [], isDark 
                           </Select>
                         </div>
                         <div>
+                          <label className={lbl}>Your Company PIN Code</label>
+                          <Input className={`${inp} font-mono`} placeholder="6-digit PIN" maxLength={6}
+                            value={form.supply_pincode}
+                            onChange={async e => {
+                              const digits = e.target.value.replace(/\D/g, '').slice(0, 6);
+                              set('supply_pincode', digits);
+                              if (digits.length === 6) {
+                                const r = await lookupPincode(digits);
+                                if (r?.valid) {
+                                  set('supply_state', r.state);
+                                  set('supply_state_code', r.state_code || '');
+                                  toast.success(`Supply State auto-set to ${r.state}`);
+                                }
+                              }
+                            }} />
+                          <p className="text-[10px] text-slate-400 mt-1">Auto-fills Supply State on the right</p>
+                        </div>
+                        <div>
                           <label className={lbl}>Supply State</label>
                           <Input className={inp} placeholder="e.g. Gujarat" value={form.supply_state}
-                            onChange={e => set('supply_state', e.target.value)} />
-                          <p className="text-[10px] text-slate-400 mt-1">Auto-detect IGST vs CGST+SGST</p>
+                            onChange={e => { set('supply_state', e.target.value); set('supply_state_code', ''); }} />
+                          <p className="text-[10px] text-slate-400 mt-1">Auto-detect IGST vs CGST+SGST — editable if the PIN lookup is wrong</p>
                         </div>
                       </div>
                       <div className="flex items-center justify-between mt-4 pt-4 border-t border-slate-200 dark:border-slate-700">
