@@ -25,6 +25,7 @@ from backend.dependencies import (
     _get_perm,
 )
 from backend.models import User
+from backend.pincode_lookup import get_state_from_pincode
 
 try:
     from fpdf import FPDF
@@ -227,6 +228,14 @@ class CompanyProfile(BaseModel):
     id: Optional[str] = None
     name: str
     address: str = ""
+    city: str = ""
+    # Registered PIN code of the company/firm itself. Used to auto-derive
+    # `state` / `state_code` below (see backend/pincode_lookup.py) so every
+    # invoice raised from this company can auto-decide CGST+SGST vs IGST by
+    # comparing this state_code against the client's / place-of-supply's.
+    pincode: str = ""
+    state: str = ""
+    state_code: str = ""
     phone: str = ""
     email: str = ""
     website: str = ""
@@ -1602,10 +1611,24 @@ async def create_company(
 ):
     # Issue #6: permission enforced via Depends above (can_create_quotations)
     now = datetime.now(timezone.utc).isoformat()
+    pincode = (data.get("pincode") or "").strip()
+    state = (data.get("state") or "").strip()
+    state_code = (data.get("state_code") or "").strip()
+    if pincode and not state:
+        # Auto-derive the company's own state/state-code from its PIN code
+        # so invoices can auto-decide CGST+SGST vs IGST (see pincode_lookup.py).
+        resolved = get_state_from_pincode(pincode)
+        if resolved:
+            state = resolved.get("state") or state
+            state_code = resolved.get("state_code") or state_code
     doc = {
         "id": str(uuid.uuid4()),
         "name": data.get("name", "").strip(),
         "address": data.get("address", ""),
+        "city": data.get("city", ""),
+        "pincode": pincode,
+        "state": state,
+        "state_code": state_code,
         "phone": data.get("phone", ""),
         "email": data.get("email", ""),
         "website": data.get("website", ""),
@@ -1681,6 +1704,10 @@ async def list_companies(current_user: User = Depends(get_current_user)):
         "id": 1,
         "name": 1,
         "address": 1,
+        "city": 1,
+        "pincode": 1,
+        "state": 1,
+        "state_code": 1,
         "phone": 1,
         "email": 1,
         "website": 1,
@@ -1729,6 +1756,10 @@ async def update_company(
     allowed = [
         "name",
         "address",
+        "city",
+        "pincode",
+        "state",
+        "state_code",
         "phone",
         "email",
         "website",
@@ -1761,6 +1792,13 @@ async def update_company(
         for k in allowed
         if k in data and (data[k] is not None or k in ("tm_logo_base64", "upi_qr_image_base64"))
     }
+    # If a PIN code was set/changed but state wasn't sent explicitly, auto-derive
+    # it server-side too (frontend already does this live, this is a safety net).
+    if update.get("pincode") and not update.get("state"):
+        resolved = get_state_from_pincode(update["pincode"])
+        if resolved:
+            update["state"] = resolved.get("state") or ""
+            update["state_code"] = resolved.get("state_code") or ""
     await db.companies.update_one({"id": company_id}, {"$set": update})
     updated = await db.companies.find_one({"id": company_id}, {"_id": 0})
     # Keep the Bank Accounts page in sync: mirror the company's primary
