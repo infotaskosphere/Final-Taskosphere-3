@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import api from '@/lib/api';
+import { lookupPincode } from '@/lib/pincode';
 import {
   fetchPassvaultFillForClient,
   backfillPassvaultFromClient,
@@ -4875,7 +4876,7 @@ export default function Clients() {
   const [formData, setFormData] = useState({
     company_name: '', client_type: 'proprietor', client_type_other: '',
     contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }],
-    email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [],
+    email: '', phone: '', birthday: '', address: '', city: '', state: '', pincode: '', services: [],
     dsc_details: [], assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '', auditor: '',
     // Tax & Billing
     gstin: '', pan: '', gst_treatment: 'regular', place_of_supply: '',
@@ -5401,6 +5402,7 @@ export default function Clients() {
         email: trimmedEmail(formData.email), phone: cleanPhone || null,
         birthday: safeDate(formData.birthday) || null, address: formData.address?.trim() || null,
         city: formData.city?.trim() || null, state: formData.state?.trim() || null,
+        pincode: formData.pincode?.trim() || null,
         services: finalServices, notes: formData.notes?.trim() || null,
         assigned_to: cleanedAssignments[0]?.user_id || null, assignments: cleanedAssignments,
         status: formData.status, contact_persons: cleanedContacts, dsc_details: cleanedDSC,
@@ -5542,7 +5544,7 @@ export default function Clients() {
 
   const resetForm = useCallback(() => {
     setAddressTab('primary');
-    setFormData({ company_name: '', client_type: 'proprietor', client_type_other: '', contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }], email: '', phone: '', birthday: '', address: '', city: '', state: '', services: [], dsc_details: [], assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '', auditor: '', gstin: '', pan: '', gst_treatment: 'regular', place_of_supply: '', default_payment_terms: 'Due on receipt', credit_limit: '', opening_balance: '', opening_balance_type: 'Dr', tally_ledger_name: '', tally_group: 'Sundry Debtors', website: '', msme_number: '', gst_address: '', gst_city: '', gst_state: '', gst_pin: '', cin: '', llpin: '', proprietor_name: '', mca_fetch_date: '' });
+    setFormData({ company_name: '', client_type: 'proprietor', client_type_other: '', contact_persons: [{ name: '', email: '', phone: '', designation: '', birthday: '', din: '' }], email: '', phone: '', birthday: '', address: '', city: '', state: '', pincode: '', services: [], dsc_details: [], assignments: [{ ...EMPTY_ASSIGNMENT }], notes: '', status: 'active', referred_by: '', auditor: '', gstin: '', pan: '', gst_treatment: 'regular', place_of_supply: '', default_payment_terms: 'Due on receipt', credit_limit: '', opening_balance: '', opening_balance_type: 'Dr', tally_ledger_name: '', tally_group: 'Sundry Debtors', website: '', msme_number: '', gst_address: '', gst_city: '', gst_state: '', gst_pin: '', cin: '', llpin: '', proprietor_name: '', mca_fetch_date: '' });
     setOtherService(''); setEditingClient(null); setFormErrors({}); setContactErrors([]); setReferrerInput(''); setReferrerSelectValue(''); setAuditorInput(''); setAuditorSelectValue('');
     setSmartImportFiles({ gst: null, udyam: null, mca: null });
     setSmartImportError('');
@@ -6678,7 +6680,7 @@ export default function Clients() {
                                     onChange={e => setFormData(p => ({ ...p, address: e.target.value }))}
                                   />
                                 </div>
-                                <div className="grid grid-cols-2 gap-3">
+                                <div className="grid grid-cols-3 gap-3">
                                   <div>
                                     <label className={labelCls}>City</label>
                                     <Input className={inpCls} value={formData.city} onChange={e => setFormData(p => ({ ...p, city: e.target.value }))} />
@@ -6686,6 +6688,26 @@ export default function Clients() {
                                   <div>
                                     <label className={labelCls}>State</label>
                                     <Input className={inpCls} value={formData.state} onChange={e => setFormData(p => ({ ...p, state: e.target.value }))} />
+                                  </div>
+                                  <div>
+                                    <label className={labelCls}>PIN Code <span className="text-slate-400 font-normal normal-case">(auto-fills State)</span></label>
+                                    <Input
+                                      className={`${inpCls} font-mono`}
+                                      placeholder="6-digit PIN"
+                                      maxLength={6}
+                                      value={formData.pincode || ''}
+                                      onChange={async e => {
+                                        const digits = e.target.value.replace(/\D/g, '').slice(0, 6);
+                                        setFormData(p => ({ ...p, pincode: digits }));
+                                        if (digits.length === 6) {
+                                          const r = await lookupPincode(digits);
+                                          if (r?.valid) {
+                                            setFormData(p => ({ ...p, state: r.state }));
+                                            toast.success(`State auto-set to ${r.state}`);
+                                          }
+                                        }
+                                      }}
+                                    />
                                   </div>
                                 </div>
                               </div>
@@ -6747,13 +6769,10 @@ export default function Clients() {
                           </div>
                         );
                       })()}
-                      {/* City & State when no GST tab is shown (handled inside tab panels above) */}
-                      {!formData.gst_address && (
-                        <>
-                          <div><label className={labelCls}>City</label><Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} value={formData.city} onChange={e => setFormData(p => ({ ...p, city: e.target.value }))} /></div>
-                          <div><label className={labelCls}>State</label><Input className={`h-11 focus:border-blue-400 rounded-xl text-sm ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} value={formData.state} onChange={e => setFormData(p => ({ ...p, state: e.target.value }))} /></div>
-                        </>
-                      )}
+                      {/* NOTE: City & State fields are rendered once, inside the primary/GST
+                          address panels above. A duplicate unconditional City/State block used
+                          to live here and rendered a second copy of the same two fields whenever
+                          formData.gst_address was empty — removed to fix the double row. */}
                     </div>
                   </div>
                   {/* Contact Persons */}
