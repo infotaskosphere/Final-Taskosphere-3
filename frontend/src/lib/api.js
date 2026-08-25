@@ -5,136 +5,76 @@ import { useState, useEffect } from "react";
 // API BASE URL
 // ─────────────────────────────────────────────────────────────
 
-// Runtime override.
-const _runtimeOverride =
-  typeof window !== "undefined"
-    ? window.__TASKOSPHERE_API_URL__
-    : undefined;
-
-//Development/preview hosts.
-const _isDevOrPreviewHost =
-  typeof window !== "undefined" &&
-  (
-    window.location.hostname === "localhost" ||
-    window.location.hostname === "127.0.0.1" ||
-    window.location.hostname.includes(".run.app") ||
-    window.location.hostname.includes("emergentagent.com") ||
-    window.location.hostname.includes(".replit.dev") ||
-    window.location.hostname.includes(".replit.app") ||
-    window.location.hostname.endsWith(".repl.co")
-  );
-
-// Production means the actual Taskosphere website or another
-// non-development deployment.
-const _isProductionHost =
-  typeof window !== "undefined" &&
-  !_isDevOrPreviewHost;
-
-// Production fallback.
-const _defaultBackendUrl =
+// Production backend.
+// This is the ONLY backend used by the production Taskosphere website.
+const PRODUCTION_API_URL =
   "https://final-taskosphere-backend.onrender.com";
 
-/**
- * Detect an accidental local backend URL.
- *
- * This is important because a Vite environment variable or runtime
- * override such as:
- *
- *   http://localhost:7432
- *   http://127.0.0.1:7432
- *
- * must NEVER be used by the production website.
- */
-const _isLocalBackendUrl = (value) => {
-  if (!value || typeof window === "undefined") {
-    return false;
-  }
+// Local development backend.
+const LOCAL_API_URL =
+  "http://localhost:7432";
 
-  try {
-    const hostname = new URL(
-      value,
-      window.location.origin
-    ).hostname;
-
-    return (
-      hostname === "localhost" ||
-      hostname === "127.0.0.1" ||
-      hostname === "0.0.0.0"
-    );
-  } catch {
-    return false;
-  }
-};
-
-/**
- * Never allow localhost / 127.0.0.1 to leak into production.
- *
- * Local development is unaffected.
- */
-const _safeRuntimeOverride =
-  _isProductionHost && _isLocalBackendUrl(_runtimeOverride)
-    ? ""
-    : _runtimeOverride;
-
-const _environmentApiUrl =
-  typeof import.meta !== "undefined" &&
-  import.meta.env
-    ? import.meta.env.VITE_API_URL || ""
+// Detect browser hostname.
+const _hostname =
+  typeof window !== "undefined"
+    ? window.location.hostname
     : "";
 
-const _safeConfiguredApiUrl =
-  _isProductionHost && _isLocalBackendUrl(_environmentApiUrl)
-    ? ""
-    : _environmentApiUrl;
+// ─────────────────────────────────────────────────────────────
+// ENVIRONMENT DETECTION
+// ─────────────────────────────────────────────────────────────
 
-const _configuredApiUrl =
-  _safeRuntimeOverride ||
-  _safeConfiguredApiUrl ||
-  "";
+const _isLocalHost =
+  _hostname === "localhost" ||
+  _hostname === "127.0.0.1";
 
-// Some older deployments accidentally used the frontend Render URL.
-const _configuredUrlIsFrontendHost = (() => {
-  if (
-    !_configuredApiUrl ||
-    _safeRuntimeOverride ||
-    typeof window === "undefined"
-  ) {
-    return false;
-  }
+const _isTaskosphereProduction =
+  _hostname === "taskosphere.com" ||
+  _hostname === "www.taskosphere.com";
 
-  try {
-    const configuredHost = new URL(
-      _configuredApiUrl,
-      window.location.origin
-    ).hostname;
+// ─────────────────────────────────────────────────────────────
+// API URL SELECTION
+// ─────────────────────────────────────────────────────────────
+//
+// Production:
+//     taskosphere.com
+//          ↓
+//     final-taskosphere-backend.onrender.com
+//
+// Local development:
+//     localhost
+//          ↓
+//     localhost:7432
+//
+// This is deliberately determined from the actual browser
+// environment. A stale VITE_API_URL or runtime variable cannot
+// change the production backend.
+// ─────────────────────────────────────────────────────────────
 
-    return configuredHost.endsWith("-frontend.onrender.com");
-  } catch {
-    return false;
-  }
-})();
+let BASE_URL;
 
-let _raw =
-  _safeRuntimeOverride ||
-  (
-    _configuredUrlIsFrontendHost
-      ? _configuredApiUrl.replace(
-          "-frontend.onrender.com",
-          "-backend.onrender.com"
-        )
-      : _configuredApiUrl
-  ) ||
-  (_isDevOrPreviewHost ? "" : _defaultBackendUrl);
-
-// Remove trailing slash.
-_raw = _raw.replace(/\/+$/, "");
-
-// Make sure /api exists exactly once.
-if (!_raw.endsWith("/api")) {
-  _raw += "/api";
+if (_isTaskosphereProduction) {
+  BASE_URL = PRODUCTION_API_URL;
+} else if (_isLocalHost) {
+  BASE_URL =
+    import.meta.env.VITE_API_URL ||
+    LOCAL_API_URL;
+} else {
+  // Preview / staging / other deployments.
+  BASE_URL =
+    import.meta.env.VITE_API_URL ||
+    PRODUCTION_API_URL;
 }
 
-const BASE_URL = _raw;
+// ─────────────────────────────────────────────────────────────
+// NORMALIZE API URL
+// ─────────────────────────────────────────────────────────────
+
+BASE_URL = BASE_URL.replace(/\/+$/, "");
+
+if (!BASE_URL.endsWith("/api")) {
+  BASE_URL += "/api";
+}
 
 export { BASE_URL };
 
