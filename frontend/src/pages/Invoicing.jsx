@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import api from '@/lib/api';
+import { lookupPincode, isInterState } from '@/lib/pincode';
 import { fetchCompanies, normalizeCompanies, recordBelongsToCompany } from "@/lib/companies";
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
@@ -3556,11 +3557,16 @@ const ItemRow = React.memo(function ItemRow({
 // QUICK ADD CLIENT DIALOG — inline create from inside the Invoice form
 // ════════════════════════════════════════════════════════════════════════════════
 const QuickAddClientDialog = ({ open, onClose, onCreated, isDark }) => {
+  const QUICK_ADD_SERVICES = [
+    'GST', 'Trademark', 'Income Tax', 'ROC', 'Audit', 'Compliance',
+    'Company Registration', 'Tax Planning', 'Accounting', 'Payroll', 'Other'
+  ];
   const blank = {
     company_name: '', client_type: 'proprietor',
     gstin: '', pan: '', email: '', phone: '',
-    address: '', city: '', state: '',
-    msme_number: '',
+    address: '', city: '', state: '', pincode: '',
+    msme_number: '', referred_by: '', services: [],
+    contact_persons: [{ name: '', email: '', phone: '', designation: '' }],
   };
   const [data, setData] = useState(blank);
   const [saving, setSaving] = useState(false);
@@ -3651,11 +3657,13 @@ const QuickAddClientDialog = ({ open, onClose, onCreated, isDark }) => {
         address:      data.address.trim() || null,
         city:         data.city.trim() || null,
         state:        data.state.trim() || null,
+        pincode:      (data.pincode || '').trim() || null,
         gstin:        gstin || null,
         pan:          (data.pan || '').trim().toUpperCase() || null,
         msme_number:  (data.msme_number || '').trim() || null,
-        services: [],
-        contact_persons: [],
+        referred_by:  (data.referred_by || '').trim() || null,
+        services: data.services || [],
+        contact_persons: (data.contact_persons || []).filter(cp => cp.name?.trim()),
         dsc_details: [],
         assignments: [],
         assigned_to: null,
@@ -3870,9 +3878,56 @@ const QuickAddClientDialog = ({ open, onClose, onCreated, isDark }) => {
               <Input className={inputCls} value={data.city} onChange={e => setField('city', e.target.value)} />
             </div>
             <div>
+              <label className={labelCls}>PIN Code <span className="text-slate-400 font-normal normal-case">(auto-fills state)</span></label>
+              <Input className={`${inputCls} font-mono`} maxLength={6} placeholder="6-digit PIN"
+                value={data.pincode}
+                onChange={async e => {
+                  const digits = e.target.value.replace(/\D/g, '').slice(0, 6);
+                  setField('pincode', digits);
+                  if (digits.length === 6) {
+                    const r = await lookupPincode(digits);
+                    if (r?.valid) { setField('state', r.state); toast.success(`State auto-set to ${r.state}`); }
+                  }
+                }} />
+            </div>
+            <div>
               <label className={labelCls}>State</label>
               <Input className={inputCls} value={data.state} onChange={e => setField('state', e.target.value)}
                 placeholder="Maharashtra, Delhi…" />
+            </div>
+            <div>
+              <label className={labelCls}>Referred By</label>
+              <Input className={inputCls} value={data.referred_by} onChange={e => setField('referred_by', e.target.value)} placeholder="Optional" />
+            </div>
+            <div className="md:col-span-2">
+              <label className={labelCls}>Services</label>
+              <div className="flex flex-wrap gap-2">
+                {QUICK_ADD_SERVICES.map(s => {
+                  const checked = (data.services || []).includes(s);
+                  return (
+                    <button
+                      key={s} type="button"
+                      onClick={() => setField('services', checked ? data.services.filter(x => x !== s) : [...(data.services || []), s])}
+                      className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-colors ${
+                        checked
+                          ? 'bg-blue-600 border-blue-600 text-white'
+                          : isDark ? 'border-slate-600 text-slate-300 hover:border-blue-400' : 'border-slate-200 text-slate-600 hover:border-blue-300'
+                      }`}
+                    >{s}</button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="md:col-span-2">
+              <label className={labelCls}>Primary Contact Person <span className="text-slate-400 font-normal normal-case">(optional)</span></label>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <Input className={inputCls} placeholder="Name" value={data.contact_persons[0]?.name || ''}
+                  onChange={e => setField('contact_persons', [{ ...data.contact_persons[0], name: e.target.value }])} />
+                <Input className={inputCls} placeholder="Email" value={data.contact_persons[0]?.email || ''}
+                  onChange={e => setField('contact_persons', [{ ...data.contact_persons[0], email: e.target.value }])} />
+                <Input className={inputCls} placeholder="Phone" value={data.contact_persons[0]?.phone || ''}
+                  onChange={e => setField('contact_persons', [{ ...data.contact_persons[0], phone: e.target.value }])} />
+              </div>
             </div>
           </div>
         </div>
@@ -3898,9 +3953,14 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
     invoice_type: 'tax_invoice', company_id: '', client_id: '', lead_id: '',
     invoice_no: '',
     client_name: '', client_address: '', client_email: '', client_phone: '', client_gstin: '', client_state: '',
+    // PIN-driven place-of-supply automation (frontend/src/lib/pincode.js) —
+    // typing a 6-digit client PIN auto-fills client_state/client_state_code
+    // and, together with supply_pincode/supply_state_code from Invoice
+    // Settings, auto-decides CGST+SGST vs IGST.
+    client_pincode: '', client_state_code: '',
     invoice_date: format(new Date(), 'yyyy-MM-dd'),
     due_date: '',  // intentionally empty — user sets this manually or via quick-fill buttons
-    supply_state: '', is_interstate: false,
+    supply_state: '', supply_state_code: '', supply_pincode: '', is_interstate: false,
     items: [emptyItem()],
     gst_rate: 18, discount_amount: 0, shipping_charges: 0, other_charges: 0, advance_received: 0,
     payment_terms: 'Due on receipt', notes: '', terms_conditions: '', reference_no: '',
@@ -4060,15 +4120,25 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
   }, []);
 
   const handleClientSelect = useCallback(async (client) => {
-    if (!client) { setForm(p => ({ ...p, client_id: '', client_name: '', client_email: '', client_phone: '', client_address: '', client_state: '', client_gstin: '' })); return; }
+    if (!client) { setForm(p => ({ ...p, client_id: '', client_name: '', client_email: '', client_phone: '', client_address: '', client_state: '', client_state_code: '', client_pincode: '', client_gstin: '' })); return; }
     const addressParts = [client.address, client.city, client.state].filter(Boolean).join(', ');
-    setForm(p => ({
-      ...p, client_id: client.id, client_name: client.company_name || '',
-      client_email: client.email || '', client_phone: client.phone || '',
-      client_address: addressParts, client_state: client.state || '',
-      client_gstin: client.client_gstin || client.gstin || '',
-      is_interstate: p.supply_state ? (p.supply_state.toLowerCase() !== (client.state || '').toLowerCase()) : p.is_interstate,
-    }));
+    setForm(p => {
+      const clientStateCode = client.state_code || '';
+      // Prefer comparing GST state-codes (exact); fall back to state-name
+      // string compare when a code isn't available (e.g. legacy clients
+      // saved before this field existed).
+      const interstate = clientStateCode && p.supply_state_code
+        ? isInterState(p.supply_state_code, clientStateCode)
+        : (p.supply_state ? p.supply_state.toLowerCase() !== (client.state || '').toLowerCase() : p.is_interstate);
+      return {
+        ...p, client_id: client.id, client_name: client.company_name || '',
+        client_email: client.email || '', client_phone: client.phone || '',
+        client_address: addressParts, client_state: client.state || '',
+        client_state_code: clientStateCode, client_pincode: client.pincode || '',
+        client_gstin: client.client_gstin || client.gstin || '',
+        is_interstate: interstate === null ? p.is_interstate : interstate,
+      };
+    });
 
     // ── Auto-populate compliance govt fees into invoice items ──────────────────
     // Fetch all compliance assignments for this client that have a govt fee amount + SRN
@@ -4348,6 +4418,8 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                           company_id: v,
                           invoice_no: shouldFetchNextNo ? nextNo : p.invoice_no,
                           supply_state:        s.supply_state        || p.supply_state,
+                          supply_state_code:   s.supply_state_code   || p.supply_state_code,
+                          supply_pincode:      s.supply_pincode      || p.supply_pincode,
                           notes:               s.default_notes       || p.notes,
                           terms_conditions:    s.default_terms       || p.terms_conditions,
                           invoice_template:    s.template            || p.invoice_template,
@@ -4453,8 +4525,50 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                     <div><label className={labelCls}>Email</label><Input type="email" className={inputCls} value={form.client_email} onChange={e => setField('client_email', e.target.value)} /></div>
                     <div><label className={labelCls}>Phone</label><Input className={inputCls} value={form.client_phone} onChange={e => setField('client_phone', e.target.value)} /></div>
                     <div className="md:col-span-2"><label className={labelCls}>Billing Address</label><Textarea className={`rounded-xl text-sm min-h-[72px] resize-none ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100' : 'bg-white border-slate-200'}`} value={form.client_address} onChange={e => setField('client_address', e.target.value)} /></div>
-                    <div><label className={labelCls}>Client State</label><Input className={inputCls} placeholder="Maharashtra, Delhi…" value={form.client_state} onChange={e => setField('client_state', e.target.value)} /></div>
-                    <div><label className={labelCls}>Your Supply State</label><Input className={inputCls} placeholder="Your state" value={form.supply_state} onChange={e => { setField('supply_state', e.target.value); if (form.client_state) setField('is_interstate', e.target.value.toLowerCase() !== form.client_state.toLowerCase()); }} /></div>
+                    <div>
+                      <label className={labelCls}>Client PIN Code <span className="text-slate-400 font-normal normal-case">(auto-fills state)</span></label>
+                      <Input className={`${inputCls} font-mono`} placeholder="6-digit PIN" maxLength={6}
+                        value={form.client_pincode}
+                        onChange={async e => {
+                          const digits = e.target.value.replace(/\D/g, '').slice(0, 6);
+                          setField('client_pincode', digits);
+                          if (digits.length === 6) {
+                            const r = await lookupPincode(digits);
+                            if (r?.valid) {
+                              setForm(p => {
+                                const interstate = r.state_code && p.supply_state_code
+                                  ? isInterState(p.supply_state_code, r.state_code)
+                                  : (p.supply_state ? p.supply_state.toLowerCase() !== r.state.toLowerCase() : p.is_interstate);
+                                return { ...p, client_state: r.state, client_state_code: r.state_code || '', is_interstate: interstate === null ? p.is_interstate : interstate };
+                              });
+                              toast.success(`Place of Supply auto-set to ${r.state}`);
+                            }
+                          }
+                        }} />
+                    </div>
+                    <div><label className={labelCls}>Client State</label><Input className={inputCls} placeholder="Maharashtra, Delhi…" value={form.client_state} onChange={e => { setField('client_state', e.target.value); setField('client_state_code', ''); }} /></div>
+                    <div>
+                      <label className={labelCls}>Your Company PIN Code <span className="text-slate-400 font-normal normal-case">(auto-fills your state)</span></label>
+                      <Input className={`${inputCls} font-mono`} placeholder="6-digit PIN" maxLength={6}
+                        value={form.supply_pincode}
+                        onChange={async e => {
+                          const digits = e.target.value.replace(/\D/g, '').slice(0, 6);
+                          setField('supply_pincode', digits);
+                          if (digits.length === 6) {
+                            const r = await lookupPincode(digits);
+                            if (r?.valid) {
+                              setForm(p => {
+                                const interstate = r.state_code && p.client_state_code
+                                  ? isInterState(r.state_code, p.client_state_code)
+                                  : (p.client_state ? r.state.toLowerCase() !== p.client_state.toLowerCase() : p.is_interstate);
+                                return { ...p, supply_state: r.state, supply_state_code: r.state_code || '', is_interstate: interstate === null ? p.is_interstate : interstate };
+                              });
+                              toast.success(`Your Supply State auto-set to ${r.state}`);
+                            }
+                          }
+                        }} />
+                    </div>
+                    <div><label className={labelCls}>Your Supply State</label><Input className={inputCls} placeholder="Your state" value={form.supply_state} onChange={e => { setField('supply_state', e.target.value); setField('supply_state_code', ''); if (form.client_state) setField('is_interstate', e.target.value.toLowerCase() !== form.client_state.toLowerCase()); }} /></div>
                   </div>
                   <div className="flex items-center gap-3 mt-4 p-3 rounded-xl border border-dashed border-amber-300 bg-amber-50/60 dark:bg-amber-900/10 dark:border-amber-700">
                     <Switch checked={form.is_interstate} onCheckedChange={v => setField('is_interstate', v)} />
