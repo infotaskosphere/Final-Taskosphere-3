@@ -5,16 +5,13 @@ import { useState, useEffect } from "react";
 // API BASE URL
 // ─────────────────────────────────────────────────────────────
 
-// Runtime override has highest priority.
+// Runtime override.
 const _runtimeOverride =
   typeof window !== "undefined"
     ? window.__TASKOSPHERE_API_URL__
     : undefined;
 
-// Build-time environment variable.
-const _configuredApiUrl = _runtimeOverride || import.meta.env.VITE_API_URL || "";
-
-// Development / preview hosts should use same-origin unless explicitly configured.
+//Development/preview hosts.
 const _isDevOrPreviewHost =
   typeof window !== "undefined" &&
   (
@@ -27,15 +24,79 @@ const _isDevOrPreviewHost =
     window.location.hostname.endsWith(".repl.co")
   );
 
+// Production means the actual Taskosphere website or another
+// non-development deployment.
+const _isProductionHost =
+  typeof window !== "undefined" &&
+  !_isDevOrPreviewHost;
+
 // Production fallback.
 const _defaultBackendUrl =
   "https://final-taskosphere-backend.onrender.com";
+
+/**
+ * Detect an accidental local backend URL.
+ *
+ * This is important because a Vite environment variable or runtime
+ * override such as:
+ *
+ *   http://localhost:7432
+ *   http://127.0.0.1:7432
+ *
+ * must NEVER be used by the production website.
+ */
+const _isLocalBackendUrl = (value) => {
+  if (!value || typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    const hostname = new URL(
+      value,
+      window.location.origin
+    ).hostname;
+
+    return (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "0.0.0.0"
+    );
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Never allow localhost / 127.0.0.1 to leak into production.
+ *
+ * Local development is unaffected.
+ */
+const _safeRuntimeOverride =
+  _isProductionHost && _isLocalBackendUrl(_runtimeOverride)
+    ? ""
+    : _runtimeOverride;
+
+const _environmentApiUrl =
+  typeof import.meta !== "undefined" &&
+  import.meta.env
+    ? import.meta.env.VITE_API_URL || ""
+    : "";
+
+const _safeConfiguredApiUrl =
+  _isProductionHost && _isLocalBackendUrl(_environmentApiUrl)
+    ? ""
+    : _environmentApiUrl;
+
+const _configuredApiUrl =
+  _safeRuntimeOverride ||
+  _safeConfiguredApiUrl ||
+  "";
 
 // Some older deployments accidentally used the frontend Render URL.
 const _configuredUrlIsFrontendHost = (() => {
   if (
     !_configuredApiUrl ||
-    _runtimeOverride ||
+    _safeRuntimeOverride ||
     typeof window === "undefined"
   ) {
     return false;
@@ -54,7 +115,7 @@ const _configuredUrlIsFrontendHost = (() => {
 })();
 
 let _raw =
-  _runtimeOverride ||
+  _safeRuntimeOverride ||
   (
     _configuredUrlIsFrontendHost
       ? _configuredApiUrl.replace(
