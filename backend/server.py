@@ -260,6 +260,16 @@ _last_reminder_date_cache: Optional[str] = None
 # ====================== APP ======================
 app = FastAPI(title="Taskosphere Backend", redirect_slashes=False)
 
+# ====================== HEALTH CHECK ======================
+# Used by Render and the frontend to verify that the backend
+# process is alive and accepting requests.
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "ok",
+        "service": "taskosphere-backend",
+    }
+
 # === CRITICAL: CORS MUST BE THE VERY FIRST MIDDLEWARE ===
 # Registered BEFORE startup_event and all other middleware.
 # When the Render free-tier backend is sleeping (cold start), it returns no
