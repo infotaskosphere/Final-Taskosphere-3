@@ -1516,10 +1516,14 @@ class InvoiceCreate(BaseModel):
     client_phone: str = ""
     client_gstin: str = ""
     client_state: str = ""
+    client_state_code: str = ""  # GST 2-digit state code, auto-derived from client_pincode
+    client_pincode: str = ""     # Client / place-of-supply PIN — drives auto CGST+SGST vs IGST
     invoice_no: Optional[str] = None   # if provided by frontend, use it (after dup-check); else auto-generate
     invoice_date: str = ""
     due_date: str = ""
     supply_state: str = ""
+    supply_state_code: str = ""  # GST 2-digit state code of the issuing company, from its own PIN
+    supply_pincode: str = ""     # Issuing company's own registered PIN code
     is_interstate: bool = False
     items: List[InvoiceItem] = []
     gst_rate: float = 18.0
