@@ -1181,6 +1181,7 @@ class ClientBase(BaseModel):
     address: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
+    pincode: Optional[str] = None  # Primary address PIN — auto-derives `state` (see backend/pincode_lookup.py)
     status: Optional[str] = "active"
     services: List[str] = Field(default_factory=list)
     dsc_details: List[ClientDSC] = Field(default_factory=list)
@@ -1225,7 +1226,7 @@ class ClientBase(BaseModel):
             nullable_fields = [
                 "email", "phone", "referred_by", "notes", "assigned_to",
                 "birthday", "date_of_incorporation", "client_type_label",
-                "address", "city", "state",
+                "address", "city", "state", "pincode",
                 "gstin", "pan", "gst_treatment", "place_of_supply",
                 "tally_ledger_name", "tally_group", "website", "msme_number",
                 "gst_address", "gst_city", "gst_state", "gst_pin",
