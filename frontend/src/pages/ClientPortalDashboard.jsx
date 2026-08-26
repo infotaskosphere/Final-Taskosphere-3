@@ -9,6 +9,18 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
+// Same department codes used on Admin → Users (a staff member's
+// `departments` field) and Admin → Contact Details (the helpline
+// directory) — kept here as a small label lookup so the codes shown on the
+// client portal (task assignee's department, Contact Us tab) read as
+// friendly names instead of raw codes like "TM" or "ACC".
+const DEPT_LABELS = {
+  GST: 'GST', IT: 'Income Tax', ACC: 'Accounts', TDS: 'TDS',
+  ROC: 'ROC / Company Law', TM: 'Trademark & IP', MSME: 'MSME',
+  FEMA: 'FEMA', DSC: 'DSC', OTHER: 'General / Other',
+};
+const deptLabel = (code) => DEPT_LABELS[code] || code;
+
 // Always resolve to the absolute backend URL — same logic as api.js and ClientPortalLogin.jsx
 let _raw = import.meta?.env?.VITE_API_URL || "https://final-taskosphere-backend.onrender.com";
 _raw = _raw.replace(/\/+$/, "");
@@ -901,6 +913,42 @@ function MessagesTab({ onUnreadChange }) {
 }
 
 
+// ── Task assignee's department + helpline (shown on each Tasks card) ──────
+// Resolves the assigned staff member's department code(s) — set by admin on
+// Users → Departments — against the admin-configured helpline directory
+// (Admin → Contact Details) and shows the matching department + number
+// right under "Assigned to". A staff member can belong to more than one
+// department; the first one with a saved phone/email wins.
+function TaskDeptContact({ departments, helpDesk }) {
+  const codes = Array.isArray(departments) ? departments : [];
+  if (codes.length === 0) return null;
+
+  const rows = helpDesk || [];
+  const match = codes
+    .map(code => rows.find(r => r.department === code))
+    .find(r => r && ((r.phone || "").trim() || (r.email || "").trim()))
+    || (codes[0] ? { department: codes[0] } : null);
+
+  if (!match) return null;
+
+  return (
+    <p className="text-xs text-gray-500 mt-0.5 flex flex-wrap items-center gap-x-1.5">
+      <span>Department:</span>
+      <span className="font-medium text-gray-700">{deptLabel(match.department)}</span>
+      {match.phone && (
+        <a href={`tel:${match.phone.replace(/[^\d+]/g, "")}`} className="text-blue-600 hover:text-blue-700 font-medium">
+          📞 {match.phone}
+        </a>
+      )}
+      {!match.phone && match.email && (
+        <a href={`mailto:${match.email}`} className="text-blue-600 hover:text-blue-700 font-medium">
+          ✉️ {match.email}
+        </a>
+      )}
+    </p>
+  );
+}
+
 // ── Contact Us Tab (Client side) ──────────────────────────────────────────
 // Renders the department-wise helpline directory configured by the admin
 // (Client Portal Setting → Department Helpline Numbers). Purely display —
@@ -917,7 +965,7 @@ function ContactTab({ helpDesk }) {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {rows.map((r, i) => (
             <div key={i} className="p-4 bg-gray-50 rounded-xl border border-gray-100 hover:border-blue-200 transition">
-              <p className="font-semibold text-gray-900 text-sm">{r.department}</p>
+              <p className="font-semibold text-gray-900 text-sm">{deptLabel(r.department)}</p>
               {r.phone && (
                 <a href={`tel:${r.phone.replace(/[^\d+]/g, "")}`} className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 mt-2 font-medium">
                   <span>📞</span> {r.phone}
@@ -1164,6 +1212,7 @@ export default function ClientPortalDashboard() {
                           {t.assigned_to_name && (
                             <p className="text-xs text-gray-500 mt-0.5">Assigned to: {t.assigned_to_name}</p>
                           )}
+                          <TaskDeptContact departments={t.assigned_to_departments} helpDesk={branding.help_desk} />
                           {t.due_date && (
                             <p className="text-xs text-gray-400 mt-1">Due: {fmtDate(t.due_date)}</p>
                           )}
