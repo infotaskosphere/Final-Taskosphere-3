@@ -29,6 +29,24 @@ import {
   Loader2, ExternalLink, Contact,
 } from 'lucide-react';
 
+// Canonical department codes — same list used on Admin → Users for each
+// staff member's `departments` field (GST, IT, ACC, TDS, ROC, TM, MSME,
+// FEMA, DSC, OTHER). Picking from this list here (instead of free text)
+// keeps the helpline directory keyed the same way, so a task's assignee
+// can be matched to their department's contact number reliably.
+const DEPARTMENTS = [
+  { value: 'GST',   label: 'GST' },
+  { value: 'IT',    label: 'Income Tax' },
+  { value: 'ACC',   label: 'Accounts' },
+  { value: 'TDS',   label: 'TDS' },
+  { value: 'ROC',   label: 'ROC / Company Law' },
+  { value: 'TM',    label: 'Trademark & IP' },
+  { value: 'MSME',  label: 'MSME' },
+  { value: 'FEMA',  label: 'FEMA' },
+  { value: 'DSC',   label: 'DSC' },
+  { value: 'OTHER', label: 'General / Other' },
+];
+
 const COLORS = {
   deepBlue:     '#0D3B66',
   mediumBlue:   '#1F6FB2',
@@ -188,7 +206,7 @@ export default function ContactDetails() {
             </div>
             <div>
               <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">Department-wise Helpline Numbers</h3>
-              <p className="text-xs text-slate-400">Shown to clients on the Client Portal's "Contact Us" tab.</p>
+              <p className="text-xs text-slate-400">Shown to clients on the Contact Us tab, and next to a task's assignee once we know their department.</p>
             </div>
           </div>
           <button
@@ -206,10 +224,20 @@ export default function ContactDetails() {
             </div>
           ) : (
             <div className="space-y-3">
-              {helpDesk.map((row, idx) => (
+              {helpDesk.map((row, idx) => {
+                const usedElsewhere = helpDesk.some((r, i) => i !== idx && r.department === row.department && row.department);
+                return (
                 <div key={idx} className={`grid grid-cols-1 sm:grid-cols-[1.2fr_1fr_1fr_0.8fr_auto] gap-2 p-3 rounded-xl border ${isDark ? 'border-slate-700 bg-slate-900/40' : 'border-slate-100 bg-slate-50'}`}>
-                  <Input value={row.department || ''} onChange={(e) => updateRow(idx, 'department', e.target.value)}
-                    placeholder="Department (e.g. Trademark & IP)" className="text-sm" />
+                  <select
+                    value={row.department || ''}
+                    onChange={(e) => updateRow(idx, 'department', e.target.value)}
+                    className={`text-sm rounded-lg border px-3 py-2 ${isDark ? 'bg-slate-800 border-slate-600 text-slate-100' : 'bg-white border-slate-200 text-slate-800'} ${usedElsewhere ? 'ring-1 ring-amber-400' : ''}`}
+                  >
+                    <option value="">Select department…</option>
+                    {DEPARTMENTS.map(d => (
+                      <option key={d.value} value={d.value}>{d.label}</option>
+                    ))}
+                  </select>
                   <Input value={row.phone || ''} onChange={(e) => updateRow(idx, 'phone', e.target.value)}
                     placeholder="Helpline number" className="text-sm" />
                   <Input value={row.email || ''} onChange={(e) => updateRow(idx, 'email', e.target.value)}
@@ -221,7 +249,8 @@ export default function ContactDetails() {
                     <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
           <div className="pt-4">
