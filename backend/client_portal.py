@@ -17,7 +17,7 @@ import asyncio
 import os
 import tempfile
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -1115,6 +1115,19 @@ class PortalSettings(BaseModel):
     # (validated at upload time) so it can live directly on the settings
     # document instead of needing separate file storage/CDN.
     logo_url: Optional[str] = None
+    # Department-wise helpline directory shown to clients on the portal's
+    # "Contact Us" tab. Each entry: {department, phone, email, hours}.
+    # Admin-editable from Client Portal Setting; publicly readable (no
+    # sensitive data) so it also appears on the pre-login screen if needed.
+    help_desk: Optional[List[Dict[str, str]]] = None
+
+
+DEFAULT_HELP_DESK = [
+    {"department": "General / Front Desk", "phone": "", "email": "", "hours": "Mon–Sat, 10:00 AM – 6:30 PM"},
+    {"department": "Trademark & IP", "phone": "", "email": "", "hours": "Mon–Sat, 10:00 AM – 6:30 PM"},
+    {"department": "Compliance & GST", "phone": "", "email": "", "hours": "Mon–Sat, 10:00 AM – 6:30 PM"},
+    {"department": "Accounts & Invoicing", "phone": "", "email": "", "hours": "Mon–Sat, 10:00 AM – 6:30 PM"},
+]
 
 
 @router.get("/settings", dependencies=[Depends(_client_portal_guard)])
@@ -1127,6 +1140,8 @@ async def get_portal_settings(
     doc = await db.portal_settings.find_one({}, {"_id": 0})
     if not doc:
         doc = PortalSettings().model_dump()
+    if not doc.get("help_desk"):
+        doc["help_desk"] = DEFAULT_HELP_DESK
     # Also resolve + attach the folder's display name/link so the UI can
     # show "MS ADVISORY... root folder" style confirmation without a
     # separate round trip.
@@ -1187,6 +1202,10 @@ async def get_public_portal_settings():
         "welcome_message": doc.get("welcome_message") or "Welcome to your client portal.",
         "logo_url": doc.get("logo_url") or None,
         "portal_status": doc.get("portal_status") or "live",
+        # Department helpline directory — safe to expose pre-login, no
+        # internal/sensitive data. Falls back to sane defaults (empty
+        # numbers) until the admin fills them in.
+        "help_desk": doc.get("help_desk") or DEFAULT_HELP_DESK,
     }
 
 
