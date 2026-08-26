@@ -823,9 +823,25 @@ async def portal_tasks(portal_user=Depends(get_current_portal_client)):
         raise HTTPException(403, "You don't have access to tasks")
     tasks = await db.tasks.find(
         {"client_id": portal_user["client_id"]},
+        # Note: "description" is intentionally excluded — internal notes on a
+        # task are not client-facing. Only the task header (title) plus
+        # status/priority/due date and who it's assigned to are exposed.
         {"_id": 0, "title": 1, "status": 1, "due_date": 1, "priority": 1,
-         "description": 1, "assigned_to": 1, "created_at": 1}
+         "assigned_to": 1, "created_at": 1}
     ).sort("created_at", -1).to_list(200)
+
+    # Resolve assigned_to -> the assignee's display name so the client can
+    # see who owns the task without exposing internal user IDs.
+    user_ids = list({t["assigned_to"] for t in tasks if t.get("assigned_to")})
+    user_map: dict = {}
+    if user_ids:
+        users = await db.users.find(
+            {"id": {"$in": user_ids}}, {"_id": 0, "id": 1, "full_name": 1}
+        ).to_list(500)
+        user_map = {u["id"]: u.get("full_name", "") for u in users}
+    for t in tasks:
+        t["assigned_to_name"] = user_map.get(t.get("assigned_to", ""), "")
+
     return tasks
 
 
