@@ -11,7 +11,7 @@ import {
   Building2, Zap, Briefcase, ShoppingBag, Landmark, BookOpen, NotebookPen,
   ScanLine, Lock, Search, Loader2,
   Wallet, CalendarOff, UserPlus, Cake,
-  Database, FolderOpen, MessagesSquare, FileBarChart2,
+  Database, FolderOpen, MessagesSquare, FileBarChart2, Phone,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -203,6 +203,7 @@ const NAV_GROUPS = [
       { path: '/task-audit',     icon: Activity,   label: 'Audit Logs',   permission: 'can_view_audit_logs'  },
       { path: '/master-data',    icon: Database,   label: 'Master Data', adminOnly: true },
       { path: '/roles',          icon: Fingerprint, label: 'Roles', adminOnly: true },
+      { path: '/contact-details', icon: Phone,     label: 'Contact Details', adminOnly: true },
       // Admin is a system-administration area, not an individually-grantable
       // permission module (see MODULE_HIERARCHY["admin"] in backend/models.py:
       // "Admin should NEVER require any permission" — role === 'admin' is
@@ -318,6 +319,7 @@ const EXTRA_PAGE_TITLES = {
   '/hr': 'HR',
   '/recruitment': 'Recruitment',
   '/admin-dashboard': 'Admin Dashboard',
+  '/contact-details': 'Contact Details',
   '/task-audit': 'Task Audit',
   '/client-portal-manager': 'Client Portal Manager',
   '/settings': 'Settings',
