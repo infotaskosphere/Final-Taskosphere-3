@@ -1116,8 +1116,8 @@ export default function ClientPortalDashboard() {
                       <div key={i} className="flex items-start justify-between p-4 bg-gray-50 rounded-xl border border-gray-100 hover:border-blue-200 transition">
                         <div className="flex-1 min-w-0">
                           <p className="font-medium text-gray-900 text-sm truncate">{t.title}</p>
-                          {t.description && (
-                            <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{t.description}</p>
+                          {t.assigned_to_name && (
+                            <p className="text-xs text-gray-500 mt-0.5">Assigned to: {t.assigned_to_name}</p>
                           )}
                           {t.due_date && (
                             <p className="text-xs text-gray-400 mt-1">Due: {fmtDate(t.due_date)}</p>
