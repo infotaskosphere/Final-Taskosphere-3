@@ -1161,6 +1161,11 @@ class PortalSettings(BaseModel):
     # Admin-editable from Client Portal Setting; publicly readable (no
     # sensitive data) so it also appears on the pre-login screen if needed.
     help_desk: Optional[List[Dict[str, str]]] = None
+    # Individually-named contacts (e.g. "Manager", "Senior Manager") added
+    # manually by admin. Each entry: {name, position, phone, email}. Shown
+    # alongside the department helpline directory on Admin -> Contact
+    # Details; not currently surfaced on the public/client-portal endpoint.
+    people_contacts: Optional[List[Dict[str, str]]] = None
 
 
 DEFAULT_HELP_DESK = [
