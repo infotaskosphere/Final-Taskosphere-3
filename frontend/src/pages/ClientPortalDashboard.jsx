@@ -283,6 +283,7 @@ const SECTION_SIGNIFICANCE = {
   "Compliance": "Tracks all statutory compliance filings applicable to you — GST returns, ITR, ROC filings, TDS, etc. — with due dates and filing status so you never miss a deadline.",
   "My Drive": "Securely access files and folders shared with you by our team — reports, workings, certificates, correspondence, and other documents stored in your dedicated Drive folder.",
   "Messages": "Direct messages from our team — important alerts such as DSC expiry notices, compliance reminders, invoice communications, and any other updates regarding your account.",
+  "Contact Us": "Direct helpline numbers for each department at our firm, so you can reach the right team quickly for urgent queries.",
 };
 
 function InfoTooltip({ text }) {
@@ -900,6 +901,47 @@ function MessagesTab({ onUnreadChange }) {
 }
 
 
+// ── Contact Us Tab (Client side) ──────────────────────────────────────────
+// Renders the department-wise helpline directory configured by the admin
+// (Client Portal Setting → Department Helpline Numbers). Purely display —
+// data arrives pre-loaded via the public-settings call the dashboard
+// already makes, so this tab needs no separate fetch/loading state.
+function ContactTab({ helpDesk }) {
+  const rows = (helpDesk || []).filter(r => (r.department || "").trim());
+
+  return (
+    <Section title="Contact Us" icon="📞" count={rows.length || undefined}>
+      {rows.length === 0 ? (
+        <Empty message="Helpline details haven't been added yet. Please check back soon." />
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {rows.map((r, i) => (
+            <div key={i} className="p-4 bg-gray-50 rounded-xl border border-gray-100 hover:border-blue-200 transition">
+              <p className="font-semibold text-gray-900 text-sm">{r.department}</p>
+              {r.phone && (
+                <a href={`tel:${r.phone.replace(/[^\d+]/g, "")}`} className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 mt-2 font-medium">
+                  <span>📞</span> {r.phone}
+                </a>
+              )}
+              {r.email && (
+                <a href={`mailto:${r.email}`} className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-blue-600 mt-1.5">
+                  <span>✉️</span> {r.email}
+                </a>
+              )}
+              {r.hours && (
+                <p className="text-xs text-gray-400 mt-1.5">{r.hours}</p>
+              )}
+              {!r.phone && !r.email && (
+                <p className="text-xs text-gray-400 mt-1.5 italic">Contact details coming soon.</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </Section>
+  );
+}
+
 export default function ClientPortalDashboard() {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
@@ -910,7 +952,7 @@ export default function ClientPortalDashboard() {
   const [error, setError] = useState("");
 
   // ── Branding (custom logo set by the admin in Client Portal Setting) ──
-  const [branding, setBranding] = useState({ portal_name: "Client Portal", logo_url: null });
+  const [branding, setBranding] = useState({ portal_name: "Client Portal", logo_url: null, help_desk: [] });
   useEffect(() => {
     portalApi().get("/client-portal/public-settings")
       .then((res) => res?.data && setBranding((b) => ({ ...b, ...res.data })))
@@ -1003,6 +1045,7 @@ export default function ClientPortalDashboard() {
     user.can_view_tasks      && { id: "tasks",      label: "Tasks",      icon: "✅" },
     { id: "messages", label: "Messages", icon: "💬", badge: unreadMessages },
     { id: "copilot",  label: "AI Search", icon: "🧠" },
+    { id: "contact",  label: "Contact Us", icon: "📞" },
   ].filter(Boolean);
 
   return (
@@ -1100,6 +1143,8 @@ export default function ClientPortalDashboard() {
 
         {activeTab === "drive" ? (
           <DriveTab user={user} />
+        ) : activeTab === "contact" ? (
+          <ContactTab helpDesk={branding.help_desk} />
         ) : loading ? (
           <div className="flex justify-center py-16">
             <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
