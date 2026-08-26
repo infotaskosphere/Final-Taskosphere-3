@@ -3,6 +3,7 @@
 
 import { useDark } from '@/hooks/useDark';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -816,7 +817,7 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
                         style={{transform:calendarOpen?'rotate(180deg)':'none',transition:'transform 0.2s'}}/>
                     </button>
                     <AnimatePresence>
-                      {calendarOpen&&(
+                      {calendarOpen&&createPortal(
                         <motion.div
                           ref={calendarRef}
                           style={{
@@ -828,7 +829,8 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
                           initial={{opacity:0,y:-8,scale:0.97}} animate={{opacity:1,y:0,scale:1}}
                           exit={{opacity:0,y:-8,scale:0.97}} transition={{duration:0.15,ease:'easeOut'}}>
                           <CalendarPicker value={dueDate} onChange={setDueDate} isDark={isDark} onClose={()=>setCalendarOpen(false)}/>
-                        </motion.div>
+                        </motion.div>,
+                        document.body
                       )}
                     </AnimatePresence>
                   </div>
