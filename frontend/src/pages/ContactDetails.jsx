@@ -54,6 +54,7 @@ const COLORS = {
 };
 
 const emptyRow = () => ({ department: '', phone: '', email: '', hours: '' });
+const emptyPersonRow = () => ({ name: '', position: '', phone: '', email: '' });
 
 export default function ContactDetails() {
   const isDark = useDark();
@@ -69,6 +70,9 @@ export default function ContactDetails() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
+  // ── Individually-named contacts (Manager, Senior Manager, etc.) ──
+  const [peopleContacts, setPeopleContacts] = useState([emptyPersonRow()]);
+
   const loadCompanies = useCallback(async () => {
     setLoadingCompanies(true);
     const list = await fetchCompanies();
@@ -82,6 +86,7 @@ export default function ContactDetails() {
       const res = await api.get('/client-portal/settings');
       const d = res.data || {};
       setHelpDesk(Array.isArray(d.help_desk) && d.help_desk.length ? d.help_desk : [emptyRow()]);
+      setPeopleContacts(Array.isArray(d.people_contacts) && d.people_contacts.length ? d.people_contacts : [emptyPersonRow()]);
     } catch {
       toast.error('Failed to load department helpline numbers');
     } finally {
@@ -98,6 +103,15 @@ export default function ContactDetails() {
   const removeRow = (idx) => setHelpDesk(rows => {
     const next = rows.filter((_, i) => i !== idx);
     return next.length ? next : [emptyRow()];
+  });
+
+  const updatePersonRow = (idx, field, value) => {
+    setPeopleContacts(rows => rows.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+  };
+  const addPersonRow = () => setPeopleContacts(rows => [...rows, emptyPersonRow()]);
+  const removePersonRow = (idx) => setPeopleContacts(rows => {
+    const next = rows.filter((_, i) => i !== idx);
+    return next.length ? next : [emptyPersonRow()];
   });
 
   const save = async () => {
