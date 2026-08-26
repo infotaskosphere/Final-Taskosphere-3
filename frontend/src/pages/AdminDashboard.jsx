@@ -1,5 +1,5 @@
 import React from 'react';
-import { Users, ShieldCheck, Activity, Settings, Database, Fingerprint, ScrollText } from 'lucide-react';
+import { Users, ShieldCheck, Activity, Settings, Database, Fingerprint, ScrollText, Phone } from 'lucide-react';
 import useDark from '@/hooks/useDark';
 import { HubBanner, LinkCard, HUB_COLORS } from '@/components/SectionHub.jsx';
 
@@ -11,6 +11,7 @@ const LINKS = [
   { path: '/master-data', icon: Database, label: 'Master Data', description: 'Departments, categories and shared lookups.', color: '#7C3AED' },
   { path: '/roles', icon: Fingerprint, label: 'Roles', description: 'Custom role definitions.', color: '#DB2777' },
   { path: '/staff-activity', icon: Activity, label: 'Activity Logs', description: 'Live staff activity feed.', color: HUB_COLORS.lightGreen },
+  { path: '/contact-details', icon: Phone, label: 'Contact Details', description: 'Company and department-wise contact numbers.', color: '#0EA5E9' },
 ];
 
 export default function AdminDashboard() {
