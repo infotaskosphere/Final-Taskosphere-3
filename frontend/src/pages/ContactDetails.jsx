@@ -26,7 +26,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   Phone, Mail, Building2, Globe, MapPin, Plus, Trash2,
-  Loader2, ExternalLink, Contact,
+  Loader2, ExternalLink, Contact, UserRound,
 } from 'lucide-react';
 
 // Canonical department codes — same list used on Admin → Users for each
@@ -122,11 +122,14 @@ export default function ContactDetails() {
       // saving the helpline directory here doesn't clobber those fields.
       const current = await api.get('/client-portal/settings');
       const cleaned = helpDesk.filter(r => (r.department || '').trim() || (r.phone || '').trim());
+      const cleanedPeople = peopleContacts.filter(r => (r.name || '').trim() || (r.position || '').trim() || (r.phone || '').trim() || (r.email || '').trim());
       await api.put('/client-portal/settings', {
         ...current.data,
         help_desk: cleaned,
+        people_contacts: cleanedPeople,
       });
       setHelpDesk(cleaned.length ? cleaned : [emptyRow()]);
+      setPeopleContacts(cleanedPeople.length ? cleanedPeople : [emptyPersonRow()]);
       setSaved(true); setTimeout(() => setSaved(false), 3000);
       toast.success('Contact details saved — now live on the client portal.');
     } catch (err) {
@@ -265,6 +268,54 @@ export default function ContactDetails() {
                 </div>
                 );
               })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Individually-named contacts (Manager, Senior Manager, etc.) ── */}
+      <div className={`rounded-2xl border overflow-hidden shadow-sm ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+        <div className={`flex items-center justify-between px-5 py-4 border-b gap-2.5 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 rounded-lg" style={{ background: `${COLORS.mediumBlue}12` }}>
+              <UserRound className="h-4 w-4" style={{ color: COLORS.mediumBlue }} />
+            </div>
+            <div>
+              <h3 className="font-semibold text-sm text-slate-800 dark:text-slate-100">Contact Persons</h3>
+              <p className="text-xs text-slate-400">Add named contacts manually — e.g. Manager, Senior Manager — with their name, position, phone and email.</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={addPersonRow}
+            className={`inline-flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg border transition ${isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+          >
+            <Plus className="h-3.5 w-3.5" /> Add Contact
+          </button>
+        </div>
+        <div className="p-5">
+          {loadingHelpDesk ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {peopleContacts.map((row, idx) => (
+                <div key={idx} className={`grid grid-cols-1 sm:grid-cols-[1fr_1fr_1fr_1fr_auto] gap-2 p-3 rounded-xl border ${isDark ? 'border-slate-700 bg-slate-900/40' : 'border-slate-100 bg-slate-50'}`}>
+                  <Input value={row.name || ''} onChange={(e) => updatePersonRow(idx, 'name', e.target.value)}
+                    placeholder="Name" className="text-sm" />
+                  <Input value={row.position || ''} onChange={(e) => updatePersonRow(idx, 'position', e.target.value)}
+                    placeholder="Position (e.g. Senior Manager)" className="text-sm" />
+                  <Input value={row.phone || ''} onChange={(e) => updatePersonRow(idx, 'phone', e.target.value)}
+                    placeholder="Phone" className="text-sm" />
+                  <Input value={row.email || ''} onChange={(e) => updatePersonRow(idx, 'email', e.target.value)}
+                    placeholder="Email (optional)" className="text-sm" />
+                  <button type="button" onClick={() => removePersonRow(idx)}
+                    className="flex items-center justify-center text-red-400 hover:text-red-600 px-2" title="Remove contact">
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
             </div>
           )}
           <div className="pt-4">
