@@ -817,6 +817,29 @@ async def update_portal_self(
     return updated
 
 
+# Tasks store their "Department" classification (Edit Task modal →
+# Classification → Department) using the lowercase codes from
+# frontend/src/pages/Tasks.jsx's DEPARTMENTS list (e.g. "roc",
+# "income_tax", "msme_smadhan"). The Contact Us helpline directory
+# (Admin → Contact Details / PortalSettings.help_desk) and each staff
+# member's User.departments tags use a different, uppercase code set
+# (e.g. "ROC", "IT", "MSME") — see ContactDetails.jsx's DEPARTMENTS list.
+# This maps the former onto the latter so a task tagged "roc" correctly
+# surfaces the "ROC" helpline entry on the Client Portal.
+TASK_CATEGORY_TO_HELPDESK_CODE = {
+    "gst": "GST",
+    "income_tax": "IT",
+    "accounts": "ACC",
+    "tds": "TDS",
+    "roc": "ROC",
+    "trademark": "TM",
+    "msme_smadhan": "MSME",
+    "fema": "FEMA",
+    "dsc": "DSC",
+    "other": "OTHER",
+}
+
+
 @router.get("/tasks")
 async def portal_tasks(portal_user=Depends(get_current_portal_client)):
     if not portal_user.get("can_view_tasks"):
@@ -826,14 +849,17 @@ async def portal_tasks(portal_user=Depends(get_current_portal_client)):
         # Note: "description" is intentionally excluded — internal notes on a
         # task are not client-facing. Only the task header (title) plus
         # status/priority/due date and who it's assigned to are exposed.
+        # "categories" IS included — that's the task's own "Department"
+        # classification set in the Edit Task modal (e.g. ROC, GST, TDS),
+        # which is what should drive the Contact Us match below, not the
+        # assignee's general department tags.
         {"_id": 0, "title": 1, "status": 1, "due_date": 1, "priority": 1,
-         "assigned_to": 1, "created_at": 1}
+         "assigned_to": 1, "categories": 1, "created_at": 1}
     ).sort("created_at", -1).to_list(200)
 
-    # Resolve assigned_to -> the assignee's display name AND their
-    # department tag(s), so the Client Portal can show which department to
-    # contact (matched against the admin-configured helpline directory —
-    # see PortalSettings.help_desk / ContactTab / TaskDeptContact below).
+    # Resolve assigned_to -> the assignee's display name. Also keep the
+    # assignee's own department tags as a fallback for tasks that were
+    # created before per-task classification existed / have no category set.
     user_ids = list({t["assigned_to"] for t in tasks if t.get("assigned_to")})
     user_map: dict = {}
     dept_map: dict = {}
@@ -846,7 +872,16 @@ async def portal_tasks(portal_user=Depends(get_current_portal_client)):
     for t in tasks:
         assignee_id = t.get("assigned_to", "")
         t["assigned_to_name"] = user_map.get(assignee_id, "")
-        t["assigned_to_departments"] = dept_map.get(assignee_id, [])
+        # Prefer the task's own Department classification (categories) —
+        # this is what's set per-task in the Edit Task modal and is what
+        # should determine which helpline shows on this specific task.
+        # Translate its lowercase task-category codes to the helpline
+        # directory's codes. Fall back to the assignee's general
+        # department tags (already in the right code set) only if the
+        # task itself has no category set.
+        task_cats = t.pop("categories", None) or []
+        mapped = [TASK_CATEGORY_TO_HELPDESK_CODE.get(c, c) for c in task_cats]
+        t["assigned_to_departments"] = mapped or dept_map.get(assignee_id, [])
 
     return tasks
 
