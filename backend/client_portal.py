@@ -830,17 +830,23 @@ async def portal_tasks(portal_user=Depends(get_current_portal_client)):
          "assigned_to": 1, "created_at": 1}
     ).sort("created_at", -1).to_list(200)
 
-    # Resolve assigned_to -> the assignee's display name so the client can
-    # see who owns the task without exposing internal user IDs.
+    # Resolve assigned_to -> the assignee's display name AND their
+    # department tag(s), so the Client Portal can show which department to
+    # contact (matched against the admin-configured helpline directory —
+    # see PortalSettings.help_desk / ContactTab / TaskDeptContact below).
     user_ids = list({t["assigned_to"] for t in tasks if t.get("assigned_to")})
     user_map: dict = {}
+    dept_map: dict = {}
     if user_ids:
         users = await db.users.find(
-            {"id": {"$in": user_ids}}, {"_id": 0, "id": 1, "full_name": 1}
+            {"id": {"$in": user_ids}}, {"_id": 0, "id": 1, "full_name": 1, "departments": 1}
         ).to_list(500)
         user_map = {u["id"]: u.get("full_name", "") for u in users}
+        dept_map = {u["id"]: (u.get("departments") or []) for u in users}
     for t in tasks:
-        t["assigned_to_name"] = user_map.get(t.get("assigned_to", ""), "")
+        assignee_id = t.get("assigned_to", "")
+        t["assigned_to_name"] = user_map.get(assignee_id, "")
+        t["assigned_to_departments"] = dept_map.get(assignee_id, [])
 
     return tasks
 
