@@ -606,7 +606,7 @@ const DashboardLayout = ({ children }) => {
       <AnimatePresence>
         {sidebarOpen && !isDesktop && (
           <motion.div
-            className="fixed inset-0 bg-black/50 z-40 lg:hidden backdrop-blur-sm"
+            className="fixed inset-0 bg-emerald-900/50 z-40 lg:hidden backdrop-blur-sm"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -1133,7 +1133,7 @@ function EnterpriseSearchModal({ isOpen, onClose, isDark }) {
 
   return (
     <div className="fixed inset-0 z-[300] flex items-start justify-center pt-[6%] px-4">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-emerald-900/60 backdrop-blur-sm" onClick={onClose} />
 
       <div className={`relative w-full max-w-3xl rounded-2xl border p-5 shadow-2xl ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}>
         <div className="flex items-center justify-between mb-4 pb-2 border-b" style={{ borderColor: isDark ? '#334155' : '#f1f5f9' }}>
@@ -1445,7 +1445,7 @@ function AICopilotDrawer({ isOpen, onClose, isDark }) {
   return (
     <div className="fixed inset-0 z-[250] flex justify-end">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute inset-0 bg-emerald-900/40" onClick={onClose} />
 
       {/* Drawer */}
       <div className={`relative w-full max-w-sm h-full flex flex-col border-l shadow-2xl ${isDark ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-800'}`}>
