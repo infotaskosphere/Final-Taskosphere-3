@@ -555,7 +555,7 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
 
   return(
     <motion.div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-      style={{background:'rgba(0,0,0,0.75)',backdropFilter:'blur(8px)'}}
+      style={{background:'rgba(6,78,59,0.75)',backdropFilter:'blur(8px)'}}
       initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} onClick={onClose}>
       <motion.div className="w-full max-w-3xl rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col"
         style={{backgroundColor:isDark?D.card:'#fff',border:isDark?`1px solid ${D.border}`:'1px solid #e2e8f0'}}
@@ -957,7 +957,7 @@ function ImportExcelModal({complianceId,complianceName,onClose,onImported,isDark
 
   return(
     <motion.div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-      style={{background:'rgba(0,0,0,0.8)',backdropFilter:'blur(8px)'}}
+      style={{background:'rgba(6,78,59,0.8)',backdropFilter:'blur(8px)'}}
       initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} onClick={onClose}>
       <motion.div className="w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col"
         style={{backgroundColor:isDark?D.card:'#fff',border:isDark?`1px solid ${D.border}`:'1px solid #e2e8f0'}}
@@ -1178,7 +1178,7 @@ function AssignClientsModal({compliance,onClose,onAssigned,isDark,allUsers=[]}){
 
   return(
     <motion.div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-      style={{background:'rgba(0,0,0,0.75)',backdropFilter:'blur(8px)'}}
+      style={{background:'rgba(6,78,59,0.75)',backdropFilter:'blur(8px)'}}
       initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} onClick={onClose}>
       <motion.div className="w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden flex flex-col"
         style={{backgroundColor:isDark?D.card:'#fff',border:isDark?`1px solid ${D.border}`:'1px solid #e2e8f0',maxHeight:'88vh'}}
@@ -2253,7 +2253,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
         <AnimatePresence>
         {commentPopup&&(
           <motion.div className="fixed inset-0 z-[9998] flex items-end sm:items-center justify-center p-4"
-            style={{background:'rgba(0,0,0,0.55)',backdropFilter:'blur(6px)'}}
+            style={{background:'rgba(6,78,59,0.55)',backdropFilter:'blur(6px)'}}
             initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
             onClick={()=>setCommentPopup(null)}>
             <motion.div className="w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col"
@@ -2313,7 +2313,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
         <AnimatePresence>
         {detailRow&&(
           <motion.div className="fixed inset-0 z-[9997] flex items-center justify-center p-4"
-            style={{background:'rgba(0,0,0,0.6)',backdropFilter:'blur(8px)'}}
+            style={{background:'rgba(6,78,59,0.6)',backdropFilter:'blur(8px)'}}
             initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
             onClick={()=>setDetailRow(null)}>
             <motion.div className="w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden"
@@ -3204,7 +3204,7 @@ function ComplianceCalendarPanel({ isDark, showAddCal, setShowAddCal }) {
         {showAddCal && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center p-4"
-            style={{ backgroundColor: 'rgba(0,0,0,0.4)' }}
+            style={{ backgroundColor: 'rgba(6,78,59,0.4)' }}
             onClick={() => setShowAddCal(false)}>
             <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
               className="w-full max-w-md rounded-2xl border shadow-2xl p-6 space-y-4"
@@ -3265,7 +3265,7 @@ function ComplianceCalendarPanel({ isDark, showAddCal, setShowAddCal }) {
         {clickedDate && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 z-[60] flex items-center justify-center p-4"
-            style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
+            style={{ backgroundColor: 'rgba(6,78,59,0.5)', backdropFilter: 'blur(4px)' }}
             onClick={() => setClickedDate(null)}>
             <motion.div
               initial={{ scale: 0.93, y: 16, opacity: 0 }}
@@ -4426,7 +4426,7 @@ export default function CompliancePage(){
       <AnimatePresence>
         {editingLinkedFee && (
           <motion.div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-            style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}
+            style={{ background: 'rgba(6,78,59,0.75)', backdropFilter: 'blur(8px)' }}
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             onClick={() => !savingLinkedFee && setEditingLinkedFee(null)}>
             <motion.div onClick={(e) => e.stopPropagation()}
