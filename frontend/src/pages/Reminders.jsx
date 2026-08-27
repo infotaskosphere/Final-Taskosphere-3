@@ -727,7 +727,7 @@ function PopupSettingsModal({ isOpen, onClose }) {
 
   return (
     <motion.div
-      className="fixed inset-0 z-[100] bg-black/40 flex items-center justify-center p-4"
+      className="fixed inset-0 z-[100] bg-emerald-900/40 flex items-center justify-center p-4"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
