@@ -76,7 +76,7 @@ function DSCPickerModal({ open, onClose, dscRegister, loadingReg, companyName, o
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-emerald-900/50 backdrop-blur-sm" onClick={onClose} />
       <div className={`relative w-full max-w-lg rounded-2xl shadow-2xl border flex flex-col max-h-[80vh] ${isDark ? "bg-slate-900 border-slate-700" : "bg-white border-slate-200"}`}>
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: isDark ? "#334155" : "#e2e8f0" }}>
