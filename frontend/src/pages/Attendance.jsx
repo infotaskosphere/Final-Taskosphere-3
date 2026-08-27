@@ -421,8 +421,8 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
   const isHalfDayHoliday = holiday?.type === 'half_day';
   const isFullHoliday = !!holiday && !isHalfDayHoliday;
   const isHalfDayLeave = dayRecord?.status === 'leave' && HALF_DAY_LEAVE_TYPES.includes(dayRecord?.leave_type);
-  const isHalfDayPresent = !!dayRecord?.is_half_day;
-  const isLate = !!dayRecord?.is_late;
+  const isHalfDayPresent = !!dayRecord?.is_half_day || dayRecord?.status === 'half_day';
+  const isLate = !!dayRecord?.is_late || dayRecord?.status === 'late';
   const isAbsent = dayRecord?.status === 'absent';
   const isLeave = dayRecord?.status === 'leave';
   const isPresent = !!dayRecord?.punch_in && !isAbsent && !isLeave;
@@ -1787,7 +1787,7 @@ function GoalSettingsModal({ goal, onSave, onClose, isDark, hoursWorkedToday, ta
 // ═══════════════════════════════════════════════════════════════════════════════
 // EDIT ATTENDANCE MODAL — Admin / permitted users can edit past attendance
 // ═══════════════════════════════════════════════════════════════════════════════
-function EditAttendanceModal({ record, isOpen, status, setStatus, note, setNote, onClose, onSave, loading, isDark }) {
+function EditAttendanceModal({ record, isOpen, status, setStatus, note, setNote, onClose, onSave, onResetPunchOut, loading, isDark }) {
   if (!isOpen || !record) return null;
   const D = isDark
     ? { bg: '#0f172a', raised: '#1e293b', border: '#334155', text: '#f1f5f9', muted: '#94a3b8' }
@@ -1869,7 +1869,19 @@ function EditAttendanceModal({ record, isOpen, status, setStatus, note, setNote,
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t" style={{ borderColor: D.border }}>
+          <div className="flex items-center justify-between gap-2 px-5 py-3.5 border-t" style={{ borderColor: D.border }}>
+            {record.punch_in && record.punch_out && (
+              <button
+                onClick={onResetPunchOut}
+                disabled={loading}
+                className="px-3 py-2 rounded-lg text-xs font-bold border transition hover:shadow-sm disabled:opacity-50"
+                style={{ borderColor: '#f59e0b55', color: '#d97706', backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb' }}
+                title="Admin-only: remove the accidental punch-out and restore the active punched-in state"
+              >
+                ↩ Restore Punch In
+              </button>
+            )}
+            <div className="flex items-center justify-end gap-2 ml-auto">
             <button
               onClick={onClose}
               className="px-4 py-2 rounded-lg text-sm font-semibold border transition hover:shadow-sm"
@@ -1886,6 +1898,7 @@ function EditAttendanceModal({ record, isOpen, status, setStatus, note, setNote,
               {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
               Save Changes
             </button>
+            </div>
           </div>
         </motion.div>
       </motion.div>
@@ -2712,6 +2725,44 @@ export default function Attendance() {
     }
   }, [editAttendanceRecord, editAttendanceStatus, editAttendanceNote, selectedUserId, isAdmin, fetchData]);
 
+  const handleAdminResetPunchOut = useCallback(async () => {
+    if (!editAttendanceRecord || !isAdmin) {
+      toast.error('Only Admin can restore a punch-out');
+      return;
+    }
+    const targetUserId = selectedUserId && selectedUserId !== 'everyone'
+      ? selectedUserId
+      : editAttendanceRecord.user_id;
+    if (!targetUserId || targetUserId === 'everyone') {
+      toast.error('Select one specific employee before restoring punch-in');
+      return;
+    }
+    if (!editAttendanceRecord.punch_in) {
+      toast.error('This record has no punch-in to restore');
+      return;
+    }
+    if (!editAttendanceRecord.punch_out) {
+      toast.info('Punch-out is already cleared');
+      return;
+    }
+    setEditAttendanceLoading(true);
+    try {
+      await api.patch('/attendance/admin-reset-punch-out', {
+        date: editAttendanceRecord.date,
+        user_id: targetUserId,
+        note: editAttendanceNote.trim() || 'Admin restored accidental punch-out',
+      });
+      toast.success('Punch-out removed — employee is back to Punch In state');
+      setShowEditAttendanceModal(false);
+      setEditAttendanceRecord(null);
+      await fetchData();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to restore punch-in');
+    } finally {
+      setEditAttendanceLoading(false);
+    }
+  }, [editAttendanceRecord, editAttendanceNote, selectedUserId, isAdmin, fetchData]);
+
   const handleEditHolidaySave = useCallback(async () => {
     if (!editName.trim() || !editDate) { toast.error('Name and date required'); return; }
     setEditLoading(true);
@@ -3392,6 +3443,7 @@ export default function Attendance() {
           setNote={setEditAttendanceNote}
           onClose={() => { setShowEditAttendanceModal(false); setEditAttendanceRecord(null); }}
           onSave={handleEditAttendanceSave}
+          onResetPunchOut={handleAdminResetPunchOut}
           loading={editAttendanceLoading}
           isDark={isDark}
         />
