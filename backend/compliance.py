@@ -1559,6 +1559,26 @@ class StandaloneGovtFeeIn(BaseModel):
     reimbursed_amount: Optional[float] = None   # defaults to amount when not set
 
 
+class StandaloneGovtFeeBatchItem(BaseModel):
+    title: str
+    category: Optional[str] = "OTHER"
+    period_label: Optional[str] = None
+    fy_year: Optional[str] = None
+    due_date: Optional[str] = None
+    payment_date: Optional[str] = None
+    amount: float = 0.0
+    srn: Optional[str] = None
+    notes: Optional[str] = None
+    status: Optional[str] = "pending"
+    reimbursed: Optional[bool] = False
+    reimbursed_amount: Optional[float] = None
+
+
+class StandaloneGovtFeeBatchIn(BaseModel):
+    client_id: str
+    payments: list[StandaloneGovtFeeBatchItem]
+
+
 class StandaloneGovtFeeUpdate(BaseModel):
     title:             Optional[str]   = None
     category:          Optional[str]   = None
@@ -1634,6 +1654,47 @@ async def create_standalone_govt_fee(
     await db.standalone_govt_fees.insert_one(dict(doc))
     doc.pop("_id", None)
     return doc
+
+
+@router.post("/standalone-govt-fees/batch")
+async def create_standalone_govt_fees_batch(
+    data: StandaloneGovtFeeBatchIn,
+    current_user: User = Depends(check_module_permission("compliance", "create")),
+):
+    """Create multiple ad-hoc government fee payments for one client in one save."""
+    if not (data.client_id or "").strip():
+        raise HTTPException(400, "client_id is required")
+    if not data.payments:
+        raise HTTPException(400, "At least one payment is required")
+
+    now = _now()
+    docs = []
+    for item in data.payments:
+        if not (item.title or "").strip():
+            raise HTTPException(400, "Title is required for every government fee")
+        docs.append({
+            "id": str(uuid.uuid4()),
+            "client_id": data.client_id,
+            "title": item.title.strip(),
+            "category": (item.category or "OTHER").upper(),
+            "period_label": item.period_label,
+            "fy_year": item.fy_year,
+            "due_date": item.due_date,
+            "payment_date": item.payment_date,
+            "amount": float(item.amount or 0),
+            "srn": (item.srn or "").strip() or None,
+            "notes": item.notes,
+            "status": item.status or "pending",
+            "is_standalone": True,
+            "reimbursed": bool(item.reimbursed) if item.reimbursed is not None else False,
+            "reimbursed_amount": float(item.reimbursed_amount) if item.reimbursed_amount is not None else None,
+            "created_at": now,
+            "updated_at": now,
+            "created_by": current_user.id,
+        })
+
+    await db.standalone_govt_fees.insert_many([dict(doc) for doc in docs])
+    return {"items": docs}
 
 
 @router.patch("/standalone-govt-fees/{fee_id}")
