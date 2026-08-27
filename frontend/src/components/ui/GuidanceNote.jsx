@@ -173,7 +173,7 @@ export function GuidanceNote({ pageKey = 'default', isDark, className = '' }) {
       )}
 
       {open && (
-        <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4" onClick={() => setOpen(false)}>
+        <div className="fixed inset-0 bg-emerald-900/40 z-[60] flex items-center justify-center p-4" onClick={() => setOpen(false)}>
           <div
             className={`w-full max-w-lg rounded-2xl shadow-2xl p-6 max-h-[85vh] overflow-y-auto ${isDark ? 'bg-slate-800' : 'bg-white'}`}
             onClick={(e) => e.stopPropagation()}
