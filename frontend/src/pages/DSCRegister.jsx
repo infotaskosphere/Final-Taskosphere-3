@@ -613,7 +613,7 @@ function UsbDscPopup({ device, isDark, onDismiss, onSaved, clients = [] }) {
           display: 'flex', alignItems: 'center',
           justifyContent: 'center',
           padding: '16px',
-          background: 'rgba(0,0,0,0.52)',
+          background: 'rgba(6,78,59,0.52)',
           backdropFilter: 'blur(5px)',
         }}
       >
@@ -2832,7 +2832,7 @@ export default function DSCRegister() {
 
       {/* ── WhatsApp Share Choice Dialog ── */}
       {shareChoiceDialog && (
-        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.60)', backdropFilter: 'blur(6px)' }}>
+        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4" style={{ background: 'rgba(6,78,59,0.60)', backdropFilter: 'blur(6px)' }}>
           <div className={`rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden ${isDark ? 'bg-slate-900 border border-slate-700' : 'bg-white border border-slate-200'}`}>
             <div className="px-6 pt-6 pb-4">
               <div className="flex items-center gap-3 mb-3">
@@ -2885,7 +2885,7 @@ export default function DSCRegister() {
 
       {/* ── WhatsApp Message Settings Dialog ── */}
       {waMsgSettingsOpen && (
-        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.60)', backdropFilter: 'blur(6px)' }}>
+        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4" style={{ background: 'rgba(6,78,59,0.60)', backdropFilter: 'blur(6px)' }}>
           <div className={`rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto ${isDark ? 'bg-slate-900 border border-slate-700' : 'bg-white border border-slate-200'}`}>
             <div className="px-6 pt-6 pb-4 flex items-center gap-3 border-b" style={{ borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }}>
               <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${isDark ? 'bg-indigo-900/40' : 'bg-indigo-50'}`}>
@@ -2992,7 +2992,7 @@ export default function DSCRegister() {
 
       {/* ── Legacy WhatsApp Phone Entry Dialog (kept for automation bulk flow) ── */}
       {waPhoneDialog && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}>
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" style={{ background: 'rgba(6,78,59,0.55)', backdropFilter: 'blur(4px)' }}>
           <div className={`rounded-2xl shadow-2xl w-full max-w-sm p-6 ${isDark ? 'bg-slate-900 border border-slate-700' : 'bg-white border border-slate-200'}`}>
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: '#25d36620' }}>
@@ -3038,7 +3038,7 @@ export default function DSCRegister() {
 
       {/* ── WhatsApp Automation Dialog ── */}
       {whatsappAutoOpen && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}>
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" style={{ background: 'rgba(6,78,59,0.55)', backdropFilter: 'blur(4px)' }}>
           <div className={`rounded-2xl shadow-2xl w-full max-w-md ${isDark ? 'bg-slate-900 border border-slate-700' : 'bg-white border border-slate-200'}`}>
             {/* Header */}
             <div className="px-6 pt-6 pb-4 flex items-center gap-3">
