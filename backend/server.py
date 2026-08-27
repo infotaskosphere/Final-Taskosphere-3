@@ -33,7 +33,6 @@ from backend.gst_portal_sync import router as gst_portal_sync_router, create_gst
 from backend.accounting_lock import router as accounting_lock_router, create_accounting_integrity_indexes
 from backend.reminders_router import router as reminders_router
 from backend.quotations import router as quotation_router
-from backend.pincode_lookup import router as pincode_router
 from backend.purchases import router as purchases_router
 from backend.attendance_identix import identix_router
 from backend.google_auth import router as google_auth_router
@@ -260,16 +259,6 @@ _last_reminder_date_cache: Optional[str] = None
 # ====================== APP ======================
 app = FastAPI(title="Taskosphere Backend", redirect_slashes=False)
 
-# ====================== HEALTH CHECK ======================
-# Used by Render and the frontend to verify that the backend
-# process is alive and accepting requests.
-@app.get("/health")
-async def health_check():
-    return {
-        "status": "ok",
-        "service": "taskosphere-backend",
-    }
-
 # === CRITICAL: CORS MUST BE THE VERY FIRST MIDDLEWARE ===
 # Registered BEFORE startup_event and all other middleware.
 # When the Render free-tier backend is sleeping (cold start), it returns no
@@ -317,7 +306,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 # =============================================================
 
 
-async def _mark_absent_for_date(target_date_str: str) -> dict:
+async def _mark_absent_for_date(target_date_str: str, target_user_id: Optional[str] = None, actor_user_id: Optional[str] = None) -> dict:
     """Core absent-marking logic. Returns a summary dict."""
     # Skip confirmed holidays
     # FIX: {"_id": 0} projection — ObjectId causes issues if doc is returned
@@ -342,16 +331,78 @@ async def _mark_absent_for_date(target_date_str: str) -> dict:
             "date": target_date_str,
         }
 
-    # Fetch all active users
+    # Targeted admin action: when target_user_id is supplied, ONLY that user
+    # is touched. This path intentionally overrides an existing present/leave
+    # record because the Admin explicitly selected "Mark Absent".
+    if target_user_id:
+        target_user = await db.users.find_one(
+            {"id": target_user_id}, {"_id": 0, "id": 1, "full_name": 1, "is_active": 1, "status": 1}
+        )
+        if not target_user:
+            raise HTTPException(status_code=404, detail="Selected employee not found")
+        if target_user.get("is_active") is False or target_user.get("status") == "inactive":
+            raise HTTPException(status_code=400, detail="Selected employee is inactive")
+
+        existing = await db.attendance.find_one(
+            {"user_id": target_user_id, "date": target_date_str}, {"_id": 0}
+        )
+        if existing and existing.get("status") == "absent":
+            return {
+                "skipped": True,
+                "reason": f"{target_user.get('full_name') or 'Employee'} is already marked absent",
+                "marked": 0,
+                "date": target_date_str,
+                "user_id": target_user_id,
+                "user_name": target_user.get("full_name"),
+                "already_recorded": 1,
+            }
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        update_fields = {
+            "status": "absent",
+            "punch_in": None,
+            "punch_out": None,
+            "duration_minutes": 0,
+            "is_late": False,
+            "punched_out_early": False,
+            "leave_reason": None,
+            "leave_type": None,
+            "is_half_day": False,
+            "auto_marked": False,
+            "auto_marked_at": None,
+            "edited_by": actor_user_id,
+            "edited_at": now_iso,
+            "admin_note": "Admin marked absent",
+        }
+        await db.attendance.update_one(
+            {"user_id": target_user_id, "date": target_date_str},
+            {"$set": update_fields},
+            upsert=True,
+        )
+        return {
+            "skipped": False,
+            "date": target_date_str,
+            "marked": 1,
+            "total_active_users": 1,
+            "already_recorded": 0,
+            "user_id": target_user_id,
+            "user_name": target_user.get("full_name"),
+            "previous_status": existing.get("status") if existing else None,
+        }
+
+    # Scheduled/bulk path — preserve the original rule of not overwriting
+    # existing present/leave/absent records.
     active_users = await db.users.find(
         {"is_active": True, "status": "active"}, {"_id": 0, "id": 1, "full_name": 1}
     ).to_list(1000)
 
     marked_count = 0
     already_recorded = 0
+    marked_user_name = None
 
     for u in active_users:
         uid = u["id"]
+        marked_user_name = u.get("full_name") or marked_user_name
         existing = await db.attendance.find_one(
             {"user_id": uid, "date": target_date_str}, {"_id": 0}
         )
@@ -366,7 +417,7 @@ async def _mark_absent_for_date(target_date_str: str) -> dict:
                 {
                     "$set": {
                         "status": "absent",
-                        "auto_marked": True,
+                        "auto_marked": not bool(target_user_id),
                         "auto_marked_at": datetime.now(timezone.utc).isoformat(),
                     }
                 },
@@ -385,14 +436,14 @@ async def _mark_absent_for_date(target_date_str: str) -> dict:
                     "is_late": False,
                     "punched_out_early": False,
                     "leave_reason": None,
-                    "auto_marked": True,
+                    "auto_marked": not bool(target_user_id),
                     "auto_marked_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
             marked_count += 1
 
     logger.info(
-        f"Absent marking for {target_date_str}: marked={marked_count}, skipped={already_recorded}"
+        f"Absent marking for {target_date_str}: marked={marked_count}, skipped={already_recorded}, target={target_user_id or 'ALL'}"
     )
     return {
         "skipped": False,
@@ -400,6 +451,8 @@ async def _mark_absent_for_date(target_date_str: str) -> dict:
         "marked": marked_count,
         "total_active_users": len(active_users),
         "already_recorded": already_recorded,
+        "user_id": target_user_id,
+        "user_name": marked_user_name if target_user_id else None,
     }
 
 
@@ -3386,6 +3439,29 @@ async def get_today_attendance(current_user: User = Depends(get_current_user)):
 @api_router.post("/attendance/apply-leave")
 async def apply_leave(data: dict, current_user: User = Depends(get_current_user)):
     try:
+        # Target user is NEVER trusted from the client without a role check.
+        # Admin may act on one selected employee; everyone else can only act
+        # on their own attendance record.
+        requested_target_user_id = data.get("target_user_id") or data.get("user_id")
+        if current_user.role == "admin":
+            target_user_id = requested_target_user_id or current_user.id
+        else:
+            if requested_target_user_id and requested_target_user_id != current_user.id:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only Admin can apply leave for another employee",
+                )
+            target_user_id = current_user.id
+
+        target_user = await db.users.find_one(
+            {"id": target_user_id},
+            {"_id": 0, "id": 1, "full_name": 1, "email": 1, "is_active": 1, "status": 1},
+        )
+        if not target_user:
+            raise HTTPException(status_code=404, detail="Selected employee not found")
+        if target_user.get("is_active") is False or target_user.get("status") == "inactive":
+            raise HTTPException(status_code=400, detail="Selected employee is inactive")
+
         from_date = datetime.fromisoformat(data["from_date"]).date()
         to_date = datetime.fromisoformat(data.get("to_date", data["from_date"])).date()
         reason = data.get("reason", "Leave Applied")
@@ -3423,7 +3499,7 @@ async def apply_leave(data: dict, current_user: User = Depends(get_current_user)
         while current <= to_date:
             current_str = current.isoformat()
             existing = await db.attendance.find_one(
-                {"user_id": current_user.id, "date": current_str}, {"_id": 0}
+                {"user_id": target_user_id, "date": current_str}, {"_id": 0}
             )
 
             if leave_type == "full_day":
@@ -3515,7 +3591,7 @@ async def apply_leave(data: dict, current_user: User = Depends(get_current_user)
                         pass
 
             await db.attendance.update_one(
-                {"user_id": current_user.id, "date": current_str},
+                {"user_id": target_user_id, "date": current_str},
                 {"$set": update_fields},
                 upsert=True,
             )
@@ -3547,24 +3623,40 @@ async def apply_leave(data: dict, current_user: User = Depends(get_current_user)
                         logger.warning(f"Half-day holiday removal failed for {current_str}: {_rd_err}")
             # ─────────────────────────────────────────────────────────────
 
+            await create_audit_log(
+                current_user,
+                action="APPLY_LEAVE_FOR_USER" if target_user_id != current_user.id else "APPLY_LEAVE",
+                module="attendance",
+                record_id=f"{target_user_id}_{current_str}",
+                old_data=existing,
+                new_data={**update_fields, "target_user_id": target_user_id},
+            )
+
             current += timedelta(days=1)
 
-        # Notify admins that a leave application was submitted.
+        # Notify admins with the actual employee for whom the leave was applied.
         try:
             span = (
                 from_date.isoformat()
                 if from_date == to_date
                 else f"{from_date.isoformat()} → {to_date.isoformat()}"
             )
+            applicant_name = target_user.get("full_name") or target_user.get("email") or target_user_id
+            admin_action = "Admin applied" if target_user_id != current_user.id else "Leave applied"
             await notify_admins_leave(
-                applicant_name=(current_user.full_name or current_user.email),
-                detail=f"{leave_type.replace('_', ' ')} · {span} · {reason}",
-                exclude_user_id=current_user.id,
+                applicant_name=applicant_name,
+                detail=f"{admin_action}: {leave_type.replace('_', ' ')} · {span} · {reason}",
+                exclude_user_id=current_user.id if target_user_id != current_user.id else None,
             )
         except Exception:
             pass
 
-        return {"message": "Leave applied successfully", "leave_type": leave_type}
+        return {
+            "message": "Leave applied successfully",
+            "leave_type": leave_type,
+            "user_id": target_user_id,
+            "user_name": target_user.get("full_name"),
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -3830,22 +3922,17 @@ async def export_attendance_pdf(
 # ─────────────────────────────────────────────────────────────────────────────
 @api_router.patch("/attendance/edit-record")
 async def edit_attendance_record(
-    data: dict, current_user: User = Depends(get_current_user)
+    data: dict, current_user: User = Depends(require_admin())
 ):
     """
-    Allow admin or users with can_edit_attendance permission to
-    manually correct an attendance record's status.
+    Admin-only manual attendance correction.
     Body: { date, user_id, status, note }
+    The selected user is the ONLY attendance record that can be changed.
     """
-    is_admin = current_user.role == "admin"
-    perms = get_user_permissions(current_user)
-    if not is_admin and not perms.get("can_edit_attendance", False):
-        raise HTTPException(
-            status_code=403, detail="Not authorized to edit attendance records"
-        )
-
     date_str = data.get("date")
-    user_id = data.get("user_id") or current_user.id
+    user_id = data.get("user_id")
+    if not user_id or user_id == "everyone":
+        raise HTTPException(status_code=400, detail="A specific employee user_id is required")
     status = data.get("status")
     note = data.get("note", "").strip()
 
@@ -3857,6 +3944,15 @@ async def edit_attendance_record(
         raise HTTPException(
             status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}"
         )
+
+    target_user = await db.users.find_one(
+        {"id": user_id},
+        {"_id": 0, "id": 1, "full_name": 1, "is_active": 1, "status": 1},
+    )
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Selected employee not found")
+    if target_user.get("is_active") is False or target_user.get("status") == "inactive":
+        raise HTTPException(status_code=400, detail="Selected employee is inactive")
 
     existing = await db.attendance.find_one(
         {"user_id": user_id, "date": date_str}, {"_id": 0}
@@ -3944,21 +4040,35 @@ async def mark_absent_bulk(
     data: dict = {}, current_user: User = Depends(require_admin())
 ):
     """
-    Manually trigger absent-marking for a given date.
-    If no date is provided, defaults to today (IST).
-    Respects the same rules as the scheduled job:
-      - Skips confirmed holidays
-      - Skips weekends
-      - Only marks users who have no present/leave/absent record
+    Admin-only manual absent marking.
+
+    - user_id supplied: mark ONLY that employee absent.
+    - user_id omitted: preserve the explicit bulk/all-active behavior for
+      backward compatibility (the frontend disables this path when a specific
+      employee is selected so an accidental universal update cannot occur).
     """
     target_date_str = (data or {}).get("date") or datetime.now(IST).date().isoformat()
+    target_user_id = (data or {}).get("user_id") or (data or {}).get("target_user_id")
+    if target_user_id == "everyone":
+        raise HTTPException(status_code=400, detail="Select one specific employee")
     try:
         datetime.strptime(target_date_str, "%Y-%m-%d")
     except ValueError:
         raise HTTPException(
             status_code=400, detail="Invalid date format. Use YYYY-MM-DD."
         )
-    result = await _mark_absent_for_date(target_date_str)
+    result = await _mark_absent_for_date(target_date_str, target_user_id=target_user_id, actor_user_id=current_user.id)
+    if target_user_id:
+        result["marked_by"] = current_user.id
+        if result.get("marked"):
+            await create_audit_log(
+                current_user,
+                action="ADMIN_MARK_ABSENT",
+                module="attendance",
+                record_id=f"{target_user_id}_{target_date_str}",
+                old_data={"status": result.get("previous_status")} if result.get("previous_status") else None,
+                new_data={"status": "absent", "user_id": target_user_id, "date": target_date_str},
+            )
     return result
 
 
@@ -11737,7 +11847,6 @@ async def update_client(
         "address",
         "city",
         "state",
-        "pincode",
         "services",
         "notes",
         "assigned_to",
@@ -14464,7 +14573,6 @@ api_router.include_router(auth_password_reset_router)
 api_router.include_router(visits_router)
 api_router.include_router(website_tracking_router)
 api_router.include_router(quotation_router)
-api_router.include_router(pincode_router)  # /api/pincode/{pincode} — PIN → State/GST-state-code lookup
 api_router.include_router(purchases_router)
 api_router.include_router(telegram_router)
 api_router.include_router(leads_router)
@@ -14808,17 +14916,14 @@ async def remove_clients_from_group(
     return updated
 
 
-# ── Client Groups direct API route safety ─────────────────────────────────────
-# The Clients page uses:
-#   GET    /api/client-groups
-#   POST   /api/client-groups
-#   PUT    /api/client-groups/{group_id}
-#   DELETE /api/client-groups/{group_id}
+# ── Client Groups direct collection route safety fix ─────────────────────────
+# The Clients page calls GET /api/client-groups.
+# Register the exact collection endpoint directly on the FastAPI app so it
+# cannot fail because of nested router mounting/order behavior.
 #
-# Register the exact routes directly on the main FastAPI app.
-# Keep the original api_router client-group routes unchanged.
+# Keep the existing api_router client-group routes unchanged.
+# This direct registration only guarantees the exact collection GET endpoint.
 
-# GET - list groups
 app.add_api_route(
     "/api/client-groups",
     list_client_groups,
@@ -14830,51 +14935,6 @@ app.add_api_route(
     "/api/client-groups/",
     list_client_groups,
     methods=["GET"],
-    include_in_schema=False,
-)
-
-# POST - create group
-app.add_api_route(
-    "/api/client-groups",
-    create_client_group,
-    methods=["POST"],
-    include_in_schema=False,
-)
-
-app.add_api_route(
-    "/api/client-groups/",
-    create_client_group,
-    methods=["POST"],
-    include_in_schema=False,
-)
-
-# PUT - update group
-app.add_api_route(
-    "/api/client-groups/{group_id}",
-    update_client_group,
-    methods=["PUT"],
-    include_in_schema=False,
-)
-
-app.add_api_route(
-    "/api/client-groups/{group_id}/",
-    update_client_group,
-    methods=["PUT"],
-    include_in_schema=False,
-)
-
-# DELETE - delete group
-app.add_api_route(
-    "/api/client-groups/{group_id}",
-    delete_client_group,
-    methods=["DELETE"],
-    include_in_schema=False,
-)
-
-app.add_api_route(
-    "/api/client-groups/{group_id}/",
-    delete_client_group,
-    methods=["DELETE"],
     include_in_schema=False,
 )
 
