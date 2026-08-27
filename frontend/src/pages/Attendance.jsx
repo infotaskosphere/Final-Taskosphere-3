@@ -583,7 +583,7 @@ function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete, isDar
 
   return (
     <motion.div
-      className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
+      className="fixed inset-0 z-[9999] bg-emerald-900/60 flex items-center justify-center p-4"
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       onClick={onClose}
     >
@@ -695,7 +695,7 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEd
 
   return (
     <motion.div
-      className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
+      className="fixed inset-0 z-[9999] bg-emerald-900/60 flex items-center justify-center p-4"
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       onClick={onClose}
     >
@@ -833,7 +833,7 @@ function AttendanceUserDetailModal({ detail, onClose, isDark, resolveLocation })
 
   return (
     <motion.div
-      className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
+      className="fixed inset-0 z-[9999] bg-emerald-900/60 flex items-center justify-center p-4"
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       onClick={onClose}
     >
@@ -994,7 +994,7 @@ function ReminderEditModal({ reminder, isOpen, onClose, onSave, isDark }) {
 
   return (
     <motion.div
-      className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
+      className="fixed inset-0 z-[9999] bg-emerald-900/60 flex items-center justify-center p-4"
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       onClick={onClose}
     >
@@ -1086,7 +1086,7 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
 
   return (
     <motion.div
-      className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
+      className="fixed inset-0 z-[9999] bg-emerald-900/60 flex items-center justify-center p-4"
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       onClick={onClose}
     >
@@ -1195,7 +1195,7 @@ function LateWorkingPopup({ onContinue, onPunchOut, onRemindLater, isDark }) {
   return (
     <motion.div
       className="fixed inset-0 z-[99998] flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}
+      style={{ background: 'rgba(6,78,59,0.75)', backdropFilter: 'blur(8px)' }}
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
     >
       <motion.div
@@ -1464,7 +1464,7 @@ function AttendanceProofModal({ onClose, onSave, isDark, existingProof = null })
         <AnimatePresence>
           {previewUrl && (
             <motion.div
-              className="absolute inset-0 z-10 flex items-center justify-center bg-black/80 rounded-3xl"
+              className="absolute inset-0 z-10 flex items-center justify-center bg-emerald-900/80 rounded-3xl"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setPreviewUrl(null)}
             >
@@ -1782,7 +1782,7 @@ function EditAttendanceModal({ record, isOpen, status, setStatus, note, setNote,
       <motion.div
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-        style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
+        style={{ backgroundColor: 'rgba(6,78,59,0.5)', backdropFilter: 'blur(4px)' }}
         onClick={onClose}
       >
         <motion.div
