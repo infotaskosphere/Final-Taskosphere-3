@@ -674,7 +674,7 @@ export default function AttendanceReportModal({
       <motion.div
         className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
         style={{
-          background: isDark ? 'rgba(0,0,0,0.88)' : 'rgba(15,23,42,0.75)',
+          background: isDark ? 'rgba(6,78,59,0.88)' : 'rgba(6,95,70,0.75)',
           backdropFilter: 'blur(12px)',
         }}
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
