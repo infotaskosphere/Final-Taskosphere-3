@@ -108,7 +108,7 @@ export default function ApplyLeaveModal({
       {open && (
         <motion.div
           className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-          style={{ background: isDark ? 'rgba(0,0,0,0.85)' : 'rgba(15,23,42,0.75)', backdropFilter: 'blur(8px)' }}
+          style={{ background: isDark ? 'rgba(6,78,59,0.85)' : 'rgba(6,95,70,0.75)', backdropFilter: 'blur(8px)' }}
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
           onClick={(e) => { if (e.target === e.currentTarget) onClose?.(); }}
         >
