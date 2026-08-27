@@ -329,7 +329,7 @@ function MediaLightbox({ url, type, filename, onClose }) {
 
   return (
     <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}
-      style={{ position:'fixed', inset:0, zIndex:9999, background:'rgba(0,0,0,0.92)',
+      style={{ position:'fixed', inset:0, zIndex:9999, background:'rgba(6,78,59,0.92)',
         display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column' }}
       onClick={onClose}>
       <button onClick={onClose} style={{ position:'absolute', top:16, right:20, background:'none', border:'none',
@@ -542,7 +542,7 @@ function ForwardModal({ msg, contacts, connectedSessions, isDark, onClose }) {
   }
 
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', zIndex:1000,
+    <div style={{ position:'fixed', inset:0, background:'rgba(6,78,59,0.5)', zIndex:1000,
       display:'flex', alignItems:'center', justifyContent:'center' }} onClick={onClose}>
       <div style={{ background:bg, borderRadius:12, width:360, maxHeight:'80vh', display:'flex',
         flexDirection:'column', overflow:'hidden', boxShadow:'0 8px 32px rgba(0,0,0,0.3)' }}
@@ -875,7 +875,7 @@ function QRModal({ sessionId, label, onClose, isDark }) {
   useEffect(() => { poll(); return () => clearTimeout(timer.current); }, [poll]);
 
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:2000, display:'flex', alignItems:'center', justifyContent:'center', backdropFilter:'blur(4px)' }} onClick={onClose}>
+    <div style={{ position:'fixed', inset:0, background:'rgba(6,78,59,0.6)', zIndex:2000, display:'flex', alignItems:'center', justifyContent:'center', backdropFilter:'blur(4px)' }} onClick={onClose}>
       <motion.div initial={{scale:0.9,opacity:0}} animate={{scale:1,opacity:1}} onClick={e=>e.stopPropagation()}
         style={{ background:card, borderRadius:20, padding:28, maxWidth:350, width:'90%', boxShadow:'0 24px 80px rgba(0,0,0,0.35)' }}>
         <div style={{ display:'flex', justifyContent:'space-between', marginBottom:18 }}>
@@ -921,7 +921,7 @@ function PairModal({ sessionId, label, onClose, isDark }) {
   const copy = () => { if(code){ navigator.clipboard.writeText(code); setCopied(true); setTimeout(()=>setCopied(false),2000); } };
 
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:2000, display:'flex', alignItems:'center', justifyContent:'center', backdropFilter:'blur(4px)' }} onClick={onClose}>
+    <div style={{ position:'fixed', inset:0, background:'rgba(6,78,59,0.6)', zIndex:2000, display:'flex', alignItems:'center', justifyContent:'center', backdropFilter:'blur(4px)' }} onClick={onClose}>
       <motion.div initial={{scale:0.9,opacity:0}} animate={{scale:1,opacity:1}} onClick={e=>e.stopPropagation()}
         style={{ background:card, borderRadius:20, padding:28, maxWidth:380, width:'90%', boxShadow:'0 24px 80px rgba(0,0,0,0.35)' }}>
         <div style={{ display:'flex', justifyContent:'space-between', marginBottom:18 }}>
@@ -997,7 +997,7 @@ function ManageModal({ isDark, sessions, onClose, onRefresh }) {
     <>
       {qrSess   && <QRModal   sessionId={qrSess.sessionId}   label={qrSess.label}   isDark={isDark} onClose={()=>{ setQrSess(null);   onRefresh(); }}/>}
       {pairSess && <PairModal sessionId={pairSess.sessionId} label={pairSess.label} isDark={isDark} onClose={()=>{ setPairSess(null); onRefresh(); }}/>}
-      <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', zIndex:1500, display:'flex', alignItems:'center', justifyContent:'center', backdropFilter:'blur(3px)' }} onClick={onClose}>
+      <div style={{ position:'fixed', inset:0, background:'rgba(6,78,59,0.55)', zIndex:1500, display:'flex', alignItems:'center', justifyContent:'center', backdropFilter:'blur(3px)' }} onClick={onClose}>
         <motion.div initial={{scale:0.93,opacity:0}} animate={{scale:1,opacity:1}} onClick={e=>e.stopPropagation()}
           style={{ background:bg, borderRadius:20, width:480, maxWidth:'95vw', maxHeight:'90vh', overflow:'hidden', display:'flex', flexDirection:'column', boxShadow:'0 24px 80px rgba(0,0,0,0.4)' }}>
           {/* Header */}
@@ -1197,7 +1197,7 @@ function StarredModal({ onClose, onOpenChat, isDark }) {
   }, []);
 
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', zIndex:1500, display:'flex', alignItems:'center', justifyContent:'center', backdropFilter:'blur(3px)' }} onClick={onClose}>
+    <div style={{ position:'fixed', inset:0, background:'rgba(6,78,59,0.55)', zIndex:1500, display:'flex', alignItems:'center', justifyContent:'center', backdropFilter:'blur(3px)' }} onClick={onClose}>
       <motion.div initial={{scale:0.93,opacity:0}} animate={{scale:1,opacity:1}} onClick={e=>e.stopPropagation()}
         style={{ background:bg, borderRadius:20, width:460, maxWidth:'95vw', maxHeight:'80vh', overflow:'hidden', display:'flex', flexDirection:'column', boxShadow:'0 24px 80px rgba(0,0,0,0.4)' }}>
         <div style={{ display:'flex', alignItems:'center', gap:10, padding:'18px 20px', borderBottom:`1px solid ${isDark?'#3b4a54':'#e9edef'}` }}>
