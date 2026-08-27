@@ -178,7 +178,7 @@ export default function DriveFolderVisibility({ portalUserId, portalUsername, on
   // ── Render ──────────────────────────────────────────────────────────────
   return (
     <div
-      className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 bg-emerald-900/50 z-50 flex items-center justify-center p-4"
       onClick={e => e.target === e.currentTarget && !dirty && onClose?.()}
     >
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col overflow-hidden">
