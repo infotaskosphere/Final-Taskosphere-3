@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import {
   IndianRupee, Save as SaveIcon, Loader2, UserPlus, X, ChevronDown,
   Upload, FileText, FileSpreadsheet, CheckCircle2, ArrowLeft,
+  Plus, Trash2, Copy, Receipt, Wallet,
 } from 'lucide-react';
 
 /**
@@ -438,6 +439,200 @@ function ClientSelect({ value, onChange, clients, onNewClient }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// A single "payment / form" row used in the multi-add flow. Everything except
+// the client is scoped to the row so several government-fee forms/payments
+// for the SAME client can be captured — and totalled — in one popup.
+// ─────────────────────────────────────────────────────────────────────────────
+let _rowSeq = 0;
+const makeEmptyRow = () => ({
+  _key:              `row-${Date.now()}-${_rowSeq++}`,
+  title:             '',
+  category:          'OTHER',
+  period_label:      '',
+  fy_year:           '',
+  due_date:          '',
+  payment_date:      '',
+  amount:            '',
+  srn:               '',
+  notes:             '',
+  status:            'pending',
+  reimbursed:        false,
+  reimbursed_amount: '',
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// One card per payment/form inside the multi-add flow. Compact but keeps every
+// field the single-row editor has (minus client — that's shared at the top).
+// ─────────────────────────────────────────────────────────────────────────────
+function GovtFeeRowCard({ row, idx, canRemove, onChange, onRemove, onDuplicate }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-50/40 p-3.5">
+      {/* Row header */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <span className="w-5 h-5 rounded-md bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">
+            {idx + 1}
+          </span>
+          <span className="text-xs font-semibold text-slate-600">Payment {idx + 1}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            title="Duplicate this payment"
+            onClick={onDuplicate}
+            className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </button>
+          {canRemove && (
+            <button
+              type="button"
+              title="Remove this payment"
+              onClick={onRemove}
+              className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-4 gap-x-3 gap-y-2.5">
+        {/* Title — full width */}
+        <div className="col-span-4">
+          <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Title / Purpose *</label>
+          <Input
+            className="mt-1 h-9 bg-white"
+            value={row.title}
+            onChange={e => onChange('title', e.target.value)}
+            placeholder="e.g. Increase in Authorised Capital — SH-7"
+          />
+        </div>
+
+        {/* Category | FY Year | Period Label | Status */}
+        <div>
+          <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Category</label>
+          <Select value={row.category} onValueChange={v => onChange('category', v)}>
+            <SelectTrigger className="mt-1 h-9 bg-white"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div>
+          <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">FY Year</label>
+          <Input
+            className="mt-1 h-9 bg-white"
+            value={row.fy_year}
+            onChange={e => onChange('fy_year', e.target.value)}
+            placeholder="2024-25"
+          />
+        </div>
+
+        <div>
+          <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Period Label</label>
+          <Input
+            className="mt-1 h-9 bg-white"
+            value={row.period_label}
+            onChange={e => onChange('period_label', e.target.value)}
+            placeholder="Q1, May, One-time"
+          />
+        </div>
+
+        <div>
+          <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Status</label>
+          <Select value={row.status} onValueChange={v => onChange('status', v)}>
+            <SelectTrigger className="mt-1 h-9 bg-white"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {STATUSES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Due Date | Payment Date | Amount | SRN */}
+        <div>
+          <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Due Date</label>
+          <Input className="mt-1 h-9 bg-white" type="date" value={row.due_date} onChange={e => onChange('due_date', e.target.value)} />
+        </div>
+
+        <div>
+          <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Payment Date</label>
+          <Input className="mt-1 h-9 bg-white" type="date" value={row.payment_date} onChange={e => onChange('payment_date', e.target.value)} />
+        </div>
+
+        <div>
+          <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Amount (₹) *</label>
+          <Input
+            className="mt-1 h-9 bg-white"
+            type="number" min="0" step="0.01"
+            value={row.amount}
+            onChange={e => onChange('amount', e.target.value)}
+            placeholder="0.00"
+          />
+        </div>
+
+        <div>
+          <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">SRN</label>
+          <Input
+            className="mt-1 h-9 bg-white font-mono"
+            value={row.srn}
+            onChange={e => onChange('srn', e.target.value)}
+            placeholder="SRN…"
+          />
+        </div>
+
+        {/* Reimbursed — full width */}
+        <div className="col-span-4">
+          <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Reimbursed by Client</label>
+          <div className="flex items-center gap-3 mt-1.5">
+            <div className="flex rounded-lg overflow-hidden border border-slate-200 bg-white">
+              {[{ v: true, l: 'Yes — Received' }, { v: false, l: 'No' }].map(opt => (
+                <button
+                  key={String(opt.v)}
+                  type="button"
+                  onClick={() => onChange('reimbursed', opt.v)}
+                  className="px-3 py-1.5 text-xs font-semibold transition-colors"
+                  style={{
+                    backgroundColor: row.reimbursed === opt.v ? (opt.v ? '#10b981' : '#94a3b8') : 'transparent',
+                    color: row.reimbursed === opt.v ? '#fff' : '#64748b',
+                  }}>
+                  {opt.l}
+                </button>
+              ))}
+            </div>
+            {row.reimbursed && (
+              <div className="flex items-center gap-2 flex-1">
+                <span className="text-xs text-slate-500">Amount (₹)</span>
+                <Input
+                  className="h-9 flex-1 bg-white"
+                  type="number" min="0" step="0.01"
+                  value={row.reimbursed_amount !== '' ? row.reimbursed_amount : (row.amount || '')}
+                  onChange={e => onChange('reimbursed_amount', e.target.value)}
+                  placeholder={row.amount || '0.00'}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Notes — full width */}
+        <div className="col-span-4">
+          <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Notes</label>
+          <Textarea
+            className="mt-1 resize-none bg-white"
+            rows={1}
+            value={row.notes}
+            onChange={e => onChange('notes', e.target.value)}
+            placeholder="Optional notes…"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main dialog
 // ─────────────────────────────────────────────────────────────────────────────
 export default function StandaloneGovtFeeDialog({
@@ -464,6 +659,7 @@ export default function StandaloneGovtFeeDialog({
     reimbursed_amount: '',
   };
   const [form,        setForm]        = useState(empty);
+  const [rows,        setRows]        = useState([makeEmptyRow()]);
   const [saving,      setSaving]      = useState(false);
   const [clients,     setClients]     = useState(propClients);
   const [showAddCli,  setShowAddCli]  = useState(false);
@@ -492,11 +688,29 @@ export default function StandaloneGovtFeeDialog({
       });
     } else {
       setForm({ ...empty, client_id: clientId || '' });
+      setRows([makeEmptyRow()]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editing, clientId]);
 
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+
+  // ── Multi-row helpers (create-mode only) ─────────────────────────────────
+  const setRow = (key, k, v) => setRows(prev => prev.map(r => (r._key === key ? { ...r, [k]: v } : r)));
+  const addRow = () => setRows(prev => [...prev, makeEmptyRow()]);
+  const duplicateRow = (key) => setRows(prev => {
+    const idx = prev.findIndex(r => r._key === key);
+    if (idx === -1) return prev;
+    const copy = { ...prev[idx], _key: `row-${Date.now()}-${_rowSeq++}`, srn: '' };
+    const next = [...prev];
+    next.splice(idx + 1, 0, copy);
+    return next;
+  });
+  const removeRow = (key) => setRows(prev => (prev.length <= 1 ? prev : prev.filter(r => r._key !== key)));
+
+  // Running totals — this is the whole point: know exactly how much to collect
+  const rowsTotalAmount     = rows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+  const rowsReimbursedTotal = rows.reduce((s, r) => s + (r.reimbursed ? (parseFloat(r.reimbursed_amount) || parseFloat(r.amount) || 0) : 0), 0);
 
   const handleClientCreated = (newClient) => {
     setClients(prev => {
@@ -513,36 +727,101 @@ export default function StandaloneGovtFeeDialog({
       toast.error('Please select a client');
       return;
     }
-    if (!form.title.trim()) {
-      toast.error('Title is required');
+
+    // ── Edit mode: single record, unchanged behaviour ──────────────────────
+    if (editing?.id) {
+      if (!form.title.trim()) {
+        toast.error('Title is required');
+        return;
+      }
+      setSaving(true);
+      try {
+        const payload = {
+          ...form,
+          amount:            parseFloat(form.amount) || 0,
+          due_date:          form.due_date     || null,
+          payment_date:      form.payment_date || null,
+          period_label:      form.period_label || null,
+          fy_year:           form.fy_year      || null,
+          srn:               form.srn          || null,
+          notes:             form.notes        || null,
+          reimbursed:        !!form.reimbursed,
+          reimbursed_amount: form.reimbursed && form.reimbursed_amount !== '' ? parseFloat(form.reimbursed_amount) || 0 : null,
+        };
+        const res = await api.patch(`/compliance/standalone-govt-fees/${editing.id}`, payload);
+        toast.success('Government fee updated');
+        onSaved && onSaved(res.data);
+        onOpenChange(false);
+      } catch (e) {
+        toast.error(e?.response?.data?.detail || 'Save failed');
+      } finally {
+        setSaving(false);
+      }
       return;
     }
-    setSaving(true);
-    try {
-      const payload = {
-        ...form,
-        amount:            parseFloat(form.amount) || 0,
-        due_date:          form.due_date     || null,
-        payment_date:      form.payment_date || null,
-        period_label:      form.period_label || null,
-        fy_year:           form.fy_year      || null,
-        srn:               form.srn          || null,
-        notes:             form.notes        || null,
-        reimbursed:        !!form.reimbursed,
-        reimbursed_amount: form.reimbursed && form.reimbursed_amount !== '' ? parseFloat(form.reimbursed_amount) || 0 : null,
-      };
-      let res;
-      if (editing?.id) {
-        res = await api.patch(`/compliance/standalone-govt-fees/${editing.id}`, payload);
-        toast.success('Government fee updated');
-      } else {
-        res = await api.post('/compliance/standalone-govt-fees', payload);
-        toast.success('Government fee added');
+
+    // ── Create mode: save every row for the same client in one go ──────────
+    const cleanRows = rows.filter(r => r.title.trim() || r.amount !== '' || r.srn.trim());
+    if (cleanRows.length === 0) {
+      toast.error('Add at least one payment / form');
+      return;
+    }
+    for (const r of cleanRows) {
+      if (!r.title.trim()) {
+        toast.error('Title / Purpose is required for every payment');
+        return;
       }
-      onSaved && onSaved(res.data);
-      onOpenChange(false);
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || 'Save failed');
+      if (!r.amount || parseFloat(r.amount) <= 0) {
+        toast.error(`Amount is required for "${r.title.trim()}"`);
+        return;
+      }
+    }
+
+    setSaving(true);
+    const clientIdToUse = lockClient ? clientId : form.client_id;
+    const saved = [];
+    const failed = [];
+    try {
+      for (const r of cleanRows) {
+        const payload = {
+          client_id:          clientIdToUse,
+          title:              r.title.trim(),
+          category:           r.category,
+          period_label:       r.period_label || null,
+          fy_year:            r.fy_year      || null,
+          due_date:           r.due_date     || null,
+          payment_date:       r.payment_date || null,
+          amount:             parseFloat(r.amount) || 0,
+          srn:                r.srn?.trim()  || null,
+          notes:              r.notes?.trim() || null,
+          status:             r.status,
+          reimbursed:         !!r.reimbursed,
+          reimbursed_amount:  r.reimbursed && r.reimbursed_amount !== '' ? parseFloat(r.reimbursed_amount) || 0 : null,
+        };
+        try {
+          const res = await api.post('/compliance/standalone-govt-fees', payload);
+          saved.push(res.data);
+        } catch (e) {
+          failed.push(r.title.trim());
+        }
+      }
+
+      if (saved.length) {
+        toast.success(
+          saved.length === 1
+            ? 'Government fee added'
+            : `${saved.length} government fees added — ₹${rowsTotalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} total`
+        );
+      }
+      if (failed.length) {
+        toast.error(`Failed to save: ${failed.join(', ')}`);
+      }
+      if (saved.length) {
+        onSaved && onSaved(saved);
+      }
+      if (!failed.length) {
+        onOpenChange(false);
+      }
     } finally {
       setSaving(false);
     }
@@ -550,7 +829,7 @@ export default function StandaloneGovtFeeDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden p-0">
+      <DialogContent className={`${editing ? 'max-w-3xl' : 'max-w-4xl'} w-full max-h-[90vh] flex flex-col overflow-hidden p-0`}>
 
         {/* ── Header ── */}
         <div className="flex items-center gap-2 px-6 pt-5 pb-3 border-b border-slate-100 shrink-0">
@@ -562,7 +841,9 @@ export default function StandaloneGovtFeeDialog({
               {editing ? 'Edit Government Fee' : 'Add Government Fee'}
             </DialogTitle>
             <DialogDescription className="text-xs text-slate-400 mt-0">
-              Record a one-off government fee (not part of a recurring compliance).
+              {editing
+                ? 'Record a one-off government fee (not part of a recurring compliance).'
+                : 'Add payments for multiple forms for this client in one go — the total below shows exactly how much to collect.'}
             </DialogDescription>
           </div>
         </div>
@@ -597,7 +878,7 @@ export default function StandaloneGovtFeeDialog({
             )}
 
             {/* ─── Rest of form hidden while adding a client ─── */}
-            {!showAddCli && (<>
+            {!showAddCli && editing && (<>
 
               {/* Title — full width */}
               <div className="col-span-4">
@@ -730,8 +1011,60 @@ export default function StandaloneGovtFeeDialog({
               </div>
 
             </>)}
+
+            {/* ─── Create mode: multiple payments / forms for the same client ─── */}
+            {!showAddCli && !editing && (
+              <div className="col-span-4 space-y-3">
+                {rows.map((row, idx) => (
+                  <GovtFeeRowCard
+                    key={row._key}
+                    row={row}
+                    idx={idx}
+                    canRemove={rows.length > 1}
+                    onChange={(k, v) => setRow(row._key, k, v)}
+                    onRemove={() => removeRow(row._key)}
+                    onDuplicate={() => duplicateRow(row._key)}
+                  />
+                ))}
+
+                <button
+                  type="button"
+                  onClick={addRow}
+                  className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold py-2.5 rounded-xl border-2 border-dashed border-blue-200 text-blue-600 hover:bg-blue-50 hover:border-blue-300 transition-colors"
+                >
+                  <Plus className="h-3.5 w-3.5" /> Add Another Payment / Form
+                </button>
+              </div>
+            )}
           </div>
         </div>
+
+        {/* ── Running totals (create mode only) — exactly how much to collect ── */}
+        {!showAddCli && !editing && (
+          <div className="flex items-center justify-between gap-4 px-6 py-2.5 border-t border-slate-100 shrink-0 bg-blue-50/50 text-xs">
+            <div className="flex items-center gap-1.5 text-slate-500 font-semibold">
+              <Receipt className="h-3.5 w-3.5" />
+              {rows.length} payment{rows.length !== 1 ? 's' : ''}
+            </div>
+            <div className="flex items-center gap-5">
+              <span className="text-slate-500">
+                Total fees: <strong className="text-slate-800">₹{rowsTotalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+              </span>
+              {rowsReimbursedTotal > 0 && (
+                <span className="text-slate-500">
+                  Reimbursed: <strong className="text-emerald-600">₹{rowsReimbursedTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                </span>
+              )}
+              <span className="flex items-center gap-1.5 text-slate-500">
+                <Wallet className="h-3.5 w-3.5" />
+                To collect from client:
+                <strong className="text-blue-700 text-sm">
+                  ₹{Math.max(0, rowsTotalAmount - rowsReimbursedTotal).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </strong>
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* ── Footer ── */}
         {!showAddCli && (
@@ -747,7 +1080,9 @@ export default function StandaloneGovtFeeDialog({
             >
               {saving
                 ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Saving…</>
-                : <><SaveIcon className="h-3.5 w-3.5 mr-1.5" />{editing ? 'Update' : 'Save'}</>}
+                : <><SaveIcon className="h-3.5 w-3.5 mr-1.5" />
+                    {editing ? 'Update' : rows.length > 1 ? `Save All (${rows.length})` : 'Save'}
+                  </>}
             </Button>
           </div>
         )}
