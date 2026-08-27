@@ -414,25 +414,55 @@ function StatCard({ icon: Icon, label, value, unit, color, trend, isDark }) {
 // CUSTOM CALENDAR DAY
 // ─────────────────────────────────────────────────────────────────────────────
 function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
-  const dateStr  = format(date, 'yyyy-MM-dd');
+  const dateStr = format(date, 'yyyy-MM-dd');
   const dayRecord = attendance[dateStr];
-  const holiday  = (Array.isArray(holidays) ? holidays : []).find(h => h.date === dateStr);
+  const holiday = (Array.isArray(holidays) ? holidays : []).find(h => h.date === dateStr);
 
-  const isHalfDayHoliday  = holiday?.type === 'half_day';
-  const isFullHoliday     = holiday && !isHalfDayHoliday;
-  const isHalfDayLeave    = dayRecord?.status === 'leave' && HALF_DAY_LEAVE_TYPES.includes(dayRecord?.leave_type);
-  const isHalfDayPresent  = !!dayRecord?.is_half_day;
+  const isHalfDayHoliday = holiday?.type === 'half_day';
+  const isFullHoliday = !!holiday && !isHalfDayHoliday;
+  const isHalfDayLeave = dayRecord?.status === 'leave' && HALF_DAY_LEAVE_TYPES.includes(dayRecord?.leave_type);
+  const isHalfDayPresent = !!dayRecord?.is_half_day;
+  const isLate = !!dayRecord?.is_late;
+  const isAbsent = dayRecord?.status === 'absent';
+  const isLeave = dayRecord?.status === 'leave';
+  const isPresent = !!dayRecord?.punch_in && !isAbsent && !isLeave;
 
   let ringColor = null, bgColor = null, isSpecial = false;
-  if (isFullHoliday)                                  { ringColor = '#1e3a8a';              bgColor = 'rgba(30, 58, 138, 0.15)';  isSpecial = true; }
-  else if (isHalfDayHoliday || isHalfDayLeave || isHalfDayPresent)
-                                                      { ringColor = ATT_COLORS.half_day.fg; bgColor = ATT_COLORS.half_day.bgDark; isSpecial = true; }
-  else if (dayRecord?.status === 'leave')             { ringColor = ATT_COLORS.absent.fg;  bgColor = `${ATT_COLORS.absent.fg}18`;  isSpecial = true; }
-  else if (dayRecord?.status === 'absent')            { ringColor = ATT_COLORS.absent.fg;  bgColor = `${ATT_COLORS.absent.fg}18`;  isSpecial = true; }
-  else if (dayRecord?.punch_in && dayRecord?.is_late) { ringColor = ATT_COLORS.late.fg;    bgColor = `${ATT_COLORS.late.fg}14`;    isSpecial = true; }
-  else if (dayRecord?.punch_in)                       { ringColor = ATT_COLORS.present.fg; bgColor = `${ATT_COLORS.present.fg}12`; }
+  if (isFullHoliday) {
+    ringColor = ATT_COLORS.holiday.fg;
+    bgColor = 'rgba(30, 58, 138, 0.15)';
+    isSpecial = true;
+  } else if (isHalfDayHoliday || isHalfDayLeave || isHalfDayPresent) {
+    ringColor = ATT_COLORS.half_day.fg;
+    bgColor = ATT_COLORS.half_day.bgDark;
+    isSpecial = true;
+  } else if (isAbsent || isLeave) {
+    ringColor = ATT_COLORS.absent.fg;
+    bgColor = `${ATT_COLORS.absent.fg}18`;
+    isSpecial = true;
+  } else if (isLate) {
+    ringColor = ATT_COLORS.late.fg;
+    bgColor = `${ATT_COLORS.late.fg}14`;
+    isSpecial = true;
+  } else if (isPresent) {
+    ringColor = ATT_COLORS.present.fg;
+    bgColor = `${ATT_COLORS.present.fg}12`;
+  }
 
   const isTodayDate = dateFnsIsToday(date);
+
+  // Build a complete hover summary instead of showing only the first matching status.
+  // This lets one date show combinations such as: Half Day + Late + Punch In/Out,
+  // or Holiday + Half Day, without hiding the other applicable information.
+  const statusLines = [];
+  if (isFullHoliday) statusLines.push({ label: `🏖 Holiday${holiday.name ? ` — ${holiday.name}` : ''}`, color: ATT_COLORS.holiday.fg });
+  if (isHalfDayHoliday) statusLines.push({ label: `🌗 Half Day${holiday.name ? ` — ${holiday.name}` : ''}`, color: ATT_COLORS.half_day.fg });
+  if (isHalfDayLeave) statusLines.push({ label: `🌗 Half Day Leave${dayRecord?.leave_reason ? ` — ${dayRecord.leave_reason}` : ''}`, color: ATT_COLORS.half_day.fg });
+  else if (isLeave) statusLines.push({ label: `🏖 On Leave${dayRecord?.leave_reason ? ` — ${dayRecord.leave_reason}` : ''}`, color: ATT_COLORS.absent.fg });
+  if (isAbsent) statusLines.push({ label: `❌ Absent${dayRecord?.auto_marked ? ' (auto-marked)' : ''}`, color: ATT_COLORS.absent.fg });
+  if (isHalfDayPresent && !isHalfDayLeave) statusLines.push({ label: '🌗 Half Day', color: ATT_COLORS.half_day.fg });
+  if (isLate) statusLines.push({ label: '⏰ Late', color: ATT_COLORS.late.fg });
+  if (isPresent && !isLate) statusLines.push({ label: '✓ Present', color: ATT_COLORS.present.fg });
 
   return (
     <Tooltip>
@@ -461,31 +491,26 @@ function CustomDay({ date, displayMonth, attendance = {}, holidays = [] }) {
           </span>
         </button>
       </TooltipTrigger>
-      <TooltipContent side="top" className="text-xs max-w-[180px]">
-        <p className="font-bold mb-1">{format(date, 'MMM d, yyyy')}</p>
-        {isHalfDayHoliday
-          ? <p className="font-medium" style={{ color: ATT_COLORS.half_day.fg }}>🌗 Half Day{holiday.name ? ` — ${holiday.name}` : ''}</p>
-          : isFullHoliday
-          ? <p className="font-medium" style={{ color: ATT_COLORS.holiday.fg }}>{holiday.name}</p>
-          : isHalfDayLeave
-          ? <p className="font-medium" style={{ color: ATT_COLORS.half_day.fg }}>🌗 Half Day Leave{dayRecord.leave_reason ? ` — ${dayRecord.leave_reason}` : ''}</p>
-          : isHalfDayPresent
-          ? <p className="font-medium" style={{ color: ATT_COLORS.half_day.fg }}>🌗 Half Day</p>
-          : dayRecord?.status === 'leave'
-            ? <p className="font-medium" style={{ color: ATT_COLORS.absent.fg }}>On Leave{dayRecord.leave_reason ? ` — ${dayRecord.leave_reason}` : ''}</p>
-          : dayRecord?.status === 'absent'
-            ? <p className="font-medium" style={{ color: ATT_COLORS.absent.fg }}>Absent{dayRecord.auto_marked ? ' (auto-marked)' : ''}</p>
-          : dayRecord?.punch_in
-            ? (<>
+      <TooltipContent side="top" className="text-xs max-w-[260px] p-3">
+        <p className="font-bold mb-1.5">{format(date, 'EEEE, MMM d, yyyy')}</p>
+        {statusLines.length > 0 ? (
+          <div className="space-y-1">
+            {statusLines.map((item, i) => (
+              <p key={`${dateStr}-status-${i}`} className="font-medium" style={{ color: item.color }}>{item.label}</p>
+            ))}
+            {dayRecord?.punch_in && (
+              <div className="pt-1 mt-1 border-t border-slate-200/70 dark:border-slate-700 space-y-0.5">
                 <p>In: {formatAttendanceTime(dayRecord.punch_in)}</p>
                 {dayRecord.punch_out && <p>Out: {formatAttendanceTime(dayRecord.punch_out)}</p>}
-                <p className="font-semibold" style={{ color: ATT_COLORS.present.fg }}>{formatDuration(dayRecord.duration_minutes)}</p>
-                {dayRecord.is_late && <p className="font-semibold" style={{ color: ATT_COLORS.late.fg }}>Late arrival</p>}
-              </>)
-          : dateFnsIsToday(date)
-            ? <p className="font-semibold" style={{ color: ATT_COLORS.late.fg }}>Not punched in yet</p>
-          : <p className="text-slate-400">No record</p>
-        }
+                <p className="font-semibold">Duration: {formatDuration(dayRecord.duration_minutes)}</p>
+              </div>
+            )}
+          </div>
+        ) : dateFnsIsToday(date) ? (
+          <p className="font-semibold" style={{ color: ATT_COLORS.late.fg }}>Not punched in yet</p>
+        ) : (
+          <p className="text-slate-400">No record</p>
+        )}
       </TooltipContent>
     </Tooltip>
   );
@@ -4727,6 +4752,18 @@ export default function Attendance() {
                     {/* Selected-date detail */}
                     <SectionCard>
                       <div className="p-0">
+                        {canEditAttendance && selectedAttendance && (
+                          <div className="flex justify-end px-4 pt-3">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openEditAttendance(selectedAttendance)}
+                              className="h-8 text-xs font-semibold text-blue-600 border-blue-200 hover:bg-blue-50 dark:text-blue-300 dark:border-blue-900 dark:hover:bg-blue-950/40"
+                            >
+                              <Edit2 className="w-3.5 h-3.5 mr-1.5" /> Edit Attendance
+                            </Button>
+                          </div>
+                        )}
                         {selectedAttendance?.status === 'absent' ? (
                           <div className="relative p-4 pl-5 rounded-xl overflow-hidden"
                             style={{ backgroundColor: isDark ? 'rgba(239,68,68,0.06)' : '#fef2f2' }}>
