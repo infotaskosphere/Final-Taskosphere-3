@@ -124,7 +124,7 @@ function EmptyState({ isDark, text, icon: Icon = Info }) {
 
 function ModalShell({ isDark, onClose, title, icon: Icon, children, wide }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-emerald-900/50 p-4" onClick={onClose}>
       <div
         onClick={(e) => e.stopPropagation()}
         className={`w-full ${wide ? 'max-w-2xl' : 'max-w-md'} max-h-[90vh] overflow-y-auto rounded-2xl p-6 ${isDark ? 'bg-slate-900 border border-slate-800' : 'bg-white'}`}
