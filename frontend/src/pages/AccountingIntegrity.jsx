@@ -110,7 +110,7 @@ function AdjustmentDrawer({ entry, accounts, isDark, onClose, onSaved }) {
   const inputCls = isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-700';
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4 overflow-y-auto">
+    <div className="fixed inset-0 bg-emerald-900/40 z-50 flex items-center justify-center p-4 overflow-y-auto">
       <div className={`w-full max-w-2xl rounded-2xl shadow-2xl p-6 my-8 ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
         <div className="flex items-center justify-between mb-1">
           <h3 className={`font-bold text-lg ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Fix this entry</h3>
