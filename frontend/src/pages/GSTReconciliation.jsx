@@ -3986,7 +3986,7 @@ const InvoiceDetailModal = ({ record, tabId, manualTradeNames, comments, onClose
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose}/>
+      <div className="absolute inset-0 bg-emerald-900/60 backdrop-blur-sm" onClick={onClose}/>
       <motion.div
         initial={{opacity:0,scale:0.96,y:12}} animate={{opacity:1,scale:1,y:0}} exit={{opacity:0,scale:0.96,y:12}}
         className="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-auto"
@@ -4886,7 +4886,7 @@ const EditSessionModal = ({ session, clients, onSave, onClose }) => {
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-[70] flex items-center justify-center p-4"
     >
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose}/>
+      <div className="absolute inset-0 bg-emerald-900/50 backdrop-blur-sm" onClick={onClose}/>
       <motion.div
         initial={{ scale: 0.96, opacity: 0, y: 8 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
@@ -5328,7 +5328,7 @@ const ITCDetailModal = ({ type, results, onClose }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose}/>
+      <div className="absolute inset-0 bg-emerald-900/50 backdrop-blur-sm" onClick={onClose}/>
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -5569,7 +5569,7 @@ const SideBySideCompare = ({ portalOnly, booksOnly, onConfirmMatch, onClose }) =
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose}/>
+      <div className="absolute inset-0 bg-emerald-900/60 backdrop-blur-sm" onClick={onClose}/>
       <motion.div
         initial={{opacity:0,scale:0.96,y:12}} animate={{opacity:1,scale:1,y:0}} exit={{opacity:0,scale:0.96,y:12}}
         className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-[97vw] max-h-[92vh] flex flex-col overflow-hidden"
@@ -7570,7 +7570,7 @@ export default function GSTReconciliation() {
         {showDateLog && (
           <motion.div
             initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}
-            className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+            className="fixed inset-0 z-[100] bg-emerald-900/60 backdrop-blur-sm flex items-center justify-center p-4"
             onClick={() => setShowDateLog(false)}
           >
             <motion.div
@@ -7667,7 +7667,7 @@ export default function GSTReconciliation() {
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[60] flex items-center justify-center p-4"
           >
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !snapshotSaving && setSnapshotPrompt(null)}/>
+            <div className="absolute inset-0 bg-emerald-900/60 backdrop-blur-sm" onClick={() => !snapshotSaving && setSnapshotPrompt(null)}/>
             <motion.div
               initial={{ scale: 0.95, opacity: 0, y: 10 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
