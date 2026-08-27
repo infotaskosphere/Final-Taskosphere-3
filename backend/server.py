@@ -3596,32 +3596,11 @@ async def apply_leave(data: dict, current_user: User = Depends(get_current_user)
                 upsert=True,
             )
 
-            # ── Half-Day ↔ Holiday sync ───────────────────────────────────
-            # When a half-day leave is applied, add (or confirm) a 'half_day'
-            # entry in the holidays collection so it is visible on the
-            # Holiday Card and Attendance Calendar.
-            # When a non-half-day leave overrides a previous half-day for the
-            # same date, remove any auto-created 'half_day' holiday entry.
-            if leave_type in ("half_day_morning", "half_day_afternoon"):
-                try:
-                    await _upsert_half_day_holiday(current_str)
-                except Exception as _hd_err:
-                    logger.warning(f"Half-day holiday sync failed for {current_str}: {_hd_err}")
-            elif leave_type in ("full_day", "early_leave"):
-                # Only remove if the existing attendance was a half-day (i.e.
-                # this call is replacing a half-day with a different leave type).
-                prev_was_half_day = bool(
-                    existing and (
-                        existing.get("is_half_day")
-                        or existing.get("leave_type") in ("half_day_morning", "half_day_afternoon")
-                    )
-                )
-                if prev_was_half_day:
-                    try:
-                        await _remove_half_day_holiday(current_str)
-                    except Exception as _rd_err:
-                        logger.warning(f"Half-day holiday removal failed for {current_str}: {_rd_err}")
-            # ─────────────────────────────────────────────────────────────
+            # IMPORTANT: Do NOT create a global holidays collection entry for
+            # employee-specific half-day leave.  A holiday document is global
+            # for a date, so doing that would incorrectly make every employee
+            # appear to have a half-day.  The attendance record above is the
+            # authoritative per-user source of truth.
 
             await create_audit_log(
                 current_user,
@@ -3966,20 +3945,37 @@ async def edit_attendance_record(
         "auto_marked": False,
     }
 
-    # Status-specific adjustments
-    if status == "absent":
+    # Status-specific adjustments.  Explicitly clear mutually-exclusive
+    # flags so an Admin can safely reverse Half Day → Present/Absent/Leave.
+    if status == "present":
+        update_fields["is_half_day"] = False
+        update_fields["leave_type"] = None
+        update_fields["leave_reason"] = None
+        update_fields["is_early_leave"] = False
+        update_fields["early_leave_time"] = None
+    elif status == "absent":
         update_fields["punch_in"] = None
         update_fields["punch_out"] = None
         update_fields["duration_minutes"] = 0
         update_fields["is_half_day"] = False
+        update_fields["leave_type"] = None
+        update_fields["leave_reason"] = None
+        update_fields["is_early_leave"] = False
+        update_fields["early_leave_time"] = None
     elif status == "leave":
         update_fields["punch_in"] = None
         update_fields["punch_out"] = None
         update_fields["duration_minutes"] = 0
         update_fields["leave_reason"] = note or "Admin marked leave"
+        update_fields["leave_type"] = "full_day"
         update_fields["is_half_day"] = False
+        update_fields["is_early_leave"] = False
+        update_fields["early_leave_time"] = None
     elif status == "half_day":
         update_fields["is_half_day"] = True
+        update_fields["leave_type"] = None
+        update_fields["is_early_leave"] = False
+        update_fields["early_leave_time"] = None
     elif status == "late":
         update_fields["is_late"] = True
     elif status == "wfh":
@@ -3989,29 +3985,10 @@ async def edit_attendance_record(
         {"user_id": user_id, "date": date_str}, {"$set": update_fields}, upsert=True
     )
 
-    # ── Half-Day ↔ Holiday sync ───────────────────────────────────────────
-    # When admin sets status='half_day', upsert a half_day holiday entry so
-    # it appears on the Holiday Card and Attendance Calendar.
-    # When admin overrides a previous half_day with another status, remove
-    # the auto-created half_day holiday entry.
-    prev_was_half_day = bool(
-        existing and (
-            existing.get("is_half_day")
-            or existing.get("status") == "half_day"
-            or existing.get("leave_type") in ("half_day_morning", "half_day_afternoon")
-        )
-    )
-    if status == "half_day":
-        try:
-            await _upsert_half_day_holiday(date_str)
-        except Exception as _hd_err:
-            logger.warning(f"Half-day holiday sync (edit-record) failed for {date_str}: {_hd_err}")
-    elif prev_was_half_day:
-        try:
-            await _remove_half_day_holiday(date_str)
-        except Exception as _rd_err:
-            logger.warning(f"Half-day holiday removal (edit-record) failed for {date_str}: {_rd_err}")
-    # ─────────────────────────────────────────────────────────────────────
+    # IMPORTANT: Admin-marked Half Day is employee-specific.  Do NOT create
+    # or remove a global holidays document here.  The attendance record above
+    # is scoped by {user_id, date}, so changing Employee A cannot affect
+    # Employee B on the same date.
 
     await create_audit_log(
         current_user,
@@ -4027,6 +4004,86 @@ async def edit_attendance_record(
         "date": date_str,
         "user_id": user_id,
         "status": status,
+    }
+
+
+@api_router.patch("/attendance/admin-reset-punch-out")
+async def admin_reset_punch_out(
+    data: dict, current_user: User = Depends(require_admin())
+):
+    """
+    Admin-only correction for an accidental punch-out.
+
+    This restores the selected employee's day to an active punched-in state:
+      - keeps the original punch_in
+      - clears punch_out and punch-out metadata
+      - resets duration/overtime/early-out values
+
+    Body: {"date": "YYYY-MM-DD", "user_id": "...", "note": "..."}
+    The operation is strictly scoped to {user_id, date}.
+    """
+    date_str = data.get("date")
+    user_id = data.get("user_id")
+    note = (data.get("note") or "").strip()
+
+    if not date_str or not user_id or user_id == "everyone":
+        raise HTTPException(status_code=400, detail="Specific employee and date are required")
+
+    target_user = await db.users.find_one(
+        {"id": user_id},
+        {"_id": 0, "id": 1, "full_name": 1, "is_active": 1, "status": 1},
+    )
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Selected employee not found")
+    if target_user.get("is_active") is False or target_user.get("status") == "inactive":
+        raise HTTPException(status_code=400, detail="Selected employee is inactive")
+
+    existing = await db.attendance.find_one(
+        {"user_id": user_id, "date": date_str}, {"_id": 0}
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Attendance record not found")
+    if not existing.get("punch_in"):
+        raise HTTPException(status_code=400, detail="Employee has no punch-in record to restore")
+    if not existing.get("punch_out"):
+        raise HTTPException(status_code=400, detail="Punch-out is already cleared")
+
+    update_fields = {
+        "punch_out": None,
+        "punch_out_location": None,
+        "duration_minutes": 0,
+        "punched_out_early": False,
+        "overtime_minutes": 0,
+        "edited_by": current_user.id,
+        "edited_at": datetime.now(timezone.utc).isoformat(),
+        "admin_note": note or "Admin restored accidental punch-out",
+        "auto_marked": False,
+    }
+
+    await db.attendance.update_one(
+        {"user_id": user_id, "date": date_str},
+        {"$set": update_fields},
+    )
+
+    await create_audit_log(
+        current_user,
+        action="ADMIN_RESET_PUNCH_OUT",
+        module="attendance",
+        record_id=f"{user_id}_{date_str}",
+        old_data={
+            "punch_in": existing.get("punch_in"),
+            "punch_out": existing.get("punch_out"),
+            "duration_minutes": existing.get("duration_minutes", 0),
+        },
+        new_data=update_fields,
+    )
+
+    return {
+        "message": f"Punch-out restored to active punch-in for {target_user.get('full_name') or user_id}",
+        "date": date_str,
+        "user_id": user_id,
+        "punch_in": existing.get("punch_in"),
+        "punch_out": None,
     }
 
 
