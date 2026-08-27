@@ -84,8 +84,8 @@ const fmtDate  = (s,f='dd MMM yyyy')=>{const d=safeDate(s);return d?format(d,f):
 // ── GovtFeeRow: isolated component so a single bad record never blanks the table ──
 function GovtFeeRow({ fee, idx, govtFeesSubTab, isDark, canManage, onEdit, onDelete }) {
   try {
-    const colsAll    = 'minmax(180px,1.6fr) minmax(140px,1.3fr) 96px 70px 110px 96px minmax(130px,1fr) 80px 92px';
-    const colsDirect = 'minmax(200px,1.8fr) minmax(160px,1.4fr) 96px 70px 110px 96px minmax(150px,1.1fr) 92px';
+    const colsAll    = 'minmax(180px,1.55fr) minmax(140px,1.25fr) 92px 68px 104px 92px minmax(120px,1fr) 112px 78px 92px';
+    const colsDirect = 'minmax(190px,1.7fr) minmax(150px,1.35fr) 92px 68px 104px 92px minmax(135px,1.05fr) 112px 92px';
     const gridCols   = govtFeesSubTab === 'all' ? colsAll : colsDirect;
     const isLinked   = fee._source === 'linked';
 
@@ -148,6 +148,18 @@ function GovtFeeRow({ fee, idx, govtFeesSubTab, isDark, canManage, onEdit, onDel
         <div className="min-w-0">
           <p className="font-bold whitespace-nowrap">&#8377; {Number(fee.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
           <p className="text-[11px] font-mono truncate" title={fee.srn || ''} style={{ color: isDark ? D.dimmer : '#94a3b8' }}>{fee.srn || '—'}</p>
+        </div>
+
+        {/* Fees Reimbursed */}
+        <div className="min-w-0">
+          {fee.reimbursed ? (
+            <div>
+              <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Yes</span>
+              <p className="text-[10px] font-semibold mt-1 text-emerald-600 whitespace-nowrap">₹ {Number(fee.reimbursed_amount ?? fee.amount ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+            </div>
+          ) : (
+            <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-slate-50 text-slate-500 border border-slate-200">No</span>
+          )}
         </div>
 
         {/* Type badge (All Payments tab only) */}
@@ -3487,6 +3499,8 @@ export default function CompliancePage(){
                 srn: a.govt_fees_srn || '',
                 notes: a.govt_fees_notes || '',
                 payment_date: a.payment_date || a.paid_on || null,
+                reimbursed: !!a.reimbursed,
+                reimbursed_amount: a.reimbursed_amount ?? null,
                 _source: 'linked',
               });
             }
@@ -3648,7 +3662,7 @@ export default function CompliancePage(){
     if (!activeGovtFeesList.length) { toast.error('No government fee payments to export'); return; }
     const dateText = (d) => d ? format(parseISO(String(d).slice(0, 10)), 'MMM d, yyyy') : '—';
     const statusText = (s) => String(s || '').toLowerCase() === 'paid' ? 'Paid' : 'Unpaid';
-    const headers = ['#', 'Client', 'Title', 'Category', 'FY Year', 'Due Date', 'Status', 'Payment Date', 'Amount (₹)', 'SRN', 'Type', 'Details'];
+    const headers = ['#', 'Client', 'Title', 'Category', 'FY Year', 'Due Date', 'Status', 'Payment Date', 'Amount (₹)', 'Fees Reimbursed (₹)', 'SRN', 'Type', 'Details'];
     const rows = activeGovtFeesList.map((fee, i) => [
       i + 1,
       fee.client_name || '',
@@ -3659,6 +3673,7 @@ export default function CompliancePage(){
       statusText(fee.status),
       dateText(fee.payment_date || fee.paid_on || fee.paid_at),
       Number(fee.amount || 0),
+      fee.reimbursed ? Number(fee.reimbursed_amount ?? fee.amount ?? 0) : 0,
       fee.srn || '',
       fee._source === 'linked' ? 'Compliance-Linked' : 'Direct',
       fee.notes || '',
@@ -3667,7 +3682,7 @@ export default function CompliancePage(){
     if (kind === 'excel') {
       const XLSX = await getXLSX();
       const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-      ws['!cols'] = [{wch:5},{wch:30},{wch:28},{wch:16},{wch:12},{wch:14},{wch:12},{wch:14},{wch:14},{wch:18},{wch:32}];
+      ws['!cols'] = [{wch:5},{wch:30},{wch:28},{wch:16},{wch:12},{wch:14},{wch:12},{wch:14},{wch:14},{wch:18},{wch:18},{wch:18},{wch:32}];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Govt Fees');
       XLSX.writeFile(wb, `${fileName}.xlsx`);
@@ -4251,12 +4266,12 @@ export default function CompliancePage(){
                       <div className="grid px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider border-b"
                         style={{
                           gridTemplateColumns: govtFeesSubTab==='all'
-                            ? 'minmax(180px,1.6fr) minmax(140px,1.3fr) 96px 70px 110px 96px minmax(130px,1fr) 80px 92px'
-                            : 'minmax(200px,1.8fr) minmax(160px,1.4fr) 96px 70px 110px 96px minmax(150px,1.1fr) 92px',
+                            ? 'minmax(180px,1.55fr) minmax(140px,1.25fr) 92px 68px 104px 92px minmax(120px,1fr) 112px 78px 92px'
+                            : 'minmax(190px,1.7fr) minmax(150px,1.35fr) 92px 68px 104px 92px minmax(135px,1.05fr) 112px 92px',
                           backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
                         <div>Title</div><div>Client</div><div>Category</div>
                         <div>FY</div><div>Due Date</div><div>Status</div>
-                        <div>Amount / SRN</div>
+                        <div>Amount / SRN</div><div>Fees Reimbursed</div>
                         {govtFeesSubTab==='all' && <div>Type</div>}
                         <div className="text-right pr-1">Actions</div>
                       </div>
@@ -4301,12 +4316,17 @@ export default function CompliancePage(){
                             </span>
                           </div>
                         ) : <div/>}
-                        <p className="text-sm">
-                          <span style={{color:isDark?D.dimmer:'#64748b'}} className="mr-2">Total:</span>
-                          <span className="font-bold" style={{color:isDark?D.text:'#0f172a'}}>
-                            ₹ {activeGovtFeesList.reduce((s,f)=>s+(f.amount||0),0).toLocaleString('en-IN',{minimumFractionDigits:2})}
-                          </span>
-                        </p>
+                        {(() => {
+                          const total = activeGovtFeesList.reduce((s,f)=>s+(f.amount||0),0);
+                          const reimbursed = activeGovtFeesList.filter(f => f.reimbursed).reduce((s,f)=>s+(f.reimbursed_amount ?? f.amount ?? 0),0);
+                          return (
+                            <div className="flex items-center gap-4 text-xs">
+                              <p><span style={{color:isDark?D.dimmer:'#64748b'}} className="mr-1.5">Total:</span><strong style={{color:isDark?D.text:'#0f172a'}}>₹ {total.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></p>
+                              <p><span style={{color:isDark?D.dimmer:'#64748b'}} className="mr-1.5">Reimbursed:</span><strong className="text-emerald-600">₹ {reimbursed.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></p>
+                              <p><span style={{color:isDark?D.dimmer:'#64748b'}} className="mr-1.5">To Collect:</span><strong style={{color:isDark?D.text:'#0f172a'}}>₹ {Math.max(0,total-reimbursed).toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></p>
+                            </div>
+                          );
+                        })()}
                       </div>
                     </>
                   )}
