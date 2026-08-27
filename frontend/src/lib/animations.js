@@ -4,11 +4,23 @@
 // intentionally remain independent so hover, tap, modal, and status feedback
 // are not flattened into the page transition.
 
+// NOTE: This wrapper sits directly around every routed page (see
+// PageTransition.jsx). It must never animate `transform`-producing
+// properties (x, y, scale, rotate) or `filter` on itself: Framer Motion
+// applies those as inline `transform`/`filter` CSS, and ANY transform or
+// filter on an ancestor creates a new CSS "containing block" for descendant
+// `position: fixed` elements. That silently breaks every full-screen
+// modal/popup rendered inside a page - instead of centering against the
+// real browser viewport, they end up centering against this wrapper's full
+// (often much taller than the screen) content box, which is what made
+// pop-ups appear to open "below the fold" and require scrolling down to
+// see them. Keep this to opacity-only so it never becomes a containing
+// block.
 export const pageTransition = {
-  initial: { opacity: 0, y: 10, scale: 0.992, filter: "blur(2px)" },
-  animate: { opacity: 1, y: 0, scale: 1, filter: "blur(0px)" },
-  exit: { opacity: 0, y: -6, scale: 0.996, filter: "blur(1px)" },
-  transition: { duration: 0.34, ease: [0.22, 1, 0.36, 1] },
+  initial: { opacity: 0 },
+  animate: { opacity: 1 },
+  exit: { opacity: 0 },
+  transition: { duration: 0.22, ease: [0.22, 1, 0.36, 1] },
 };
 
 /**
@@ -46,13 +58,13 @@ export const itemVariants = {
  * Page-level fade-in (good for full page wrappers or main content sections)
  */
 export const pageFadeVariants = {
-  hidden: { opacity: 0, y: 10, scale: 0.992, filter: "blur(2px)" },
+  hidden: { opacity: 0 },
   visible: {
-    opacity: 1, y: 0, scale: 1, filter: "blur(0px)",
+    opacity: 1,
     transition: { duration: 0.34, ease: [0.22, 1, 0.36, 1] },
   },
   exit: {
-    opacity: 0, y: -6, scale: 0.996, filter: "blur(1px)",
+    opacity: 0,
     transition: { duration: 0.24, ease: [0.4, 0, 1, 1] },
   },
 };
