@@ -583,7 +583,7 @@ function HolidayDetailPopup({ holiday, isAdmin, onClose, onEdit, onDelete, isDar
 
   return (
     <motion.div
-      className="fixed inset-0 z-[9999] bg-emerald-900/60 flex items-center justify-center p-4"
+      className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       onClick={onClose}
     >
@@ -695,7 +695,7 @@ function ReminderDetailPopup({ reminder, isViewingOther, onClose, onDelete, onEd
 
   return (
     <motion.div
-      className="fixed inset-0 z-[9999] bg-emerald-900/60 flex items-center justify-center p-4"
+      className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       onClick={onClose}
     >
@@ -833,7 +833,7 @@ function AttendanceUserDetailModal({ detail, onClose, isDark, resolveLocation })
 
   return (
     <motion.div
-      className="fixed inset-0 z-[9999] bg-emerald-900/60 flex items-center justify-center p-4"
+      className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       onClick={onClose}
     >
@@ -994,7 +994,7 @@ function ReminderEditModal({ reminder, isOpen, onClose, onSave, isDark }) {
 
   return (
     <motion.div
-      className="fixed inset-0 z-[9999] bg-emerald-900/60 flex items-center justify-center p-4"
+      className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       onClick={onClose}
     >
@@ -1086,7 +1086,7 @@ function ReminderCalendarModal({ reminders, onClose, onClickReminder, currentMon
 
   return (
     <motion.div
-      className="fixed inset-0 z-[9999] bg-emerald-900/60 flex items-center justify-center p-4"
+      className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       onClick={onClose}
     >
@@ -1195,7 +1195,7 @@ function LateWorkingPopup({ onContinue, onPunchOut, onRemindLater, isDark }) {
   return (
     <motion.div
       className="fixed inset-0 z-[99998] flex items-center justify-center p-4"
-      style={{ background: 'rgba(6,78,59,0.75)', backdropFilter: 'blur(8px)' }}
+      style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
     >
       <motion.div
@@ -1310,7 +1310,7 @@ function AttendanceProofModal({ onClose, onSave, isDark, existingProof = null })
 
   return (
     <motion.div
-      className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+      className="fixed inset-0 z-[9999] flex items-start justify-center p-3 sm:p-4 pt-4 sm:pt-6 overflow-y-auto"
       style={{ background: isDark ? 'rgba(0,0,0,0.85)' : 'rgba(15,23,42,0.75)', backdropFilter: 'blur(8px)' }}
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       onClick={onClose}
@@ -1464,7 +1464,7 @@ function AttendanceProofModal({ onClose, onSave, isDark, existingProof = null })
         <AnimatePresence>
           {previewUrl && (
             <motion.div
-              className="absolute inset-0 z-10 flex items-center justify-center bg-emerald-900/80 rounded-3xl"
+              className="absolute inset-0 z-10 flex items-center justify-center bg-black/80 rounded-3xl"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setPreviewUrl(null)}
             >
@@ -1782,7 +1782,7 @@ function EditAttendanceModal({ record, isOpen, status, setStatus, note, setNote,
       <motion.div
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-        style={{ backgroundColor: 'rgba(6,78,59,0.5)', backdropFilter: 'blur(4px)' }}
+        style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
         onClick={onClose}
       >
         <motion.div
@@ -1873,7 +1873,7 @@ export default function Attendance() {
   const isDark = useDark();
   const isAdmin         = user?.role === 'admin';
   const canViewRankings = hasPermission('can_view_staff_rankings');
-  const canEditAttendance = isAdmin || hasPermission('can_edit_attendance');
+  const canEditAttendance = isAdmin;
 
   // ── Cross-visibility ───────────────────────────────────────────────────────
   // Cross-visibility is purely explicit — TEAM = CROSS VISIBILITY ON USER.
@@ -2573,8 +2573,27 @@ export default function Attendance() {
     if (leaveType === 'early_leave' && !earlyLeaveTime) {
       toast.error('Please specify your early departure time'); return;
     }
+
+    // Attendance management is target-specific. Only Admin may apply leave
+    // for another employee. Non-admin users are always forced to themselves
+    // by the backend and are blocked here if they are merely viewing someone else.
+    if (!isAdmin && isViewingOther) {
+      toast.error('Only Admin can apply leave for another employee');
+      return;
+    }
+    if (isAdmin && selectedUserId === 'everyone') {
+      toast.error('Select one specific employee before applying leave');
+      return;
+    }
+
     const isPartialDay = leaveType !== 'full_day'; // half_day + early_leave are partial
     const effectiveTo = isPartialDay ? leaveFrom : (leaveTo || leaveFrom);
+    const targetUserId = isAdmin ? (selectedUserId || user?.id) : user?.id;
+    if (!targetUserId) {
+      toast.error('Unable to determine the employee for this leave request');
+      return;
+    }
+
     try {
       await api.post('/attendance/apply-leave', {
         from_date:        format(leaveFrom, 'yyyy-MM-dd'),
@@ -2582,14 +2601,20 @@ export default function Attendance() {
         reason:           leaveReason.trim(),
         leave_type:       leaveType,
         early_leave_time: leaveType === 'early_leave' ? earlyLeaveTime : undefined,
+        target_user_id:   targetUserId,
       });
-      toast.success('Leave request submitted');
+      const targetName = isAdmin
+        ? (allUsers.find(u => u.id === targetUserId)?.full_name || user?.full_name || 'employee')
+        : 'yourself';
+      toast.success(`Leave applied for ${targetName}`);
       setShowLeaveForm(false);
       setLeaveFrom(null); setLeaveTo(null); setLeaveReason('');
       setLeaveType('full_day'); setEarlyLeaveTime('');
       await fetchData();
-    } catch { toast.error('Failed to submit leave request'); }
-  }, [leaveFrom, leaveTo, leaveReason, leaveType, earlyLeaveTime, fetchData]);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to submit leave request');
+    }
+  }, [leaveFrom, leaveTo, leaveReason, leaveType, earlyLeaveTime, fetchData, isAdmin, isViewingOther, selectedUserId, user?.id, user?.full_name, allUsers]);
 
   // ── Holidays ───────────────────────────────────────────────────────────────
   const handleAddHolidays = useCallback(async () => {
@@ -2631,11 +2656,22 @@ export default function Attendance() {
 
   const handleEditAttendanceSave = useCallback(async () => {
     if (!editAttendanceRecord) return;
+    if (!isAdmin) {
+      toast.error('Only Admin can edit attendance records');
+      return;
+    }
+    const targetUserId = selectedUserId && selectedUserId !== 'everyone'
+      ? selectedUserId
+      : editAttendanceRecord.user_id;
+    if (!targetUserId || targetUserId === 'everyone') {
+      toast.error('Select one specific employee before editing attendance');
+      return;
+    }
     setEditAttendanceLoading(true);
     try {
       const payload = {
         date: editAttendanceRecord.date,
-        user_id: editAttendanceRecord.user_id || user?.id,
+        user_id: targetUserId,
         status: editAttendanceStatus,
         note: editAttendanceNote.trim(),
       };
@@ -2649,7 +2685,7 @@ export default function Attendance() {
     } finally {
       setEditAttendanceLoading(false);
     }
-  }, [editAttendanceRecord, editAttendanceStatus, editAttendanceNote, user?.id, fetchData]);
+  }, [editAttendanceRecord, editAttendanceStatus, editAttendanceNote, selectedUserId, isAdmin, fetchData]);
 
   const handleEditHolidaySave = useCallback(async () => {
     if (!editName.trim() || !editDate) { toast.error('Name and date required'); return; }
@@ -2677,16 +2713,28 @@ export default function Attendance() {
   }, [fetchData]);
 
   const handleMarkAbsentBulk = useCallback(async (targetDate = null) => {
+    if (!isAdmin) {
+      toast.error('Only Admin can mark another employee absent');
+      return;
+    }
     setAbsentLoading(true);
     try {
-      const body = targetDate ? { date: targetDate } : {};
+      const body = {
+        ...(targetDate ? { date: targetDate } : {}),
+        ...(selectedUserId && selectedUserId !== 'everyone' ? { user_id: selectedUserId } : {}),
+      };
       const res  = await api.post('/attendance/mark-absent-bulk', body);
-      const { marked, skipped, reason, date: markedDate } = res.data;
-      if (skipped) { toast.info(`Skipped: ${reason}`); }
-      else { toast.success(`Absent marked for ${markedDate}: ${marked} user(s)`); await fetchData(); }
+      const { marked, skipped, reason, date: markedDate, user_name: markedUserName } = res.data;
+      if (skipped) {
+        toast.info(`Skipped: ${reason}`);
+      } else {
+        const scopeLabel = markedUserName ? `${markedUserName}` : (selectedUserId === 'everyone' ? 'all selected users' : 'selected employee');
+        toast.success(`Absent marked for ${scopeLabel} on ${markedDate}: ${marked}`);
+        await fetchData();
+      }
     } catch (e) { toast.error(e?.response?.data?.detail || 'Failed to mark absent'); }
     finally { setAbsentLoading(false); }
-  }, [fetchData]);
+  }, [fetchData, isAdmin, selectedUserId]);
 
   // ── NEW: Auto Punch-Out ───────────────────────────────────────────────────
   const handleAutoPunchOut = useCallback(async () => {
@@ -3415,8 +3463,9 @@ export default function Attendance() {
                 )}
                 {isAdmin && (
                   <button
-                    onClick={() => handleMarkAbsentBulk()} disabled={absentLoading}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all active:scale-95 border"
+                    onClick={() => handleMarkAbsentBulk()} disabled={absentLoading || selectedUserId === 'everyone'}
+                    title={selectedUserId === 'everyone' ? 'Select one employee before marking absent' : 'Mark absent for the selected employee only'}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all active:scale-95 border disabled:opacity-50 disabled:cursor-not-allowed"
                     style={{ backgroundColor: 'rgba(239,68,68,0.2)', borderColor: 'rgba(239,68,68,0.4)', color: '#fca5a5' }}
                   >
                     <UserX className="w-3.5 h-3.5" />
@@ -4816,7 +4865,14 @@ export default function Attendance() {
                         )}
                         <motion.button
                           whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                          onClick={() => setShowLeaveForm(true)}
+                          onClick={() => {
+                            if (isAdmin && selectedUserId === 'everyone') {
+                              toast.error('Select one specific employee before applying leave');
+                              return;
+                            }
+                            setShowLeaveForm(true);
+                          }}
+                          disabled={isAdmin && selectedUserId === 'everyone'}
                           className="flex items-center justify-center gap-2.5 w-full py-3.5 rounded-xl text-sm font-bold transition-all border-2"
                           style={{
                             borderColor: isDark ? ATT_COLORS.absent.borderDark : `${ATT_COLORS.absent.fg}40`,
@@ -4829,7 +4885,7 @@ export default function Attendance() {
                         <div className="grid grid-cols-2 gap-2">
                           <motion.button
                             whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}
-                            onClick={() => { setLeaveType('half_day_morning'); setShowLeaveForm(true); }}
+                            onClick={() => { if (isAdmin && selectedUserId === 'everyone') { toast.error('Select one specific employee before applying leave'); return; } setLeaveType('half_day_morning'); setShowLeaveForm(true); }}
                             className="flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all border"
                             style={{
                               borderColor: isDark ? 'rgba(139,92,246,0.3)' : '#ddd6fe',
@@ -4841,7 +4897,7 @@ export default function Attendance() {
                           </motion.button>
                           <motion.button
                             whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}
-                            onClick={() => { setLeaveType('early_leave'); setShowLeaveForm(true); }}
+                            onClick={() => { if (isAdmin && selectedUserId === 'everyone') { toast.error('Select one specific employee before applying leave'); return; } setLeaveType('early_leave'); setShowLeaveForm(true); }}
                             className="flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all border"
                             style={{
                               borderColor: isDark ? 'rgba(245,158,11,0.3)' : '#fde68a',
@@ -4860,6 +4916,7 @@ export default function Attendance() {
                           ].map(({ label, days }) => (
                             <button key={label}
                               onClick={() => {
+                                if (isAdmin && selectedUserId === 'everyone') { toast.error('Select one specific employee before applying leave'); return; }
                                 const from = new Date();
                                 from.setDate(from.getDate() + (label === 'Tomorrow' ? 1 : 0));
                                 const to = new Date(from);
@@ -5188,12 +5245,12 @@ export default function Attendance() {
         {/* Leave Form Modal */}
         <AnimatePresence>
           {showLeaveForm && (
-             <motion.div className="fixed inset-0 z-[9999] flex items-start justify-center p-3 sm:p-4 pt-4 sm:pt-5 overflow-y-auto"
+             <motion.div className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
               style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', background: isDark ? 'rgba(0,0,0,0.85)' : 'rgba(15,23,42,0.75)', backdropFilter: 'blur(8px)' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={(e) => { if (e.target === e.currentTarget) setShowLeaveForm(false); }}>
               <motion.div
-                className="w-full max-w-3xl rounded-3xl shadow-2xl overflow-hidden max-h-[68vh] overflow-y-auto"
+                className="w-full max-w-3xl rounded-3xl shadow-2xl overflow-hidden max-h-[72vh] overflow-y-auto"
                 style={{ backgroundColor: isDark ? D.card : '#ffffff', border: isDark ? `1px solid ${D.border}` : '1px solid #e2e8f0' }}
                 initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
                 transition={{ type: 'spring', stiffness: 220, damping: 20 }}
@@ -5203,7 +5260,11 @@ export default function Attendance() {
                   style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}>
                   <div>
                     <h2 className="text-xl font-black text-white">Apply Leave</h2>
-                    <p className="text-blue-200 text-sm mt-0.5">Select type and dates below</p>
+                    <p className="text-blue-200 text-sm mt-0.5">
+                      {isAdmin
+                        ? `For: ${selectedUserId === 'everyone' ? 'Select one employee' : (allUsers.find(u => u.id === (selectedUserId || user?.id))?.full_name || user?.full_name || 'Selected employee')}`
+                        : 'Select type and dates below'}
+                    </p>
                   </div>
                   <button onClick={() => setShowLeaveForm(false)}
                     className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center">
@@ -5454,7 +5515,7 @@ export default function Attendance() {
                     Cancel
                   </Button>
                   <Button
-                    disabled={!leaveFrom || !leaveReason.trim() || (leaveType === 'early_leave' && !earlyLeaveTime)}
+                    disabled={!leaveFrom || !leaveReason.trim() || (leaveType === 'early_leave' && !earlyLeaveTime) || (isAdmin && selectedUserId === 'everyone')}
                     onClick={handleApplyLeave}
                     className="font-semibold text-white rounded-xl"
                     style={{ backgroundColor: COLORS.deepBlue }}>
