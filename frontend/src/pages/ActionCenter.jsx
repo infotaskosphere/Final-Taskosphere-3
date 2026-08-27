@@ -243,7 +243,7 @@ function AddTaskModal({ event, isDark, onClose, canAssignTasks, users, clients, 
   return createPortal(
     <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-emerald-900/50 backdrop-blur-sm" onClick={onClose} />
 
       {/* Modal */}
       <motion.div
