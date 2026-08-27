@@ -1035,7 +1035,7 @@ function AddClientModal({ isDark, onClose, onCreated }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-emerald-900/50 p-4" onClick={onClose}>
       <div
         onClick={(e) => e.stopPropagation()}
         className={`w-full max-w-md rounded-2xl p-6 ${isDark ? 'bg-slate-900 border border-slate-800' : 'bg-white'}`}
