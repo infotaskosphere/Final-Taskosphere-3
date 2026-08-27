@@ -262,7 +262,7 @@ function ShareFileModal({ file, onClose, isDark }) {
       {/* Backdrop — click outside to close */}
       <div
         className="fixed inset-0 z-50 flex items-center justify-center p-4"
-        style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}
+        style={{ background: 'rgba(6,78,59,0.55)', backdropFilter: 'blur(4px)' }}
         onClick={onClose}
       >
         <motion.div
