@@ -172,7 +172,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_manage_compliance": True,     # Compliance Tracker → CREATE, EDIT, UPDATE (Own + Team)
           "can_view_mis_report": False,      # MIS Report — ADMIN_GRANTED_ONLY
           "can_manage_mis_report": False,    # MIS Report — ADMIN_GRANTED_ONLY
-          "can_edit_attendance": True,       # Attendance → EDIT/UPDATE (Own + Team)
+          "can_edit_attendance": False,      # Attendance correction is Admin-only
           "can_view_all_visits": False,      # SCOPE handled server-side by department query
           "can_edit_visits": True,           # Client Visits → EDIT/UPDATE (Own + Team)
           "can_delete_visits": False,        # ADMIN_GRANTED_ONLY
@@ -262,7 +262,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_manage_compliance": True,     # Compliance Tracker → CREATE, EDIT, UPDATE (Own)
           "can_view_mis_report": False,      # MIS Report — ADMIN_GRANTED_ONLY
           "can_manage_mis_report": False,    # MIS Report — ADMIN_GRANTED_ONLY
-          "can_edit_attendance": True,       # Attendance → EDIT/UPDATE (Own)
+          "can_edit_attendance": False,      # Attendance correction is Admin-only
           "can_view_all_visits": False,      # SCOPE: own visits only (server-side scoped)
           "can_edit_visits": True,           # Client Visits → EDIT/UPDATE (Own)
           "can_delete_visits": False,        # ADMIN_GRANTED_ONLY
@@ -459,6 +459,8 @@ class UserPermissions(BaseModel):
     can_view_all_duedates: bool = False
     can_view_reports: bool = False
     can_view_attendance: bool = False
+    # Attendance correction is strictly Admin-only. Backend also enforces role == admin.
+    can_edit_attendance: bool = False
     can_view_all_leads: bool = False
     can_edit_tasks: bool = False
     can_edit_clients: bool = False
