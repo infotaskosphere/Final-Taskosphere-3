@@ -3201,7 +3201,7 @@ export default function Tasks() {
                 exit={{ opacity: 0 }}
               >
                 <motion.div
-                  className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+                  className="absolute inset-0 bg-emerald-900/50 backdrop-blur-sm"
                   onClick={() => { setShowTips(false); setFocusedMetric(null); }}
                 />
                 <motion.div
