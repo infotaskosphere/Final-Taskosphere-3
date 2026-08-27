@@ -182,7 +182,7 @@ function TeamDetailModal({ detail, onClose, isDark }) {
 
   return (
     <motion.div
-      className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4"
+      className="fixed inset-0 z-[9999] bg-emerald-900/60 flex items-center justify-center p-4"
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       onClick={onClose}
     >
