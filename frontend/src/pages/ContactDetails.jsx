@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────
-// ContactDetails.jsx — Admin → "Contact Details" page.
+// ContactDetails.jsx — Admin → "Contact Details" page — PORTAL SYNC V2.
 //
 // One place for every helpline / contact number the firm wants reachable:
 //   • Company-wise  — pulled read-only from the shared Company Profile
@@ -122,12 +122,16 @@ export default function ContactDetails() {
       // saving the helpline directory here doesn't clobber those fields.
       const current = await api.get('/client-portal/settings');
       const cleaned = helpDesk.filter(r => (r.department || '').trim() || (r.phone || '').trim());
-      const cleanedPeople = peopleContacts.filter(r => (r.name || '').trim() || (r.position || '').trim() || (r.phone || '').trim() || (r.email || '').trim());
-      await api.put('/client-portal/settings', {
+      const cleanedPeople = peopleContacts
+        .map(r => ({ name: (r.name || '').trim(), position: (r.position || '').trim(), phone: (r.phone || '').trim(), email: (r.email || '').trim() }))
+        .filter(r => r.name || r.position || r.phone || r.email);
+      const payload = {
         ...current.data,
         help_desk: cleaned,
         people_contacts: cleanedPeople,
-      });
+      };
+      const savedResponse = await api.put('/client-portal/settings', payload);
+      if (!savedResponse?.data?.success) throw new Error('The server did not confirm the settings update.');
       setHelpDesk(cleaned.length ? cleaned : [emptyRow()]);
       setPeopleContacts(cleanedPeople.length ? cleanedPeople : [emptyPersonRow()]);
       setSaved(true); setTimeout(() => setSaved(false), 3000);
