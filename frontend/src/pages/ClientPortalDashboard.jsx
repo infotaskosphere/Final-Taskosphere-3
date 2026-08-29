@@ -1020,12 +1020,39 @@ export default function ClientPortalDashboard() {
   const [error, setError] = useState("");
 
   // ── Branding (custom logo set by the admin in Client Portal Setting) ──
-  const [branding, setBranding] = useState({ portal_name: "Client Portal", logo_url: null, help_desk: [], people_contacts: [] });
-  useEffect(() => {
-    portalApi().get("/client-portal/public-settings")
-      .then((res) => res?.data && setBranding((b) => ({ ...b, ...res.data })))
-      .catch(() => {}); // silent — default branding is fine if this fails
+  const [branding, setBranding] = useState({
+    portal_name: "Client Portal",
+    logo_url: null,
+    help_desk: [],
+    people_contacts: [],
+  });
+  // null means the portal availability is still being checked. The client
+  // dashboard is not rendered until this check completes.
+  const [portalStatus, setPortalStatus] = useState(null);
+
+  const refreshPortalStatus = useCallback(async () => {
+    try {
+      const res = await portalApi().get("/client-portal/public-settings", {
+        params: { _ts: Date.now() },
+      });
+      const nextStatus = String(res?.data?.portal_status || "live").toLowerCase();
+      setBranding((b) => ({ ...b, ...(res?.data || {}) }));
+      setPortalStatus(
+        ["live", "maintenance", "offline"].includes(nextStatus) ? nextStatus : "live"
+      );
+    } catch {
+      // Do not silently switch a known maintenance/offline portal to live.
+      // A transient status-fetch failure keeps the current state intact; on
+      // first load it remains in the safe "checking" state.
+      setPortalStatus((current) => current ?? null);
+    }
   }, []);
+
+  useEffect(() => {
+    refreshPortalStatus();
+    const timer = window.setInterval(refreshPortalStatus, 10000);
+    return () => window.clearInterval(timer);
+  }, [refreshPortalStatus]);
 
   useEffect(() => {
     const stored = sessionStorage.getItem("client_portal_user");
@@ -1074,7 +1101,17 @@ export default function ClientPortalDashboard() {
         setData(d => ({ ...d, compliance }));
       }
     } catch (err) {
-      setError(err?.response?.data?.detail || "Failed to load data.");
+      const detail = err?.response?.data?.detail;
+      const code = typeof detail === "object" ? detail?.code : "";
+      if (code === "PORTAL_MAINTENANCE") {
+        setPortalStatus("maintenance");
+        setError("");
+      } else if (code === "PORTAL_OFFLINE") {
+        setPortalStatus("offline");
+        setError("");
+      } else {
+        setError(typeof detail === "string" ? detail : "Failed to load data.");
+      }
     } finally {
       setLoading(false);
     }
@@ -1095,6 +1132,15 @@ export default function ClientPortalDashboard() {
     return h < 12 ? "Good Morning" : h < 17 ? "Good Afternoon" : "Good Evening";
   };
 
+  if (portalStatus === null) return (
+    <div className="min-h-screen bg-[#f0f4f8] flex items-center justify-center">
+      <div className="text-center">
+        <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-3" />
+        <p className="text-sm text-gray-500">Checking Client Portal availability…</p>
+      </div>
+    </div>
+  );
+
   if (!user) return (
     <div className="min-h-screen bg-[#f0f4f8] flex items-center justify-center">
       <div className="text-center">
@@ -1103,6 +1149,53 @@ export default function ClientPortalDashboard() {
       </div>
     </div>
   );
+
+  if (portalStatus !== "live") {
+    const maintenance = portalStatus === "maintenance";
+    return (
+      <div className="min-h-screen bg-[#f0f4f8] flex items-center justify-center p-6">
+        <div className="w-full max-w-xl bg-white rounded-2xl shadow-sm border border-gray-200 p-8 text-center">
+          {branding.logo_url ? (
+            <img
+              src={branding.logo_url}
+              alt={branding.portal_name || "Client Portal"}
+              className="w-14 h-14 mx-auto mb-5 rounded-xl object-contain"
+            />
+          ) : (
+            <div className="w-14 h-14 mx-auto mb-5 rounded-xl bg-blue-600 text-white flex items-center justify-center text-2xl">
+              {maintenance ? "🛠️" : "⛔"}
+            </div>
+          )}
+          <h1 className="text-xl font-bold text-gray-900">
+            {maintenance ? "Client Portal Under Maintenance" : "Client Portal Offline"}
+          </h1>
+          <p className="text-sm text-gray-500 mt-2 leading-6">
+            {maintenance
+              ? "We are performing maintenance on the Client Portal. Your account and documents are safe. Please try again shortly."
+              : "The Client Portal is currently offline. Please try again later or contact your account manager."}
+          </p>
+          <div className="mt-6 flex items-center justify-center gap-3">
+            <button
+              onClick={refreshPortalStatus}
+              className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
+            >
+              Check Again
+            </button>
+            <button
+              onClick={() => {
+                sessionStorage.removeItem("client_portal_token");
+                sessionStorage.removeItem("client_portal_user");
+                navigate("/client-portal");
+              }}
+              className="px-4 py-2 rounded-lg border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50"
+            >
+              Sign Out
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Documents tab removed — My Drive already contains the client's documents.
   // Tasks is placed second-to-last (just before Messages) per requirement.
