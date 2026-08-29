@@ -20,7 +20,7 @@ import asyncio
 import os
 import tempfile
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -84,10 +84,52 @@ def create_client_token(data: dict, expires_minutes: int = 60 * 24 * 7) -> str:
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
+def _normalise_portal_status(value) -> str:
+    """Return one of the three supported portal states."""
+    value = str(value or "live").strip().lower()
+    return value if value in {"live", "maintenance", "offline"} else "live"
+
+
+async def _get_portal_status() -> str:
+    """Read the current portal status directly from MongoDB.
+
+    This is intentionally queried at request time rather than cached in the
+    process so changing the Admin setting takes effect on every running
+    Render instance without a restart/redeploy.
+    """
+    doc = await db.portal_settings.find_one({}, {"_id": 0, "portal_status": 1})
+    return _normalise_portal_status((doc or {}).get("portal_status"))
+
+
+def _portal_status_error(status_value: str) -> HTTPException:
+    if status_value == "maintenance":
+        return HTTPException(
+            status_code=503,
+            detail={
+                "code": "PORTAL_MAINTENANCE",
+                "status": "maintenance",
+                "message": "The Client Portal is temporarily under maintenance. Please try again later.",
+            },
+        )
+    return HTTPException(
+        status_code=503,
+        detail={
+            "code": "PORTAL_OFFLINE",
+            "status": "offline",
+            "message": "The Client Portal is currently offline. Please try again later.",
+        },
+    )
+
+
 async def get_current_portal_client(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
 ):
-    """Dependency – validates client portal JWT and returns the portal_user document."""
+    """Validate the client JWT and enforce the current portal availability.
+
+    The status check is deliberately inside the shared client dependency.
+    That means an existing client session cannot bypass Maintenance/Offline
+    mode by refreshing, opening a deep link, or calling a different portal API.
+    """
     if not credentials:
         raise HTTPException(status_code=401, detail="Not authenticated")
     try:
@@ -103,6 +145,11 @@ async def get_current_portal_client(
     doc = await db.client_portal_users.find_one({"id": portal_id}, {"_id": 0})
     if not doc or not doc.get("is_active", True):
         raise HTTPException(status_code=401, detail="Portal account not found or disabled")
+
+    portal_status = await _get_portal_status()
+    if portal_status != "live":
+        raise _portal_status_error(portal_status)
+
     return doc
 
 
@@ -624,6 +671,12 @@ async def get_share_link(
 
 @router.post("/login")
 async def client_portal_login(body: PortalLoginRequest):
+    # Enforce the same status at the API boundary. This prevents direct/API
+    # login bypass when the public login page is stale or has not yet polled.
+    portal_status = await _get_portal_status()
+    if portal_status != "live":
+        raise _portal_status_error(portal_status)
+
     doc = await db.client_portal_users.find_one(
         {"portal_username": body.username.lower()}, {"_id": 0}
     )
@@ -1146,7 +1199,7 @@ class PortalSettings(BaseModel):
     welcome_message: Optional[str] = "Welcome to your client portal."
     allow_client_messages: Optional[bool] = True
     show_task_comments: Optional[bool] = True
-    portal_status: Optional[str] = "live"
+    portal_status: Literal["live", "maintenance", "offline"] = "live"
     # Accepts either a bare Drive folder ID or a full share URL — normalised
     # to a bare ID before being saved. This is the single source of truth
     # for where client Drive folders get created. Lives in the "Advanced
@@ -1226,6 +1279,9 @@ async def save_portal_settings(
             raise HTTPException(400, "Couldn't access that Drive folder. Check the link and make sure it's shared with the connected Google account.")
 
     update = body.model_dump()
+    # Never persist an invalid/case-variant status. This is the authoritative
+    # value consumed by both the client access guard and the public status API.
+    update["portal_status"] = _normalise_portal_status(update.get("portal_status"))
     update["root_drive_folder"] = normalised_root or ""
     update["updated_by"] = current_user.id
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -1249,7 +1305,7 @@ async def get_public_portal_settings():
         "portal_name": doc.get("portal_name") or "Client Portal",
         "welcome_message": doc.get("welcome_message") or "Welcome to your client portal.",
         "logo_url": doc.get("logo_url") or None,
-        "portal_status": doc.get("portal_status") or "live",
+        "portal_status": _normalise_portal_status(doc.get("portal_status")),
         # Department helpline directory — safe to expose pre-login, no
         # internal/sensitive data. Falls back to sane defaults (empty
         # numbers) until the admin fills them in.
