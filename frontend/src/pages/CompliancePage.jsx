@@ -84,8 +84,8 @@ const fmtDate  = (s,f='dd MMM yyyy')=>{const d=safeDate(s);return d?format(d,f):
 // ── GovtFeeRow: isolated component so a single bad record never blanks the table ──
 function GovtFeeRow({ fee, idx, govtFeesSubTab, isDark, canManage, onEdit, onDelete }) {
   try {
-    const colsAll    = 'minmax(180px,1.55fr) minmax(140px,1.25fr) 92px 68px 104px 92px minmax(120px,1fr) 112px 78px 92px';
-    const colsDirect = 'minmax(190px,1.7fr) minmax(150px,1.35fr) 92px 68px 104px 92px minmax(135px,1.05fr) 112px 92px';
+    const colsAll    = 'minmax(180px,1.6fr) minmax(140px,1.3fr) 96px 70px 110px 96px minmax(130px,1fr) 80px 92px';
+    const colsDirect = 'minmax(200px,1.8fr) minmax(160px,1.4fr) 96px 70px 110px 96px minmax(150px,1.1fr) 92px';
     const gridCols   = govtFeesSubTab === 'all' ? colsAll : colsDirect;
     const isLinked   = fee._source === 'linked';
 
@@ -148,18 +148,6 @@ function GovtFeeRow({ fee, idx, govtFeesSubTab, isDark, canManage, onEdit, onDel
         <div className="min-w-0">
           <p className="font-bold whitespace-nowrap">&#8377; {Number(fee.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
           <p className="text-[11px] font-mono truncate" title={fee.srn || ''} style={{ color: isDark ? D.dimmer : '#94a3b8' }}>{fee.srn || '—'}</p>
-        </div>
-
-        {/* Fees Reimbursed */}
-        <div className="min-w-0">
-          {fee.reimbursed ? (
-            <div>
-              <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Yes</span>
-              <p className="text-[10px] font-semibold mt-1 text-emerald-600 whitespace-nowrap">₹ {Number(fee.reimbursed_amount ?? fee.amount ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-            </div>
-          ) : (
-            <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-slate-50 text-slate-500 border border-slate-200">No</span>
-          )}
         </div>
 
         {/* Type badge (All Payments tab only) */}
@@ -241,6 +229,62 @@ function ProgressBar({pct,color='#1FAF5A',height='h-1.5',isDark}){
         style={{background:`linear-gradient(90deg,${color},${color}bb)`}}
         initial={{width:0}} animate={{width:`${Math.min(100,pct||0)}%`}}
         transition={{duration:0.9,ease:'easeOut'}}/>
+    </div>
+  );
+}
+
+// ── Shared pagination control ─────────────────────────────────────────────
+function Pagination({ page, pageSize, total, onPageChange, onPageSizeChange, isDark, label='records' }) {
+  const totalPages = Math.max(1, Math.ceil((total || 0) / pageSize));
+  const start = total ? (page - 1) * pageSize + 1 : 0;
+  const end = total ? Math.min(page * pageSize, total) : 0;
+  const go = (next) => onPageChange(Math.min(totalPages, Math.max(1, next)));
+
+  if (!total) return null;
+
+  const pages = [];
+  const push = (n) => { if (!pages.includes(n)) pages.push(n); };
+  push(1);
+  if (page > 3) pages.push('ellipsis-left');
+  for (let n = Math.max(2, page - 1); n <= Math.min(totalPages - 1, page + 1); n += 1) push(n);
+  if (page < totalPages - 2) pages.push('ellipsis-right');
+  if (totalPages > 1) push(totalPages);
+
+  return (
+    <div className="flex items-center justify-between gap-3 px-4 py-3 border-t flex-wrap"
+      style={{borderColor:isDark?D.border:'#e2e8f0',backgroundColor:isDark?D.raised:'#f8fafc'}}>
+      <div className="flex items-center gap-2 text-xs font-semibold" style={{color:isDark?D.dimmer:'#64748b'}}>
+        <span>Showing {start}–{end} of {total} {label}</span>
+        <span className="hidden sm:inline">·</span>
+        <label className="flex items-center gap-1.5">
+          <span>Rows</span>
+          <select value={pageSize} onChange={e=>onPageSizeChange(Number(e.target.value))}
+            className="h-8 px-2 border rounded-lg text-xs font-bold focus:outline-none focus:ring-2 focus:ring-blue-500"
+            style={{backgroundColor:isDark?D.card:'#fff',borderColor:isDark?D.border:'#d1d5db',color:isDark?D.text:'#1e293b'}}>
+            {[25,50,100].map(size=><option key={size} value={size}>{size}</option>)}
+          </select>
+        </label>
+      </div>
+
+      <div className="flex items-center gap-1">
+        <button onClick={()=>go(page-1)} disabled={page<=1}
+          className="w-8 h-8 rounded-lg border flex items-center justify-center transition-all disabled:opacity-40 disabled:cursor-not-allowed hover:bg-blue-500/10"
+          style={{borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.muted:'#64748b',backgroundColor:isDark?D.card:'#fff'}}
+          aria-label="Previous page"><ChevronLeft className="w-3.5 h-3.5"/></button>
+        {pages.map((item, idx)=> item === 'ellipsis-left' || item === 'ellipsis-right' ? (
+          <span key={`${item}-${idx}`} className="w-8 h-8 flex items-center justify-center text-xs" style={{color:isDark?D.dimmer:'#94a3b8'}}>…</span>
+        ) : (
+          <button key={item} onClick={()=>go(item)}
+            className="w-8 h-8 rounded-lg border text-xs font-bold transition-all"
+            style={{backgroundColor:page===item?'#1F6FB2':(isDark?D.card:'#fff'),borderColor:page===item?'#1F6FB2':(isDark?D.border:'#e2e8f0'),color:page===item?'#fff':(isDark?D.muted:'#64748b')}}>
+            {item}
+          </button>
+        ))}
+        <button onClick={()=>go(page+1)} disabled={page>=totalPages}
+          className="w-8 h-8 rounded-lg border flex items-center justify-center transition-all disabled:opacity-40 disabled:cursor-not-allowed hover:bg-blue-500/10"
+          style={{borderColor:isDark?D.border:'#e2e8f0',color:isDark?D.muted:'#64748b',backgroundColor:isDark?D.card:'#fff'}}
+          aria-label="Next page"><ChevronRight className="w-3.5 h-3.5"/></button>
+      </div>
     </div>
   );
 }
@@ -437,11 +481,8 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
   const[govtFees,setGovtFees]=useState(!!existing?.govt_fees);
   const[saving,setSaving]=useState(false);
   const[templates,setTemplates]=useState([]);
-  const[calendarOpen,setCalendarOpen]=useState(false);
-  const[calendarPos,setCalendarPos]=useState({top:0,left:0});
+  const nativeDateInputRef=useRef(null);
   const[applicablePeriods,setApplicablePeriods]=useState(()=>existing?.applicable_periods||[]);
-  const calendarRef=useRef(null);
-  const calendarBtnRef=useRef(null);
 
   const isRecurring=['monthly','quarterly','half_yearly'].includes(frequency);
 
@@ -462,28 +503,6 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
   useEffect(()=>{
     api.get('/compliance/common-templates').then(r=>setTemplates(r.data||[])).catch(()=>{});
   },[]);
-
-  useEffect(()=>{
-    if(!calendarOpen) return;
-    // Compute fixed position from button bounding rect so dropdown escapes overflow-y-auto
-    if(calendarBtnRef.current){
-      const r=calendarBtnRef.current.getBoundingClientRect();
-      const spaceBelow=window.innerHeight-r.bottom;
-      const calH=320; // approx calendar height
-      if(spaceBelow>=calH){
-        setCalendarPos({top:r.bottom+6,left:r.left});
-      } else {
-        setCalendarPos({top:r.top-calH-6,left:r.left});
-      }
-    }
-    const fn=(e)=>{
-      const inBtn=calendarBtnRef.current&&calendarBtnRef.current.contains(e.target);
-      const inCal=calendarRef.current&&calendarRef.current.contains(e.target);
-      if(!inBtn&&!inCal)setCalendarOpen(false);
-    };
-    document.addEventListener('mousedown',fn);
-    return()=>document.removeEventListener('mousedown',fn);
-  },[calendarOpen]);
 
   // Auto-generate period label from selections
   useEffect(()=>{
@@ -521,6 +540,18 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
     if(!d) return 'Select due date…';
     try{const dt=new Date(d);return dt.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});}
     catch{return d;}
+  };
+
+  const openNativeDatePicker=()=>{
+    const input=nativeDateInputRef.current;
+    if(!input) return;
+    try{
+      if(typeof input.showPicker==='function') input.showPicker();
+      else { input.focus(); input.click(); }
+    }catch{
+      input.focus();
+      input.click();
+    }
   };
 
   const togglePeriod=(key)=>{
@@ -815,36 +846,27 @@ function ComplianceFormModal({existing,onClose,onSave,isDark}){
                   )}
                   <div className="relative">
                     <button
-                      ref={calendarBtnRef}
-                      onClick={()=>setCalendarOpen(o=>!o)}
+                      type="button"
+                      onClick={openNativeDatePicker}
                       className="w-full flex items-center gap-3 px-4 py-2.5 border rounded-xl text-sm font-semibold transition-all hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       style={{
                         backgroundColor:isDark?D.raised:'#fff',
-                        borderColor:calendarOpen?'#1F6FB2':(isDark?D.border:'#d1d5db'),
+                        borderColor:dueDate?'#1F6FB2':(isDark?D.border:'#d1d5db'),
                         color:dueDate?(isDark?D.text:'#0f172a'):(isDark?D.dimmer:'#94a3b8'),
                       }}>
                       <Calendar className="w-4 h-4 flex-shrink-0" style={{color:dueDate?'#1F6FB2':(isDark?D.dimmer:'#94a3b8')}}/>
                       <span className="flex-1 text-left">{fmtDisplayDate(dueDate)}</span>
-                      <ChevronDown className="w-4 h-4 flex-shrink-0 opacity-50"
-                        style={{transform:calendarOpen?'rotate(180deg)':'none',transition:'transform 0.2s'}}/>
+                      <ChevronDown className="w-4 h-4 flex-shrink-0 opacity-50"/>
                     </button>
-                    <AnimatePresence>
-                      {calendarOpen&&createPortal(
-                        <motion.div
-                          ref={calendarRef}
-                          style={{
-                            position:'fixed',
-                            top:calendarPos.top,
-                            left:calendarPos.left,
-                            zIndex:99999,
-                          }}
-                          initial={{opacity:0,y:-8,scale:0.97}} animate={{opacity:1,y:0,scale:1}}
-                          exit={{opacity:0,y:-8,scale:0.97}} transition={{duration:0.15,ease:'easeOut'}}>
-                          <CalendarPicker value={dueDate} onChange={setDueDate} isDark={isDark} onClose={()=>setCalendarOpen(false)}/>
-                        </motion.div>,
-                        document.body
-                      )}
-                    </AnimatePresence>
+                    <input
+                      ref={nativeDateInputRef}
+                      type="date"
+                      value={dueDate||''}
+                      onChange={e=>setDueDate(e.target.value)}
+                      className="absolute w-px h-px opacity-0 pointer-events-none"
+                      tabIndex={-1}
+                      aria-hidden="true"
+                    />
                   </div>
                 </div>
               )}
@@ -1343,6 +1365,8 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
   const[detectingDetailDups,setDetectingDetailDups]=useState(false);
   const[editingNote,setEditingNote]=useState(null);
   const[refreshKey,setRefreshKey]=useState(0);
+  const[assignmentPage,setAssignmentPage]=useState(1);
+  const[assignmentPageSize,setAssignmentPageSize]=useState(25);
   // New tabs
   const[activeTab,setActiveTab]=useState('clients'); // 'clients' | 'monthly' | 'comments'
   const[comments,setComments]=useState([]);
@@ -1424,7 +1448,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
   const fetchItems=useCallback(async()=>{
     setLoading(true);
     try{
-      const params=new URLSearchParams({limit:1000});
+      const params=new URLSearchParams({page:String(assignmentPage),limit:String(assignmentPageSize)});
       if(statusFilter!=='all')params.set('status',statusFilter);
       if(search.trim())params.set('search',search.trim());
       const[asgn,cm]=await Promise.all([
@@ -1440,7 +1464,12 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
       setItems(enriched);setTotal(asgn.data.total||0);setCompliance(cm);
     }catch{toast.error('Failed to load');}
     finally{setLoading(false);}
-  },[compliance.id,statusFilter,search,refreshKey]);
+  },[compliance.id,statusFilter,search,assignmentPage,assignmentPageSize,refreshKey]);
+
+  useEffect(()=>{
+    setAssignmentPage(1);
+    setSelectedIds(new Set());
+  },[statusFilter,search,assignmentPageSize]);
 
   const fetchComments=useCallback(async()=>{
     setCommentsLoading(true);
@@ -1879,7 +1908,7 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
                       </button>
                     </div>
                     <div className="text-center">
-                      <span className="text-[11px] font-bold tabular-nums" style={{color:isDark?D.dimmer:'#94a3b8'}}>{idx+1}</span>
+                      <span className="text-[11px] font-bold tabular-nums" style={{color:isDark?D.dimmer:'#94a3b8'}}>{(assignmentPage-1)*assignmentPageSize+idx+1}</span>
                     </div>
                     <div className="min-w-0">
                       <button onClick={()=>setDetailRow(a)} className="text-sm font-semibold truncate text-left w-full hover:underline transition-all" style={{color:isDark?D.text:'#0f172a'}}>{a.client_name || <span className="italic" style={{color:isDark?D.dimmer:'#94a3b8'}}>Unknown client</span>}</button>
@@ -2095,13 +2124,13 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
           )}
         </div>
 
-        {/* Footer */}
+        {/* Footer + pagination */}
         <div className="px-5 py-2.5 border-t flex items-center justify-between flex-wrap gap-2 flex-shrink-0"
           style={{borderColor:isDark?D.border:'#e2e8f0',backgroundColor:isDark?D.card:'#fff'}}>
           <p className="text-xs font-semibold" style={{color:isDark?D.dimmer:'#94a3b8'}}>
             {items.length} of {total} records{selectedIds.size>0?` · ${selectedIds.size} selected`:''}
           </p>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 flex-wrap">
             {['not_started','in_progress','completed','filed'].map(k=>(
               <div key={k} className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full" style={{backgroundColor:STATUS_CFG[k]?.dot}}/>
@@ -2111,6 +2140,15 @@ function ComplianceDetailPage({compliance:initialCompliance,onBack,isDark,allUse
             ))}
           </div>
         </div>
+        <Pagination
+          page={assignmentPage}
+          pageSize={assignmentPageSize}
+          total={total}
+          onPageChange={p=>{setAssignmentPage(p);setSelectedIds(new Set());}}
+          onPageSizeChange={size=>{setAssignmentPageSize(size);setAssignmentPage(1);setSelectedIds(new Set());}}
+          isDark={isDark}
+          label="clients"
+        />
       </>)}
 
       {/* ─── MONTHLY TRACKER TAB ─────────────────────────────────────────── */}
@@ -3406,6 +3444,8 @@ export default function CompliancePage(){
   const[detailItem,setDetailItem]=useState(null);
   const[refreshKey,setRefreshKey]=useState(0);
   const[viewMode,setViewMode]=useState('board'); // 'board' | 'list'
+  const[compliancePage,setCompliancePage]=useState(1);
+  const[compliancePageSize,setCompliancePageSize]=useState(25);
   // AI Duplicate Detection
   const [showDupDialog,  setShowDupDialog]  = useState(false);
   const [dupGroups,      setDupGroups]      = useState([]);
@@ -3499,8 +3539,6 @@ export default function CompliancePage(){
                 srn: a.govt_fees_srn || '',
                 notes: a.govt_fees_notes || '',
                 payment_date: a.payment_date || a.paid_on || null,
-                reimbursed: !!a.reimbursed,
-                reimbursed_amount: a.reimbursed_amount ?? null,
                 _source: 'linked',
               });
             }
@@ -3662,7 +3700,7 @@ export default function CompliancePage(){
     if (!activeGovtFeesList.length) { toast.error('No government fee payments to export'); return; }
     const dateText = (d) => d ? format(parseISO(String(d).slice(0, 10)), 'MMM d, yyyy') : '—';
     const statusText = (s) => String(s || '').toLowerCase() === 'paid' ? 'Paid' : 'Unpaid';
-    const headers = ['#', 'Client', 'Title', 'Category', 'FY Year', 'Due Date', 'Status', 'Payment Date', 'Amount (₹)', 'Fees Reimbursed (₹)', 'SRN', 'Type', 'Details'];
+    const headers = ['#', 'Client', 'Title', 'Category', 'FY Year', 'Due Date', 'Status', 'Payment Date', 'Amount (₹)', 'SRN', 'Type', 'Details'];
     const rows = activeGovtFeesList.map((fee, i) => [
       i + 1,
       fee.client_name || '',
@@ -3673,7 +3711,6 @@ export default function CompliancePage(){
       statusText(fee.status),
       dateText(fee.payment_date || fee.paid_on || fee.paid_at),
       Number(fee.amount || 0),
-      fee.reimbursed ? Number(fee.reimbursed_amount ?? fee.amount ?? 0) : 0,
       fee.srn || '',
       fee._source === 'linked' ? 'Compliance-Linked' : 'Direct',
       fee.notes || '',
@@ -3682,7 +3719,7 @@ export default function CompliancePage(){
     if (kind === 'excel') {
       const XLSX = await getXLSX();
       const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-      ws['!cols'] = [{wch:5},{wch:30},{wch:28},{wch:16},{wch:12},{wch:14},{wch:12},{wch:14},{wch:14},{wch:18},{wch:18},{wch:18},{wch:32}];
+      ws['!cols'] = [{wch:5},{wch:30},{wch:28},{wch:16},{wch:12},{wch:14},{wch:12},{wch:14},{wch:14},{wch:18},{wch:32}];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Govt Fees');
       XLSX.writeFile(wb, `${fileName}.xlsx`);
@@ -3835,6 +3872,15 @@ export default function CompliancePage(){
   },[compliance,searchQ]);
 
   const fyYears=useMemo(()=>[...new Set(compliance.map(c=>c.fy_year).filter(Boolean))],[compliance]);
+
+  useEffect(()=>{
+    setCompliancePage(1);
+  },[searchQ,catFilter,fyFilter,compliancePageSize]);
+
+  const pagedCompliance=useMemo(()=>{
+    const start=(compliancePage-1)*compliancePageSize;
+    return filtered.slice(start,start+compliancePageSize);
+  },[filtered,compliancePage,compliancePageSize]);
 
   // Full page detail view
   if(detailItem){
@@ -4266,12 +4312,12 @@ export default function CompliancePage(){
                       <div className="grid px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider border-b"
                         style={{
                           gridTemplateColumns: govtFeesSubTab==='all'
-                            ? 'minmax(180px,1.55fr) minmax(140px,1.25fr) 92px 68px 104px 92px minmax(120px,1fr) 112px 78px 92px'
-                            : 'minmax(190px,1.7fr) minmax(150px,1.35fr) 92px 68px 104px 92px minmax(135px,1.05fr) 112px 92px',
+                            ? 'minmax(180px,1.6fr) minmax(140px,1.3fr) 96px 70px 110px 96px minmax(130px,1fr) 80px 92px'
+                            : 'minmax(200px,1.8fr) minmax(160px,1.4fr) 96px 70px 110px 96px minmax(150px,1.1fr) 92px',
                           backgroundColor:isDark?D.raised:'#f8fafc',color:isDark?D.dimmer:'#94a3b8',borderColor:isDark?D.border:'#e2e8f0'}}>
                         <div>Title</div><div>Client</div><div>Category</div>
                         <div>FY</div><div>Due Date</div><div>Status</div>
-                        <div>Amount / SRN</div><div>Fees Reimbursed</div>
+                        <div>Amount / SRN</div>
                         {govtFeesSubTab==='all' && <div>Type</div>}
                         <div className="text-right pr-1">Actions</div>
                       </div>
@@ -4316,17 +4362,12 @@ export default function CompliancePage(){
                             </span>
                           </div>
                         ) : <div/>}
-                        {(() => {
-                          const total = activeGovtFeesList.reduce((s,f)=>s+(f.amount||0),0);
-                          const reimbursed = activeGovtFeesList.filter(f => f.reimbursed).reduce((s,f)=>s+(f.reimbursed_amount ?? f.amount ?? 0),0);
-                          return (
-                            <div className="flex items-center gap-4 text-xs">
-                              <p><span style={{color:isDark?D.dimmer:'#64748b'}} className="mr-1.5">Total:</span><strong style={{color:isDark?D.text:'#0f172a'}}>₹ {total.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></p>
-                              <p><span style={{color:isDark?D.dimmer:'#64748b'}} className="mr-1.5">Reimbursed:</span><strong className="text-emerald-600">₹ {reimbursed.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></p>
-                              <p><span style={{color:isDark?D.dimmer:'#64748b'}} className="mr-1.5">To Collect:</span><strong style={{color:isDark?D.text:'#0f172a'}}>₹ {Math.max(0,total-reimbursed).toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></p>
-                            </div>
-                          );
-                        })()}
+                        <p className="text-sm">
+                          <span style={{color:isDark?D.dimmer:'#64748b'}} className="mr-2">Total:</span>
+                          <span className="font-bold" style={{color:isDark?D.text:'#0f172a'}}>
+                            ₹ {activeGovtFeesList.reduce((s,f)=>s+(f.amount||0),0).toLocaleString('en-IN',{minimumFractionDigits:2})}
+                          </span>
+                        </p>
                       </div>
                     </>
                   )}
@@ -4359,7 +4400,7 @@ export default function CompliancePage(){
                     <div>Progress</div><div>% Done</div><div>Clients</div>
                     {canManage&&<div>Actions</div>}
                   </div>
-                  {filtered.map(item=>(
+                  {pagedCompliance.map(item=>(
                     <ComplianceCard key={item.id} item={item} isDark={isDark} viewMode="list"
                       canManage={canManage}
                       onClick={()=>setDetailItem(item)}
@@ -4370,7 +4411,7 @@ export default function CompliancePage(){
                 </motion.div>
               ):(
                 <motion.div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 items-stretch" variants={containerVariants}>
-                  {filtered.map(item=>(
+                  {pagedCompliance.map(item=>(
                     <ComplianceCard key={item.id} item={item} isDark={isDark} viewMode="board"
                       canManage={canManage}
                       onClick={()=>setDetailItem(item)}
@@ -4380,6 +4421,15 @@ export default function CompliancePage(){
                   ))}
                 </motion.div>
               )}
+              <Pagination
+                page={compliancePage}
+                pageSize={compliancePageSize}
+                total={filtered.length}
+                onPageChange={setCompliancePage}
+                onPageSizeChange={size=>{setCompliancePageSize(size);setCompliancePage(1);}}
+                isDark={isDark}
+                label="compliance types"
+              />
             </React.Fragment>
           );
 
