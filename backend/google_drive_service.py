@@ -1,5 +1,5 @@
 """
-Centralized Google Drive service for Taskosphere.
+Centralized Google Drive service for Taskosphere — ROBUST V2.
 
 Authentication strategy
 -----------------------
@@ -13,12 +13,12 @@ Authentication strategy
    - GOOGLE_CLIENT_ID
    - GOOGLE_CLIENT_SECRET
 
-The service account is preferred because it does not depend on a user's
-Google browser session.
+OAuth is preferred for existing portal folders because those folders may
+have originally been created/owned by the connected Google account.
 
-OAuth is retained as a fallback for existing Taskosphere installations
-and for Drive folders that may still be accessible through the OAuth
-Google account.
+The service account is RETAINED and is the fallback for folders/resources
+accessible to the service account. Authentication is selected per folder/file
+when possible, so one credential cannot accidentally hide another account's Drive data.
 
 The rest of the application should import:
 
@@ -41,6 +41,8 @@ import time
 from typing import Optional
 
 from fastapi import HTTPException
+
+DRIVE_SERVICE_VERSION = "2.0.0-per-folder-auth"
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
@@ -362,76 +364,67 @@ def _create_drive_service():
     """
     Create the best available Drive client.
 
-    Order:
-
-        1. Service account
-        2. OAuth fallback
+    OAuth is intentionally tried first because existing Taskosphere client
+    folders may belong to the Google account that originally connected Drive.
+    The service account remains a full fallback and is never removed.
     """
-
     global _DRIVE_AUTH_MODE
 
-    service_account_error = None
+    errors = []
 
-    # ------------------------------------------------------------------
-    # 1. SERVICE ACCOUNT
-    # ------------------------------------------------------------------
-
-    if _service_account_configured():
-
+    # 1) Existing OAuth connection — preserves existing client folders.
+    if os.getenv("GOOGLE_CLIENT_ID") and os.getenv("GOOGLE_CLIENT_SECRET") and _get_drive_refresh_token():
         try:
-
-            service = _build_service_account_service()
-
-            _DRIVE_AUTH_MODE = "service_account"
-
+            service = _build_legacy_oauth_service()
+            _DRIVE_AUTH_MODE = "oauth"
             return service
-
         except Exception as exc:
+            errors.append(f"oauth: {exc}")
+            logger.warning("Google Drive OAuth initialization failed; trying service account: %s", exc)
 
-            service_account_error = exc
+    # 2) Service account — retained for new/shared folders and installations
+    #    that do not have an OAuth refresh token.
+    if _service_account_configured():
+        try:
+            service = _build_service_account_service()
+            _DRIVE_AUTH_MODE = "service_account"
+            return service
+        except Exception as exc:
+            errors.append(f"service_account: {exc}")
+            logger.warning("Google Drive service-account initialization failed: %s", exc)
 
-            logger.error(
-                "Google Drive service-account initialization failed: %s",
-                exc,
-                exc_info=True,
-            )
+    detail = "; ".join(errors) if errors else "No Google Drive credentials are configured."
+    raise RuntimeError(f"Google Drive authentication failed: {detail}")
 
-    # ------------------------------------------------------------------
-    # 2. OAUTH FALLBACK
-    # ------------------------------------------------------------------
 
-    try:
-
+def _build_drive_service_for_mode(mode: str):
+    """Build a fresh Drive client for a specific configured auth mode."""
+    global _DRIVE_AUTH_MODE
+    if mode == "oauth":
         service = _build_legacy_oauth_service()
+    elif mode == "service_account":
+        service = _build_service_account_service()
+    else:
+        raise ValueError(f"Unknown Google Drive auth mode: {mode}")
+    _DRIVE_AUTH_MODE = mode
+    return service
 
-        _DRIVE_AUTH_MODE = "oauth"
 
-        if service_account_error:
+def _available_auth_modes():
+    """Return usable credential modes without exposing any secrets."""
+    modes=[]
+    if os.getenv("GOOGLE_CLIENT_ID") and os.getenv("GOOGLE_CLIENT_SECRET") and _get_drive_refresh_token():
+        modes.append("oauth")
+    if _service_account_configured():
+        modes.append("service_account")
+    return modes
 
-            logger.warning(
-                "Service account was unavailable; using OAuth fallback."
-            )
 
-        return service
-
-    except Exception as oauth_exc:
-
-        logger.error(
-            "Google Drive OAuth initialization failed: %s",
-            oauth_exc,
-            exc_info=True,
-        )
-
-        if service_account_error:
-
-            raise RuntimeError(
-                "Google Drive could not be initialized using either "
-                "the service account or OAuth credentials. "
-                f"Service-account error: {service_account_error}; "
-                f"OAuth error: {oauth_exc}"
-            ) from oauth_exc
-
-        raise
+def _other_auth_mode(current_mode: Optional[str]) -> Optional[str]:
+    for mode in _available_auth_modes():
+        if mode != current_mode:
+            return mode
+    return None
 
 
 # ============================================================================
@@ -546,6 +539,89 @@ def reset_drive_service_cache() -> None:
     logger.info(
         "Google Drive service cache reset."
     )
+
+
+# ============================================================================
+# FOLDER / FILE SPECIFIC AUTHENTICATION
+# ============================================================================
+
+def _probe_folder_with_service(service, folder_id: str):
+    return service.files().get(
+        fileId=folder_id,
+        fields="id,name,mimeType,parents,driveId",
+        supportsAllDrives=True,
+    ).execute()
+
+
+def get_drive_service_for_folder(folder_id: str):
+    """
+    Return the credential that can actually access ``folder_id``.
+
+    This is the key fix for the portal issue: service-account credentials and
+    the OAuth Google account are independent Drive identities. A globally
+    cached service account can be perfectly healthy while still being unable
+    to see an existing OAuth-owned folder. We therefore probe the requested
+    folder and automatically switch credentials when necessary.
+    """
+    folder_id = str(folder_id or "").strip()
+    if not folder_id:
+        raise ValueError("folder_id is required")
+    if not _drive_configured():
+        raise HTTPException(503, "Google Drive is not configured.")
+
+    with _DRIVE_SERVICE_LOCK:
+        preferred = _DRIVE_AUTH_MODE or _available_auth_modes()[0]
+        modes=[preferred] + [m for m in _available_auth_modes() if m != preferred]
+        errors=[]
+        for mode in modes:
+            try:
+                if mode == _DRIVE_AUTH_MODE and _DRIVE_SERVICE_CACHE is not None:
+                    service=_DRIVE_SERVICE_CACHE
+                else:
+                    service=_build_drive_service_for_mode(mode)
+                    if mode == _DRIVE_AUTH_MODE:
+                        globals()["_DRIVE_SERVICE_CACHE"] = service
+                _probe_folder_with_service(service, folder_id)
+                logger.info("Google Drive folder %s is accessible using %s authentication.", folder_id, mode)
+                return service
+            except Exception as exc:
+                errors.append(f"{mode}: {exc}")
+                logger.warning("Drive folder %s is not accessible using %s: %s", folder_id, mode, exc)
+                # Never leave a failed mode cached.
+                if mode == _DRIVE_AUTH_MODE:
+                    globals()["_DRIVE_SERVICE_CACHE"] = None
+                    globals()["_DRIVE_AUTH_MODE"] = None
+        raise HTTPException(503, "Google Drive folder is not accessible with the configured Google accounts. " + " | ".join(errors))
+
+
+def get_drive_service_for_file(file_id: str):
+    """Return the credential that can access a specific Drive file."""
+    file_id=str(file_id or "").strip()
+    if not file_id:
+        raise ValueError("file_id is required")
+    if not _drive_configured():
+        raise HTTPException(503, "Google Drive is not configured.")
+
+    with _DRIVE_SERVICE_LOCK:
+        preferred=_DRIVE_AUTH_MODE or _available_auth_modes()[0]
+        modes=[preferred] + [m for m in _available_auth_modes() if m != preferred]
+        errors=[]
+        for mode in modes:
+            try:
+                if mode == _DRIVE_AUTH_MODE and _DRIVE_SERVICE_CACHE is not None:
+                    service=_DRIVE_SERVICE_CACHE
+                else:
+                    service=_build_drive_service_for_mode(mode)
+                    if mode == _DRIVE_AUTH_MODE:
+                        globals()["_DRIVE_SERVICE_CACHE"] = service
+                service.files().get(fileId=file_id, fields="id,name,mimeType,parents,driveId", supportsAllDrives=True).execute()
+                return service
+            except Exception as exc:
+                errors.append(f"{mode}: {exc}")
+                if mode == _DRIVE_AUTH_MODE:
+                    globals()["_DRIVE_SERVICE_CACHE"] = None
+                    globals()["_DRIVE_AUTH_MODE"] = None
+        raise HTTPException(503, "Google Drive file is not accessible with the configured Google accounts. " + " | ".join(errors))
 
 
 # ============================================================================
@@ -797,69 +873,18 @@ def execute_drive_request(
 # ============================================================================
 
 def verify_drive_folder_access(folder_id: str) -> dict:
-    """
-    Verify that the active Google Drive credentials can access a specific
-    folder.
-
-    Returns:
-
-        {
-            "accessible": True,
-            "folder_id": "...",
-            "name": "...",
-            "mime_type": "application/vnd.google-apps.folder",
-            "auth_mode": "service_account"
-        }
-
-    If the service-account connection cannot access the folder, the method
-    will reset the service and retry through the available authentication
-    configuration.
-    """
-
+    """Verify access using the correct credential for this folder."""
     if not folder_id:
-        raise ValueError(
-            "folder_id is required"
-        )
-
-    def _request(service):
-        return service.files().get(
-            fileId=folder_id,
-            fields="id,name,mimeType,parents,driveId",
-        )
-
+        raise ValueError("folder_id is required")
     try:
-
-        result = execute_drive_request(
-            _request,
-            max_attempts=2,
-        )
-
-        return {
-            "accessible": True,
-            "folder_id": result.get("id"),
-            "name": result.get("name"),
-            "mime_type": result.get("mimeType"),
-            "parents": result.get("parents", []),
-            "drive_id": result.get("driveId"),
-            "auth_mode": get_drive_auth_mode(),
-        }
-
+        service=get_drive_service_for_folder(folder_id)
+        result=service.files().get(fileId=folder_id, fields="id,name,mimeType,parents,driveId", supportsAllDrives=True).execute()
+        return {"accessible": True, "folder_id": result.get("id"), "name": result.get("name"),
+                "mime_type": result.get("mimeType"), "parents": result.get("parents", []),
+                "drive_id": result.get("driveId"), "auth_mode": get_drive_auth_mode()}
     except Exception as exc:
-
-        logger.error(
-            "Google Drive folder access verification failed "
-            "for folder %s: %s",
-            folder_id,
-            exc,
-            exc_info=True,
-        )
-
-        return {
-            "accessible": False,
-            "folder_id": folder_id,
-            "error": str(exc),
-            "auth_mode": get_drive_auth_mode(),
-        }
+        logger.error("Google Drive folder access verification failed for %s: %s", folder_id, exc, exc_info=True)
+        return {"accessible": False, "folder_id": folder_id, "error": str(exc), "auth_mode": get_drive_auth_mode()}
 
 
 # ============================================================================
@@ -903,6 +928,8 @@ def list_drive_folder(
             ),
             orderBy="folder,name",
             pageSize=page_size,
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
         )
 
     return execute_drive_request(
@@ -1057,6 +1084,8 @@ def get_drive_debug_info() -> dict:
         ),
         "active_auth_mode": _DRIVE_AUTH_MODE,
         "service_cached": _DRIVE_SERVICE_CACHE is not None,
+        "available_auth_modes": _available_auth_modes(),
+        "strategy": "oauth-first-with-per-folder-service-account-fallback",
     }
 
 
