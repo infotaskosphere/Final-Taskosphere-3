@@ -2854,6 +2854,8 @@ const EnhancedRevenueTrend = ({ invoices = [], isDark }) => {
   const [compareEnabled, setCompareEnabled] = useState(false);
   const [showServiceBreakdown, setShowServiceBreakdown] = useState(false);
   const [selectedServices, setSelectedServices] = useState([]);
+  const [chartType, setChartType] = useState('line');
+  const [selectedPoint, setSelectedPoint] = useState(null);
 
   // ── Pure helpers (no hooks) ──
   const fmtAxis = (v) => v >= 10000000 ? `${(v/10000000).toFixed(1)}Cr` : v >= 100000 ? `${(v/100000).toFixed(1)}L` : v >= 1000 ? `${(v/1000).toFixed(0)}k` : v.toFixed(0);
@@ -2959,6 +2961,7 @@ const EnhancedRevenueTrend = ({ invoices = [], isDark }) => {
   const pts = currentData.map((d, i) => [pad.l + i * xStep, yS(d.revenue)]);
   const colPts = currentData.map((d, i) => [pad.l + i * xStep, yS(d.collected)]);
   const svcPts = selectedServices.length > 0 ? currentData.map((d, i) => [pad.l + i * xStep, yS(d.serviceRevenue)]) : [];
+  const chartPoint = selectedPoint !== null ? currentData[selectedPoint] : null;
   const prevAligned = compareEnabled ? currentData.map((_, i) => prevData[i] || { revenue: 0 }) : [];
   const prevPts = prevAligned.map((d, i) => [pad.l + i * xStep, yS(d.revenue)]);
 
@@ -3049,9 +3052,30 @@ const EnhancedRevenueTrend = ({ invoices = [], isDark }) => {
         </div>
       )}
 
-      {/* SVG Chart — smooth cubic bezier */}
+      {/* Chart mode + interactive Revenue Trend chart */}
       {currentData.length > 0 && (
         <div>
+          <div className="flex items-center justify-between mb-2">
+            <p className={`text-[10px] font-semibold ${isDark ? 'text-slate-300' : 'text-slate-500'}`}>
+              Click any {chartType === 'line' ? 'point' : 'bar'} to view the exact turnover.
+            </p>
+            <div className={`flex rounded-lg overflow-hidden border ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
+              <button
+                type="button"
+                onClick={() => { setChartType('line'); setSelectedPoint(null); }}
+                className={`px-2.5 py-1 text-[10px] font-bold transition-all ${chartType === 'line' ? 'bg-blue-600 text-white' : isDark ? 'bg-slate-700 text-slate-300' : 'bg-white text-slate-600'}`}
+              >
+                Line
+              </button>
+              <button
+                type="button"
+                onClick={() => { setChartType('bar'); setSelectedPoint(null); }}
+                className={`px-2.5 py-1 text-[10px] font-bold transition-all ${chartType === 'bar' ? 'bg-blue-600 text-white' : isDark ? 'bg-slate-700 text-slate-300' : 'bg-white text-slate-600'}`}
+              >
+                Bar
+              </button>
+            </div>
+          </div>
           <svg viewBox={`0 0 ${W} ${H}`} width="100%" preserveAspectRatio="none" style={{ overflow: 'visible' }}>
             <defs>
               <linearGradient id="trendAreaGrad" x1="0" y1="0" x2="0" y2="1">
@@ -3081,52 +3105,108 @@ const EnhancedRevenueTrend = ({ invoices = [], isDark }) => {
                 </g>
               );
             })}
-            {(() => {
-              const smooth = (pp) => {
-                if (pp.length < 2) return '';
-                let d = `M${pp[0][0]},${pp[0][1]}`;
-                for (let i = 0; i < pp.length - 1; i++) {
-                  const x0 = i > 0 ? pp[i-1][0] : pp[i][0], y0 = i > 0 ? pp[i-1][1] : pp[i][1];
-                  const x1 = pp[i][0], y1 = pp[i][1];
-                  const x2 = pp[i+1][0], y2 = pp[i+1][1];
-                  const x3 = i < pp.length-2 ? pp[i+2][0] : x2, y3 = i < pp.length-2 ? pp[i+2][1] : y2;
-                  const cp1x = x1 + (x2-x0)/5, cp1y = y1 + (y2-y0)/5;
-                  const cp2x = x2 - (x3-x1)/5, cp2y = y2 - (y3-y1)/5;
-                  d += ` C${cp1x},${cp1y} ${cp2x},${cp2y} ${x2},${y2}`;
-                }
-                return d;
-              };
-              const smoothArea = (pp) => {
-                if (pp.length < 2) return '';
-                return `${smooth(pp)} L${pp[pp.length-1][0]},${H-pad.b} L${pp[0][0]},${H-pad.b} Z`;
-              };
-              return (
-                <>
-                  {colPts.length > 1 && <path d={smoothArea(colPts)} fill="url(#collectedAreaGrad)" />}
-                  {pts.length > 1 && <path d={smoothArea(pts)} fill="url(#trendAreaGrad)" />}
-                  {compareEnabled && prevPts.length > 1 && <path d={smooth(prevPts)} fill="none" stroke={COLORS.purple} strokeWidth="2" strokeDasharray="6 3" opacity="0.75" strokeLinecap="round" strokeLinejoin="round" />}
-                  {selectedServices.length > 0 && svcPts.length > 1 && <path d={smooth(svcPts)} fill="none" stroke={COLORS.amber} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />}
-                  {colPts.length > 1 && <path d={smooth(colPts)} fill="none" stroke={COLORS.emeraldGreen} strokeWidth="2" strokeDasharray="5 3" strokeLinecap="round" strokeLinejoin="round" filter="url(#glowGreen)" />}
-                  {pts.length > 1 && <path d={smooth(pts)} fill="none" stroke={COLORS.mediumBlue} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" filter="url(#glowBlue)" />}
-                  {pts.map(([x, y], i) => (
-                    <g key={i}>
-                      <circle cx={x} cy={y} r="7" fill={COLORS.mediumBlue} opacity="0.10" />
-                      <circle cx={x} cy={y} r="3.5" fill="white" stroke={COLORS.mediumBlue} strokeWidth="2.5" />
-                      {i === pts.length - 1 && currentData[i]?.revenue > 0 && (
-                        <>
-                          <rect x={x-24} y={y-22} width="48" height="14" rx="4" fill={COLORS.mediumBlue} opacity="0.92" />
-                          <text x={x} y={y-12} textAnchor="middle" fontSize="7.5" fill="white" fontFamily="monospace" fontWeight="bold">{fmtAxis(currentData[i].revenue)}</text>
-                        </>
-                      )}
-                      <text x={x} y={H-6} textAnchor="middle" fontSize="8" fill={isDark ? '#475569' : '#94a3b8'}>{currentData[i]?.label}</text>
-                    </g>
-                  ))}
-                </>
-              );
-            })()}
+            {chartType === 'bar' ? (
+              currentData.map((d, i) => {
+                const x = currentData.length > 1 ? pad.l + i * xStep : W / 2;
+                const barW = Math.min(30, Math.max(12, xStep * 0.55));
+                const y = yS(d.revenue);
+                const barH = Math.max(0, H - pad.b - y);
+                const selected = selectedPoint === i;
+                return (
+                  <g key={`bar-${d.month}`} role="button" tabIndex={0} onClick={() => setSelectedPoint(i)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setSelectedPoint(i); }} style={{ cursor: 'pointer' }}>
+                    <rect x={x - barW/2} y={y} width={barW} height={barH} rx="5" fill={COLORS.mediumBlue} opacity={selected ? 1 : 0.86} />
+                    {selected && <rect x={x - barW/2 - 2} y={y - 2} width={barW + 4} height={barH + 2} rx="6" fill="none" stroke={COLORS.mediumBlue} strokeWidth="2" opacity="0.45" />}
+                    {d.revenue > 0 && i === currentData.length - 1 && (
+                      <>
+                        <rect x={x-30} y={Math.max(2, y-22)} width="60" height="14" rx="4" fill={COLORS.mediumBlue} opacity="0.92" />
+                        <text x={x} y={Math.max(12, y-12)} textAnchor="middle" fontSize="7.5" fill="white" fontFamily="monospace" fontWeight="bold">{fmtAxis(d.revenue)}</text>
+                      </>
+                    )}
+                    <text x={x} y={H-6} textAnchor="middle" fontSize="8" fill={isDark ? '#475569' : '#94a3b8'}>{d.label}</text>
+                  </g>
+                );
+              })
+            ) : (
+              (() => {
+                const smooth = (pp) => {
+                  if (pp.length < 2) return '';
+                  let d = `M${pp[0][0]},${pp[0][1]}`;
+                  for (let i = 0; i < pp.length - 1; i++) {
+                    const x0 = i > 0 ? pp[i-1][0] : pp[i][0], y0 = i > 0 ? pp[i-1][1] : pp[i][1];
+                    const x1 = pp[i][0], y1 = pp[i][1];
+                    const x2 = pp[i+1][0], y2 = pp[i+1][1];
+                    const x3 = i < pp.length-2 ? pp[i+2][0] : x2, y3 = i < pp.length-2 ? pp[i+2][1] : y2;
+                    const cp1x = x1 + (x2-x0)/5, cp1y = y1 + (y2-y0)/5;
+                    const cp2x = x2 - (x3-x1)/5, cp2y = y2 - (y3-y1)/5;
+                    d += ` C${cp1x},${cp1y} ${cp2x},${cp2y} ${x2},${y2}`;
+                  }
+                  return d;
+                };
+                const smoothArea = (pp) => {
+                  if (pp.length < 2) return '';
+                  return `${smooth(pp)} L${pp[pp.length-1][0]},${H-pad.b} L${pp[0][0]},${H-pad.b} Z`;
+                };
+                return (
+                  <>
+                    {colPts.length > 1 && <path d={smoothArea(colPts)} fill="url(#collectedAreaGrad)" />}
+                    {pts.length > 1 && <path d={smoothArea(pts)} fill="url(#trendAreaGrad)" />}
+                    {compareEnabled && prevPts.length > 1 && <path d={smooth(prevPts)} fill="none" stroke={COLORS.purple} strokeWidth="2" strokeDasharray="6 3" opacity="0.75" strokeLinecap="round" strokeLinejoin="round" />}
+                    {selectedServices.length > 0 && svcPts.length > 1 && <path d={smooth(svcPts)} fill="none" stroke={COLORS.amber} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />}
+                    {colPts.length > 1 && <path d={smooth(colPts)} fill="none" stroke={COLORS.emeraldGreen} strokeWidth="2" strokeDasharray="5 3" strokeLinecap="round" strokeLinejoin="round" filter="url(#glowGreen)" />}
+                    {pts.length > 1 && <path d={smooth(pts)} fill="none" stroke={COLORS.mediumBlue} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" filter="url(#glowBlue)" />}
+                    {pts.map(([x, y], i) => {
+                      const selected = selectedPoint === i;
+                      return (
+                        <g key={i} role="button" tabIndex={0} onClick={() => setSelectedPoint(i)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setSelectedPoint(i); }} style={{ cursor: 'pointer' }}>
+                          <circle cx={x} cy={y} r={selected ? 9 : 7} fill={COLORS.mediumBlue} opacity={selected ? 0.18 : 0.10} />
+                          <circle cx={x} cy={y} r={selected ? 5 : 3.5} fill="white" stroke={COLORS.mediumBlue} strokeWidth="2.5" />
+                          {selected && (
+                            <g>
+                              <rect x={x-70} y={Math.max(2, y-46)} width="140" height="34" rx="7" fill={isDark ? '#0f172a' : '#0f172a'} opacity="0.96" />
+                              <text x={x} y={Math.max(16, y-30)} textAnchor="middle" fontSize="8" fill="#cbd5e1" fontWeight="600">{currentData[i]?.label}</text>
+                              <text x={x} y={Math.max(28, y-16)} textAnchor="middle" fontSize="10" fill="white" fontFamily="monospace" fontWeight="bold">Turnover: {fmtC(currentData[i]?.revenue || 0)}</text>
+                            </g>
+                          )}
+                          {i === pts.length - 1 && currentData[i]?.revenue > 0 && !selected && (
+                            <>
+                              <rect x={x-24} y={y-22} width="48" height="14" rx="4" fill={COLORS.mediumBlue} opacity="0.92" />
+                              <text x={x} y={y-12} textAnchor="middle" fontSize="7.5" fill="white" fontFamily="monospace" fontWeight="bold">{fmtAxis(currentData[i].revenue)}</text>
+                            </>
+                          )}
+                          <text x={x} y={H-6} textAnchor="middle" fontSize="8" fill={isDark ? '#475569' : '#94a3b8'}>{currentData[i]?.label}</text>
+                        </g>
+                      );
+                    })}
+                  </>
+                );
+              })()
+            )}
           </svg>
+
+          {chartPoint && (
+            <div className={`mt-3 rounded-xl border p-3 flex flex-wrap items-center justify-between gap-3 ${isDark ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+              <div>
+                <p className="text-[9px] uppercase tracking-wider font-bold text-slate-400">Selected period</p>
+                <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{chartPoint.label}</p>
+              </div>
+              <div>
+                <p className="text-[9px] uppercase tracking-wider font-bold text-slate-400">Exact turnover</p>
+                <p className="text-lg font-black" style={{ color: COLORS.mediumBlue }}>{fmtC(chartPoint.revenue)}</p>
+              </div>
+              <div>
+                <p className="text-[9px] uppercase tracking-wider font-bold text-slate-400">Collected</p>
+                <p className="text-sm font-bold" style={{ color: COLORS.emeraldGreen }}>{fmtC(chartPoint.collected)}</p>
+              </div>
+              <div>
+                <p className="text-[9px] uppercase tracking-wider font-bold text-slate-400">Invoices</p>
+                <p className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{chartPoint.count}</p>
+              </div>
+              <button type="button" onClick={() => setSelectedPoint(null)} className="text-[10px] font-bold text-slate-400 hover:text-slate-600">Clear</button>
+            </div>
+          )}
+
           <div className="flex flex-wrap gap-4 text-[10px] mt-2 text-slate-400">
-            <span className="flex items-center gap-1.5"><span className="w-5 h-0.5 inline-block rounded-full" style={{ background: COLORS.mediumBlue }} />Revenue</span>
+            <span className="flex items-center gap-1.5"><span className="w-5 h-0.5 inline-block rounded-full" style={{ background: COLORS.mediumBlue }} />Revenue / Turnover</span>
             <span className="flex items-center gap-1.5"><span className="w-5 h-0.5 inline-block rounded-full border-t-2 border-dashed" style={{ borderColor: COLORS.emeraldGreen }} />Collected</span>
             {compareEnabled && <span className="flex items-center gap-1.5"><span className="w-5 h-0.5 inline-block border-t-2 border-dashed" style={{ borderColor: COLORS.purple }} />Prev Period</span>}
             {selectedServices.length > 0 && <span className="flex items-center gap-1.5"><span className="w-5 h-0.5 inline-block rounded-full" style={{ background: COLORS.amber }} />Selected Services</span>}
