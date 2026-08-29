@@ -2462,6 +2462,7 @@ export default function ClientPortalManagerPage() {
   const [portalUsers, setPortalUsers]   = useState([]);
   const [loading, setLoading]           = useState(true);
   const [manageTarget, setManageTarget] = useState(null);
+  const [portalStatus, setPortalStatus] = useState('live');
 
   const isAdmin = user?.role === 'admin';
   // Users with can_view_client_portal permission granted via Permission Governance
@@ -2491,6 +2492,29 @@ export default function ClientPortalManagerPage() {
   }, []);
 
   useEffect(() => { loadUsers(); }, [loadUsers]);
+
+  // Keep the manager's summary card in sync with the same persisted setting
+  // used by the public/client portal. This avoids the misleading hard-coded
+  // "Live" label when the administrator selects Maintenance or Offline.
+  useEffect(() => {
+    let mounted = true;
+    const loadPortalStatus = () => {
+      api.get('/client-portal/settings')
+        .then((res) => {
+          if (mounted) {
+            const value = String(res?.data?.portal_status || 'live').toLowerCase();
+            setPortalStatus(['live', 'maintenance', 'offline'].includes(value) ? value : 'live');
+          }
+        })
+        .catch(() => {});
+    };
+    loadPortalStatus();
+    const timer = window.setInterval(loadPortalStatus, 10000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
+  }, [activeTab]);
 
   const handleManage = (pu) => {
     setManageTarget({ clientId: pu.client_id, clientName: pu.client_name || pu.portal_username });
@@ -2530,7 +2554,13 @@ export default function ClientPortalManagerPage() {
         <StatCard icon={Users}     label="Total Portal Users" value={portalUsers.length} color={COLORS.deepBlue}     bg={`${COLORS.deepBlue}12`} />
         <StatCard icon={UserCheck} label="Active"             value={activeCount}        color={COLORS.emeraldGreen} bg={`${COLORS.emeraldGreen}12`} />
         <StatCard icon={Lock}      label="Inactive"           value={inactiveCount}      color="#94a3b8"             bg="#94a3b812" />
-        <StatCard icon={Globe}     label="Portal Status"      value="Live"               color="#1F6FB2"             bg="#1F6FB212" />
+        <StatCard
+          icon={Globe}
+          label="Portal Status"
+          value={portalStatus.charAt(0).toUpperCase() + portalStatus.slice(1)}
+          color={portalStatus === 'live' ? '#1F6FB2' : portalStatus === 'maintenance' ? '#D97706' : '#DC2626'}
+          bg={portalStatus === 'live' ? '#1F6FB212' : portalStatus === 'maintenance' ? '#D9770612' : '#DC262612'}
+        />
       </motion.div>
 
       {/* ── Info banners ── */}
