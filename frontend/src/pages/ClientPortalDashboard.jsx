@@ -1,4 +1,4 @@
-// ── ClientPortalDashboard.jsx ─────────────────────────────────────────────
+// ── ClientPortalDashboard.jsx — GOOGLE DRIVE / CONTACT ROBUST V2 ─────────
 // Enhanced with:
 //   • Messages tab (client receives messages from admin — DSC, compliance, etc.)
 //   • Unread message badge on tab
@@ -954,38 +954,58 @@ function TaskDeptContact({ departments, helpDesk }) {
 // (Client Portal Setting → Department Helpline Numbers). Purely display —
 // data arrives pre-loaded via the public-settings call the dashboard
 // already makes, so this tab needs no separate fetch/loading state.
-function ContactTab({ helpDesk }) {
+function ContactTab({ helpDesk, peopleContacts }) {
   const rows = (helpDesk || []).filter(r => (r.department || "").trim());
+  const people = (peopleContacts || []).filter(r =>
+    (r.name || "").trim() || (r.position || "").trim() || (r.phone || "").trim() || (r.email || "").trim()
+  );
 
   return (
-    <Section title="Contact Us" icon="📞" count={rows.length || undefined}>
-      {rows.length === 0 ? (
-        <Empty message="Helpline details haven't been added yet. Please check back soon." />
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {rows.map((r, i) => (
-            <div key={i} className="p-4 bg-gray-50 rounded-xl border border-gray-100 hover:border-blue-200 transition">
-              <p className="font-semibold text-gray-900 text-sm">{deptLabel(r.department)}</p>
-              {r.phone && (
-                <a href={`tel:${r.phone.replace(/[^\d+]/g, "")}`} className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 mt-2 font-medium">
-                  <span>📞</span> {r.phone}
-                </a>
-              )}
-              {r.email && (
-                <a href={`mailto:${r.email}`} className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-blue-600 mt-1.5">
-                  <span>✉️</span> {r.email}
-                </a>
-              )}
-              {r.hours && (
-                <p className="text-xs text-gray-400 mt-1.5">{r.hours}</p>
-              )}
-              {!r.phone && !r.email && (
-                <p className="text-xs text-gray-400 mt-1.5 italic">Contact details coming soon.</p>
-              )}
+    <Section title="Contact Us" icon="📞" count={(rows.length + people.length) || undefined}>
+      <div className="space-y-6">
+        {people.length > 0 && (
+          <div>
+            <h3 className="font-semibold text-gray-900 text-sm mb-3">Key Contacts</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {people.map((p, i) => (
+                <div key={`person-${i}`} className="p-4 bg-white rounded-xl border border-gray-100 hover:border-blue-200 transition">
+                  <p className="font-semibold text-gray-900 text-sm">{p.name || "Contact"}</p>
+                  {p.position && <p className="text-xs text-gray-500 mt-0.5">{p.position}</p>}
+                  {p.phone && (
+                    <a href={`tel:${p.phone.replace(/[^\d+]/g, "")}`} className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 mt-2 font-medium">
+                      <span>📞</span> {p.phone}
+                    </a>
+                  )}
+                  {p.email && (
+                    <a href={`mailto:${p.email}`} className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-blue-600 mt-1.5">
+                      <span>✉️</span> {p.email}
+                    </a>
+                  )}
+                </div>
+              ))}
             </div>
-          ))}
+          </div>
+        )}
+
+        <div>
+          <h3 className="font-semibold text-gray-900 text-sm mb-3">Department Helplines</h3>
+          {rows.length === 0 ? (
+            <Empty message="Helpline details haven't been added yet. Please check back soon." />
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {rows.map((r, i) => (
+                <div key={`dept-${i}`} className="p-4 bg-gray-50 rounded-xl border border-gray-100 hover:border-blue-200 transition">
+                  <p className="font-semibold text-gray-900 text-sm">{deptLabel(r.department)}</p>
+                  {r.phone && <a href={`tel:${r.phone.replace(/[^\d+]/g, "")}`} className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 mt-2 font-medium"><span>📞</span> {r.phone}</a>}
+                  {r.email && <a href={`mailto:${r.email}`} className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-blue-600 mt-1.5"><span>✉️</span> {r.email}</a>}
+                  {r.hours && <p className="text-xs text-gray-400 mt-1.5">{r.hours}</p>}
+                  {!r.phone && !r.email && <p className="text-xs text-gray-400 mt-1.5 italic">Contact details coming soon.</p>}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </Section>
   );
 }
@@ -1000,7 +1020,7 @@ export default function ClientPortalDashboard() {
   const [error, setError] = useState("");
 
   // ── Branding (custom logo set by the admin in Client Portal Setting) ──
-  const [branding, setBranding] = useState({ portal_name: "Client Portal", logo_url: null, help_desk: [] });
+  const [branding, setBranding] = useState({ portal_name: "Client Portal", logo_url: null, help_desk: [], people_contacts: [] });
   useEffect(() => {
     portalApi().get("/client-portal/public-settings")
       .then((res) => res?.data && setBranding((b) => ({ ...b, ...res.data })))
@@ -1192,7 +1212,7 @@ export default function ClientPortalDashboard() {
         {activeTab === "drive" ? (
           <DriveTab user={user} />
         ) : activeTab === "contact" ? (
-          <ContactTab helpDesk={branding.help_desk} />
+          <ContactTab helpDesk={branding.help_desk} peopleContacts={branding.people_contacts} />
         ) : loading ? (
           <div className="flex justify-center py-16">
             <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
