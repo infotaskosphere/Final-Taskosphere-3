@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
@@ -227,11 +227,32 @@ export default function ClientPortalLogin() {
   // default Taskosphere mark before the client's own logo arrives.
   const [branding, setBranding] = useState({ portal_name: "Client Portal", logo_url: null });
   const [brandingLoaded, setBrandingLoaded] = useState(false);
-  React.useEffect(() => {
-    API.get("/client-portal/public-settings")
-      .then((res) => res?.data && setBranding((b) => ({ ...b, ...res.data })))
-      .catch(() => {}) // silent — default branding is fine if this fails
-      .finally(() => setBrandingLoaded(true));
+  const [portalStatus, setPortalStatus] = useState(null);
+
+  const refreshPortalStatus = async () => {
+    try {
+      const res = await API.get("/client-portal/public-settings", {
+        params: { _ts: Date.now() },
+      });
+      const data = res?.data || {};
+      const nextStatus = String(data.portal_status || "live").toLowerCase();
+      setBranding((b) => ({ ...b, ...data }));
+      setPortalStatus(
+        ["live", "maintenance", "offline"].includes(nextStatus) ? nextStatus : "live"
+      );
+    } catch {
+      // Keep the current known state on transient failures. On first load,
+      // remain in the checking state until the next poll succeeds.
+      setPortalStatus((current) => current ?? null);
+    } finally {
+      setBrandingLoaded(true);
+    }
+  };
+
+  useEffect(() => {
+    refreshPortalStatus();
+    const timer = window.setInterval(refreshPortalStatus, 10000);
+    return () => window.clearInterval(timer);
   }, []);
 
   // Retry login up to 3 times with increasing delay — handles Render cold starts
@@ -241,7 +262,12 @@ export default function ClientPortalLogin() {
         return await API.post("/client-portal/login", form);
       } catch (err) {
         // If it's a 401 / 403 (auth error) — no point retrying
-        if (err?.response?.status === 401 || err?.response?.status === 403) {
+        if (
+          err?.response?.status === 401 ||
+          err?.response?.status === 403 ||
+          err?.response?.data?.detail?.code === "PORTAL_MAINTENANCE" ||
+          err?.response?.data?.detail?.code === "PORTAL_OFFLINE"
+        ) {
           throw err;
         }
         // Last attempt — throw so the caller handles the error
@@ -301,6 +327,52 @@ export default function ClientPortalLogin() {
       setLoading(false);
     }
   };
+
+  if (portalStatus === null) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center p-4">
+        <div className="text-center">
+          <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-sm text-gray-500">Checking Client Portal availability…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (portalStatus !== "live") {
+    const maintenance = portalStatus === "maintenance";
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center p-4">
+        <div className="w-full max-w-md bg-white rounded-2xl shadow-sm border border-gray-200 p-8 text-center">
+          {branding.logo_url ? (
+            <img
+              src={branding.logo_url}
+              alt={branding.portal_name || "Client Portal"}
+              className="w-16 h-16 mx-auto mb-5 rounded-xl object-contain"
+            />
+          ) : (
+            <div className="w-16 h-16 mx-auto mb-5 rounded-xl bg-blue-600 text-white flex items-center justify-center text-2xl">
+              {maintenance ? "🛠️" : "⛔"}
+            </div>
+          )}
+          <h1 className="text-xl font-bold text-gray-900">
+            {maintenance ? "Client Portal Under Maintenance" : "Client Portal Offline"}
+          </h1>
+          <p className="text-sm text-gray-500 mt-2 leading-6">
+            {maintenance
+              ? "We are performing maintenance on the Client Portal. Please try again shortly."
+              : "The Client Portal is currently offline. Please try again later or contact your account manager."}
+          </p>
+          <button
+            onClick={refreshPortalStatus}
+            className="mt-6 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
+          >
+            Check Again
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center p-4">
