@@ -5080,12 +5080,24 @@ async def _run_reconcile_debounced(cache_key: str, fn, *args):
 
 async def reconcile_and_sync_all_sales_and_payments(company_id: str):
     await _run_reconcile_debounced(f"sales:{company_id}", _reconcile_and_sync_all_sales_and_payments_impl, company_id)
-    await _ensure_payment_journal_entries(company_id, db.payments, sync_payment_journal_entry, "payment")
+    # Backfill safety-net check below used to run synchronously on every
+    # single call (one per report load — Trial Balance, P&L x N months,
+    # Balance Sheet, validation-engine — all hitting it concurrently for
+    # the same company). It now shares the same debounce/lock as the
+    # reconcile pass above, so it actually runs at most once per TTL
+    # window in the background instead of blocking every report request.
+    await _run_reconcile_debounced(
+        f"payment-backfill:{company_id}", _ensure_payment_journal_entries,
+        company_id, db.payments, sync_payment_journal_entry, "payment",
+    )
 
 
 async def reconcile_and_sync_all_purchases_and_payments(company_id: str):
     await _run_reconcile_debounced(f"purchases:{company_id}", _reconcile_and_sync_all_purchases_and_payments_impl, company_id)
-    await _ensure_payment_journal_entries(company_id, db.purchase_payments, sync_purchase_payment_journal_entry, "purchase_payment")
+    await _run_reconcile_debounced(
+        f"purchase-payment-backfill:{company_id}", _ensure_payment_journal_entries,
+        company_id, db.purchase_payments, sync_purchase_payment_journal_entry, "purchase_payment",
+    )
 
 
 async def _ensure_payment_journal_entries(company_id: str, collection, sync_fn, source_label: str) -> int:
@@ -5106,18 +5118,26 @@ async def _ensure_payment_journal_entries(company_id: str, collection, sync_fn, 
     That's exactly why Accounts Receivable could stay wrong forever no
     matter how many times Verify & Fix ran. This checks every payment
     directly against journal_entries and (re)posts any that are missing.
+
+    Previously this issued one find_one() per payment/bill document — for a
+    company with hundreds of payments that's hundreds of round trips to
+    Mongo, every time it ran. It now fetches the existing source_ids for
+    this company in a single query and diffs them in Python, so the cost is
+    two queries total regardless of how many payments there are.
     """
     q = {"company_id": company_id} if company_id else {}
     docs = await collection.find(q, {"_id": 0, "id": 1}).to_list(20000)
-    fixed = 0
-    for doc in docs:
-        exists = await db.journal_entries.find_one(
-            {"source": source_label, "source_id": doc["id"]}, {"_id": 0, "id": 1}
-        )
-        if not exists:
-            await sync_fn(doc["id"])
-            fixed += 1
-    return fixed
+    if not docs:
+        return 0
+    doc_ids = [d["id"] for d in docs]
+    existing = await db.journal_entries.find(
+        {"source": source_label, "source_id": {"$in": doc_ids}}, {"_id": 0, "source_id": 1}
+    ).to_list(len(doc_ids))
+    existing_ids = {e["source_id"] for e in existing}
+    missing_ids = [d for d in doc_ids if d not in existing_ids]
+    for doc_id in missing_ids:
+        await sync_fn(doc_id)
+    return len(missing_ids)
 
 
 async def _dedupe_journal_entries(company_id: str, source: str):
