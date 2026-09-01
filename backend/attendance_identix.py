@@ -988,8 +988,10 @@ async def sync_users_to_device(
     if not sn:
         raise HTTPException(status_code=400, detail="Device has no serial number configured")
 
+    batch_id = str(uuid.uuid4())
     queued = 0
     failed = 0
+    command_ids = []
     for u in all_users:
         try:
             identix_uid = u.get("identix_uid")
@@ -1010,7 +1012,43 @@ async def sync_users_to_device(
                         "thumb_enrolled":   False,
                     }},
                 )
-            await _queue_user_cmd(sn, identix_uid, u.get("full_name", ""), u.get("id", ""))
+            # Do not create duplicate pending/sent commands for the same user
+            # when the operator double-clicks Sync Users.
+            existing = await db.identix_cmd_queue.find_one({
+                "device_serial": sn,
+                "identix_uid": int(identix_uid),
+                "status": {"$in": ["pending", "sent"]},
+            }, {"_id": 0, "cmd_id": 1})
+            if existing:
+                command_ids.append(existing.get("cmd_id"))
+                queued += 1
+                continue
+
+            safe_name = (u.get("full_name") or "")[:24].replace("\t", " ").replace("\n", " ")
+            seq = await _next_seq_id(sn)
+            cmd_id = str(uuid.uuid4())
+            cmd_str = (
+                f"DATA UPDATE USERINFO PIN={int(identix_uid)}\t"
+                f"Name={safe_name}\t"
+                f"Privilege=0\tPassword=\tCard=0\tGroup=1"
+            )
+            await db.identix_cmd_queue.insert_one({
+                "cmd_id": cmd_id,
+                "seq_id": seq,
+                "device_serial": sn,
+                "identix_uid": int(identix_uid),
+                "user_id": u.get("id"),
+                "user_name": u.get("full_name", ""),
+                "batch_id": batch_id,
+                "cmd_str": cmd_str,
+                "status": "pending",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "sent_at": None,
+                "acknowledged_at": None,
+                "return_code": None,
+            })
+            logger.info(f"📥 Queued user cmd batch={batch_id} SN={sn} uid={identix_uid} name={safe_name}")
+            command_ids.append(cmd_id)
             await db.users.update_one({"id": u["id"]}, {"$set": {"identix_enrolled": True}})
             queued += 1
         except Exception as eq:
@@ -1021,7 +1059,9 @@ async def sync_users_to_device(
         "success": True,
         "synced":  queued,
         "failed":  failed,
-        "message": f"Queued {queued} user(s) for ADMS push to {device.get('name')}. Machine will receive commands on next poll (up to 1 min).",
+        "batch_id": batch_id,
+        "command_ids": command_ids,
+        "message": f"Queued {queued} user(s) for ADMS push to {device.get('name')}. Waiting for the machine's ADMS polling cycle.",
     }
 
 
@@ -1602,6 +1642,11 @@ async def iclock_cdata(request: Request):
                 "TimeZone=5.5",
                 "Realtime=1",
                 "Encrypt=None",
+                # ADMS firmware expects the response terminator used by the
+                # PUSH protocol. Without this final 0 some terminals keep
+                # repeating /iclock/cdata?options=all and never enter the
+                # /iclock/getrequest polling cycle.
+                "0",
             ]
             return PlainTextResponse(
                 "\n".join(config_lines) + "\n",
@@ -1741,14 +1786,24 @@ async def iclock_cdata(request: Request):
 @identix_router.get("/cmd-queue")
 async def get_cmd_queue(
     status: Optional[str] = None,
+    device_serial: Optional[str] = None,
+    batch_id: Optional[str] = None,
     current_user: User = Depends(require_admin()),
 ):
-    """View pending/sent ADMS commands queued for devices."""
+    """View ADMS commands with optional real-time sync filters."""
     query = {}
     if status:
         query["status"] = status
-    cmds = await db.identix_cmd_queue.find(query, {"_id": 0}).sort("created_at", -1).limit(100).to_list(100)
-    return {"commands": cmds, "total": len(cmds)}
+    if device_serial:
+        query["device_serial"] = _normalize_serial_number(device_serial)
+    if batch_id:
+        query["batch_id"] = batch_id
+    cmds = await db.identix_cmd_queue.find(query, {"_id": 0}).sort("created_at", -1).limit(1000).to_list(1000)
+    counts = {}
+    for c in cmds:
+        key = c.get("status", "unknown")
+        counts[key] = counts.get(key, 0) + 1
+    return {"commands": cmds, "total": len(cmds), "counts": counts}
 
 
 @identix_router.delete("/cmd-queue")
