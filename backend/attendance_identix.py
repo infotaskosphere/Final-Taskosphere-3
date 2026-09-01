@@ -38,7 +38,9 @@ import uuid
 import socket
 import logging
 import traceback
+import hashlib
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from typing import Optional, Dict, Any
 from fastapi import Request
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
@@ -425,6 +427,393 @@ class SyncRequest(BaseModel):
 class ScanRequest(BaseModel):
     subnet: Optional[str] = None
     port:   int           = 4370
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MACHINE ATTENDANCE NORMALISATION
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Identix X2008 is configured for India in the user's environment. ADMS punch
+# timestamps are machine-local wall-clock values (e.g. "10:31:22"), not UTC.
+# Keep the timezone explicit throughout the biometric integration and store
+# canonical attendance timestamps in UTC, just like Taskosphere's manual
+# attendance endpoint does.
+MACHINE_TZ = ZoneInfo("Asia/Kolkata")
+
+_INDEX_READY = False
+_INDEX_LOCK = asyncio.Lock()
+
+
+async def _ensure_identix_indexes():
+    """Create safe indexes used by the ADMS ingestion path once per process."""
+    global _INDEX_READY
+    if _INDEX_READY:
+        return
+    async with _INDEX_LOCK:
+        if _INDEX_READY:
+            return
+        try:
+            # Partial unique index only covers new records that carry event_id,
+            # so existing legacy records without event_id cannot break startup.
+            await db.identix_attendance.create_index(
+                [("event_id", 1)],
+                unique=True,
+                partialFilterExpression={"event_id": {"$exists": True}},
+                name="identix_event_id_unique",
+            )
+            await db.identix_attendance.create_index(
+                [("device_serial", 1), ("punch_time", 1)],
+                name="identix_device_punch_time",
+            )
+            await db.identix_attendance.create_index(
+                [("device_user_id", 1), ("punch_time", 1)],
+                name="identix_user_punch_time",
+            )
+            _INDEX_READY = True
+        except Exception:
+            # Index creation must never prevent the ADMS endpoint from accepting
+            # a punch. The event-id upsert remains idempotent when the unique
+            # index is available, and legacy duplicate checks still apply.
+            logger.exception("Failed to initialise Identix attendance indexes")
+
+
+def _parse_machine_timestamp(value: Any) -> datetime:
+    """Parse an Identix timestamp and return an aware IST datetime.
+
+    ADMS commonly sends `YYYY-MM-DD HH:MM:SS` without an offset. Such a value
+    represents the time shown on the X2008, so it must be interpreted as IST,
+    not UTC. If a future firmware sends an explicit offset, we honour it.
+    """
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        text = str(value or "").strip()
+        if not text:
+            raise ValueError("Empty machine punch timestamp")
+
+        # Normalise a trailing Z for datetime.fromisoformat().
+        iso_text = text[:-1] + "+00:00" if text.endswith(("Z", "z")) else text
+        try:
+            dt = datetime.fromisoformat(iso_text)
+        except ValueError:
+            parsed = None
+            for fmt in (
+                "%Y-%m-%d %H:%M:%S",
+                "%Y-%m-%d %H:%M",
+                "%Y/%m/%d %H:%M:%S",
+                "%Y/%m/%d %H:%M",
+            ):
+                try:
+                    parsed = datetime.strptime(text, fmt)
+                    break
+                except ValueError:
+                    continue
+            if parsed is None:
+                raise ValueError(f"Unsupported machine punch timestamp: {text}")
+            dt = parsed
+
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=MACHINE_TZ)
+    return dt.astimezone(MACHINE_TZ)
+
+
+def _to_utc(dt: datetime) -> datetime:
+    """Return an aware UTC datetime, treating legacy naive values as UTC."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _read_attendance_datetime(value: Any) -> Optional[datetime]:
+    """Read a stored attendance timestamp safely."""
+    if value is None:
+        return None
+    try:
+        if isinstance(value, datetime):
+            return _to_utc(value)
+        return _to_utc(datetime.fromisoformat(str(value)))
+    except Exception:
+        return None
+
+
+def _late_for_user(user: dict, punch_dt_ist: datetime) -> bool:
+    try:
+        pit = datetime.strptime(user.get("punch_in_time") or "10:30", "%H:%M")
+        gt = datetime.strptime(user.get("grace_time") or "00:10", "%H:%M")
+        grace_minutes = gt.hour * 60 + gt.minute
+        deadline = punch_dt_ist.replace(
+            hour=pit.hour, minute=pit.minute, second=0, microsecond=0
+        ) + timedelta(minutes=grace_minutes)
+        return punch_dt_ist > deadline
+    except Exception:
+        return False
+
+
+def _early_out_for_user(user: dict, punch_dt_ist: datetime) -> bool:
+    try:
+        pot = datetime.strptime(user.get("punch_out_time") or "19:00", "%H:%M")
+        expected = punch_dt_ist.replace(
+            hour=pot.hour, minute=pot.minute, second=0, microsecond=0
+        )
+        return punch_dt_ist < expected
+    except Exception:
+        return False
+
+
+def _overtime_for_user(user: dict, punch_dt_ist: datetime) -> int:
+    try:
+        pot = datetime.strptime(user.get("punch_out_time") or "19:00", "%H:%M")
+        expected = punch_dt_ist.replace(
+            hour=pot.hour, minute=pot.minute, second=0, microsecond=0
+        )
+        return max(0, int((punch_dt_ist - expected).total_seconds() / 60))
+    except Exception:
+        return 0
+
+
+def _machine_event_id(
+    device_serial: str,
+    device_user_id: str,
+    punch_time_raw: str,
+    punch_type: str,
+    punch_code: Optional[str] = None,
+    log_id: Optional[Any] = None,
+) -> str:
+    """Build a deterministic event ID so ADMS retries cannot create duplicates."""
+    material = "|".join(
+        [
+            str(device_serial or ""),
+            str(device_user_id or ""),
+            str(punch_time_raw or ""),
+            str(punch_type or ""),
+            str(punch_code or ""),
+            str(log_id if log_id is not None else ""),
+        ]
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _punch_code_to_type(code: Any) -> Optional[str]:
+    """Map standard Identix/ZK ADMS punch codes to IN/OUT.
+
+    Unknown codes are ignored instead of being incorrectly treated as OUT.
+    """
+    code = str(code).strip()
+    if code in {"0", "4"}:
+        return "in"
+    if code in {"1", "5"}:
+        return "out"
+    return None
+
+
+async def _find_identix_user(device_user_id: str) -> Optional[dict]:
+    """Resolve a machine UID to a Taskosphere user."""
+    projection = {
+        "_id": 0,
+        "id": 1,
+        "full_name": 1,
+        "departments": 1,
+        "identix_uid": 1,
+        "punch_in_time": 1,
+        "grace_time": 1,
+        "punch_out_time": 1,
+    }
+
+    if str(device_user_id).isdigit():
+        user = await db.users.find_one(
+            {"identix_uid": int(device_user_id)}, projection
+        )
+        if user:
+            return user
+
+    return await db.users.find_one(
+        {"identix_uid": str(device_user_id)}, projection
+    )
+
+
+async def _store_machine_raw_punch(
+    *,
+    event_id: str,
+    device_serial: str,
+    device_id: Optional[str],
+    device_name: Optional[str],
+    device_user_id: str,
+    punch_time_raw: str,
+    punch_type: str,
+    punch_code: Optional[str],
+    verify_mode: Any = 0,
+    log_id: Optional[Any] = None,
+    source: str = "machine_push",
+    user: Optional[dict] = None,
+) -> bool:
+    """Atomically insert a raw punch. Returns True only for a new event."""
+    await _ensure_identix_indexes()
+
+    try:
+        punch_dt_ist = _parse_machine_timestamp(punch_time_raw)
+    except Exception:
+        punch_dt_ist = None
+
+    record = {
+        "id": str(uuid.uuid4()),
+        "event_id": event_id,
+        "device_id": device_id,
+        "device_serial": device_serial or None,
+        "device_name": device_name,
+        "device_user_id": str(device_user_id),
+        "punch_time": str(punch_time_raw),
+        "punch_type": punch_type,
+        "punch_code": str(punch_code) if punch_code is not None else None,
+        "verify_mode": verify_mode,
+        "log_id": log_id,
+        "source": source,
+        "user_id": user.get("id") if user else None,
+        "user_name": user.get("full_name") if user else None,
+        "department": (
+            user.get("departments", [None])[0]
+            if user and user.get("departments")
+            else None
+        ),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if punch_dt_ist is not None:
+        record["punch_time_ist"] = punch_dt_ist.isoformat()
+        record["punch_time_utc"] = punch_dt_ist.astimezone(timezone.utc)
+
+    try:
+        result = await db.identix_attendance.update_one(
+            {"event_id": event_id},
+            {"$setOnInsert": record},
+            upsert=True,
+        )
+        return bool(result.upserted_id is not None)
+    except Exception as exc:
+        if exc.__class__.__name__ == "DuplicateKeyError":
+            return False
+        raise
+
+
+async def _mirror_machine_punch(
+    *,
+    user: dict,
+    punch_time_raw: str,
+    punch_type: str,
+    source: str,
+    device_name: Optional[str] = None,
+    device_serial: Optional[str] = None,
+    event_id: Optional[str] = None,
+) -> bool:
+    """Mirror one accepted biometric punch into Taskosphere attendance.
+
+    Main attendance timestamps are stored as UTC datetimes. Local date, late,
+    early-out and overtime calculations are performed in Asia/Kolkata.
+    """
+    punch_dt_ist = _parse_machine_timestamp(punch_time_raw)
+    punch_dt_utc = punch_dt_ist.astimezone(timezone.utc)
+    date_str = punch_dt_ist.date().isoformat()
+    user_id = user["id"]
+
+    existing_att = await db.attendance.find_one(
+        {"user_id": user_id, "date": date_str}, {"_id": 0}
+    )
+
+    if punch_type == "in":
+        current_in = _read_attendance_datetime(
+            existing_att.get("punch_in") if existing_att else None
+        )
+
+        update_fields = {
+            "status": "present",
+            "auto_marked": False,
+            "source": source,
+            "device_name": device_name,
+            "device_serial": device_serial,
+            "last_machine_punch_at": punch_dt_utc,
+        }
+        if event_id:
+            update_fields["last_machine_event_id"] = event_id
+
+        # Keep the earliest IN punch of the day. This protects against
+        # duplicate/late ADMS retries and multiple accidental IN punches.
+        if current_in is None or punch_dt_utc < current_in:
+            update_fields.update({
+                "punch_in": punch_dt_utc,
+                "is_late": _late_for_user(user, punch_dt_ist),
+                "leave_reason": None,
+            })
+
+            # If OUT arrived before IN, reconcile it now when the sequence is
+            # valid. This makes the integration resilient to out-of-order ADMS
+            # delivery/retries.
+            existing_out = _read_attendance_datetime(
+                existing_att.get("punch_out") if existing_att else None
+            )
+            if existing_out and existing_out >= punch_dt_utc:
+                duration = max(
+                    0, int((existing_out - punch_dt_utc).total_seconds() / 60)
+                )
+                existing_out_ist = existing_out.astimezone(MACHINE_TZ)
+                update_fields.update({
+                    "duration_minutes": duration,
+                    "punched_out_early": _early_out_for_user(
+                        user, existing_out_ist
+                    ),
+                    "overtime_minutes": _overtime_for_user(
+                        user, existing_out_ist
+                    ),
+                })
+
+        await db.attendance.update_one(
+            {"user_id": user_id, "date": date_str},
+            {"$set": update_fields},
+            upsert=True,
+        )
+        return True
+
+    if punch_type == "out":
+        current_out = _read_attendance_datetime(
+            existing_att.get("punch_out") if existing_att else None
+        )
+
+        # Keep the latest OUT punch of the day. This handles a user pressing
+        # OUT more than once while preserving the real end-of-day punch.
+        if current_out is not None and punch_dt_utc <= current_out:
+            return False
+
+        punch_in_dt = _read_attendance_datetime(
+            existing_att.get("punch_in") if existing_att else None
+        )
+
+        update_fields = {
+            "status": "present",
+            "punch_out": punch_dt_utc,
+            "source": source,
+            "device_name": device_name,
+            "device_serial": device_serial,
+            "last_machine_punch_at": punch_dt_utc,
+            "punched_out_early": _early_out_for_user(user, punch_dt_ist),
+            "overtime_minutes": _overtime_for_user(user, punch_dt_ist),
+        }
+        if event_id:
+            update_fields["last_machine_event_id"] = event_id
+
+        if punch_in_dt is not None:
+            update_fields["duration_minutes"] = max(
+                0, int((punch_dt_utc - punch_in_dt).total_seconds() / 60)
+            )
+        else:
+            # Keep the OUT event even if IN has not arrived yet; the IN handler
+            # above will reconcile it if the later IN timestamp is earlier.
+            update_fields["auto_marked"] = False
+
+        await db.attendance.update_one(
+            {"user_id": user_id, "date": date_str},
+            {"$set": update_fields},
+            upsert=True,
+        )
+        return True
+
+    return False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -853,34 +1242,42 @@ async def sync_attendance(
                 punch_type     = log["punch_type"]   # "in" | "out"
 
                 # ── Skip duplicates in identix_attendance ──────────────────
-                existing_raw = await db.identix_attendance.find_one({
-                    "log_id":    log.get("log_id"),
-                    "device_id": device["id"],
-                })
+                event_id = _machine_event_id(
+                    device.get("serial_number") or device.get("id", ""),
+                    device_uid,
+                    punch_time_iso,
+                    punch_type,
+                    log.get("verify_mode"),
+                    log.get("log_id"),
+                )
+
+                # ── Skip duplicates in identix_attendance ──────────────────
+                existing_raw = None
+                if log.get("log_id") is not None:
+                    existing_raw = await db.identix_attendance.find_one({
+                        "log_id":    log.get("log_id"),
+                        "device_id": device["id"],
+                    })
                 if existing_raw:
                     continue
 
-                # ── Insert raw log ─────────────────────────────────────────
-                record = {
-                    "id":             str(uuid.uuid4()),
-                    "device_id":      device["id"],
-                    "device_name":    device.get("name"),
-                    "device_user_id": device_uid,
-                    "punch_time":     punch_time_iso,
-                    "punch_type":     punch_type,
-                    "verify_mode":    log.get("verify_mode", 0),
-                    "log_id":         log.get("log_id"),
-                    "source":         "machine",
-                    "user_id":        user["id"]        if user else None,
-                    "user_name":      user["full_name"] if user else f"Unknown (UID {device_uid})",
-                    "department":     (
-                        user["departments"][0]
-                        if user and user.get("departments")
-                        else None
-                    ),
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                }
-                await db.identix_attendance.insert_one(record)
+                is_new = await _store_machine_raw_punch(
+                    event_id=event_id,
+                    device_serial=device.get("serial_number") or device.get("id", ""),
+                    device_id=device["id"],
+                    device_name=device.get("name"),
+                    device_user_id=device_uid,
+                    punch_time_raw=punch_time_iso,
+                    punch_type=punch_type,
+                    punch_code=None,
+                    verify_mode=log.get("verify_mode", 0),
+                    log_id=log.get("log_id"),
+                    source="machine",
+                    user=user,
+                )
+                if not is_new:
+                    continue
+
                 total_new += 1
 
                 # ── Mirror into main attendance collection ─────────────────
@@ -888,113 +1285,26 @@ async def sync_attendance(
                     continue
 
                 try:
-                    from zoneinfo import ZoneInfo
-                    IST = ZoneInfo("Asia/Kolkata")
-
-                    # Parse punch_time to aware datetime
-                    if isinstance(punch_time_iso, str):
-                        punch_dt = datetime.fromisoformat(punch_time_iso)
-                    else:
-                        punch_dt = punch_time_iso
-
-                    if punch_dt.tzinfo is None:
-                        punch_dt = punch_dt.replace(tzinfo=timezone.utc)
-
-                    punch_dt_ist = punch_dt.astimezone(IST)
-                    date_str     = punch_dt_ist.date().isoformat()
-                    user_id      = user["id"]
-
-                    if punch_type == "in":
-                        # Determine if late — uses this user's own punch_in_time + grace_time
-                        is_late = False
-                        try:
-                            pit_str       = user.get("punch_in_time", "10:30")
-                            gt_str        = user.get("grace_time",    "00:10")
-                            pit           = datetime.strptime(pit_str, "%H:%M")
-                            gt            = datetime.strptime(gt_str,  "%H:%M")
-                            grace_minutes = gt.hour * 60 + gt.minute
-                            deadline      = punch_dt_ist.replace(
-                                hour=pit.hour, minute=pit.minute,
-                                second=0, microsecond=0,
-                            ) + timedelta(minutes=grace_minutes)
-                            is_late = punch_dt_ist > deadline
-                        except Exception:
-                            pass
-
-                        # Only upsert if no punch_in recorded yet
-                        existing_att = await db.attendance.find_one(
-                            {"user_id": user_id, "date": date_str}, {"_id": 0}
-                        )
-                        if existing_att and existing_att.get("punch_in"):
-                            pass  # Already has punch_in — skip
-                        else:
-                            await db.attendance.update_one(
-                                {"user_id": user_id, "date": date_str},
-                                {"$set": {
-                                    "status":       "present",
-                                    "punch_in":     punch_dt,
-                                    "is_late":      is_late,
-                                    "leave_reason": None,
-                                    "auto_marked":  False,
-                                    "source":       "machine",
-                                    "device_name":  device.get("name"),
-                                }},
-                                upsert=True,
-                            )
-
-                    elif punch_type == "out":
-                        existing_att = await db.attendance.find_one(
-                            {"user_id": user_id, "date": date_str}, {"_id": 0}
-                        )
-
-                        if existing_att and existing_att.get("punch_in"):
-                            punch_in_dt = existing_att["punch_in"]
-                            if isinstance(punch_in_dt, str):
-                                punch_in_dt = datetime.fromisoformat(punch_in_dt)
-                            if punch_in_dt.tzinfo is None:
-                                punch_in_dt = punch_in_dt.replace(tzinfo=timezone.utc)
-
-                            duration_minutes = max(0, int(
-                                (punch_dt - punch_in_dt.astimezone(timezone.utc))
-                                .total_seconds() / 60
-                            ))
-
-                            punched_out_early = False
-                            try:
-                                pot_str  = user.get("punch_out_time", "19:00")
-                                pot      = datetime.strptime(pot_str, "%H:%M")
-                                expected = punch_dt_ist.replace(
-                                    hour=pot.hour, minute=pot.minute,
-                                    second=0, microsecond=0,
-                                )
-                                punched_out_early = punch_dt_ist < expected
-                            except Exception:
-                                pass
-
-                            await db.attendance.update_one(
-                                {"user_id": user_id, "date": date_str},
-                                {"$set": {
-                                    "punch_out":         punch_dt,
-                                    "duration_minutes":  duration_minutes,
-                                    "punched_out_early": punched_out_early,
-                                }},
-                            )
-                        else:
-                            # No punch_in yet — store punch_out only
-                            await db.attendance.update_one(
-                                {"user_id": user_id, "date": date_str},
-                                {"$set": {
-                                    "punch_out":   punch_dt,
-                                    "source":      "machine",
-                                    "device_name": device.get("name"),
-                                }},
-                                upsert=True,
-                            )
-
+                    await _mirror_machine_punch(
+                        user=user,
+                        punch_time_raw=punch_time_iso,
+                        punch_type=punch_type,
+                        source="machine",
+                        device_name=device.get("name"),
+                        device_serial=device.get("serial_number"),
+                        event_id=_machine_event_id(
+                            device.get("serial_number") or device.get("id", ""),
+                            device_uid,
+                            punch_time_iso,
+                            punch_type,
+                            log.get("verify_mode"),
+                            log.get("log_id"),
+                        ),
+                    )
                 except Exception as mirror_err:
                     logger.warning(
                         f"Failed to mirror punch to main attendance "
-                        f"(user={user.get('id')}, date={date_str}): {mirror_err}"
+                        f"(user={user.get('id')}): {mirror_err}"
                     )
 
             # Update last_sync_at on the device
@@ -1169,184 +1479,162 @@ async def iclock_getrequest(request: Request):
 # 🔹 Main attendance data endpoint — ADMS cloud push (machine → Render)
 @identix_router.api_route("/iclock/cdata", methods=["GET", "POST"])
 async def iclock_cdata(request: Request):
-    """
-    Called automatically by the Identix machine every time someone punches.
-    Also handles initial device handshake (GET with no body → return OK).
-    Data format per line:  user_id\tYYYY-MM-DD HH:MM:SS\tpunch_type\tverify\t...
-    punch_type: 0 = check-in, 1 = check-out
+    """Receive Identix X2008 ADMS attendance pushes.
+
+    The X2008 normally sends one or more tab-separated lines: 
+    ``USER_ID<TAB>YYYY-MM-DD HH:MM:SS<TAB>PUNCH_CODE<TAB>VERIFY...``.
+
+    The machine timestamp is interpreted in Asia/Kolkata. Raw logs are kept
+    permanently, while the main attendance collection receives UTC datetimes.
     """
     try:
-        from zoneinfo import ZoneInfo
-        IST = ZoneInfo("Asia/Kolkata")
-
         params = dict(request.query_params)
-        body   = await request.body()
-        raw    = body.decode("utf-8", errors="replace").strip()
+        body = await request.body()
+        raw = body.decode("utf-8", errors="replace").strip()
 
-        # SN comes as query param (?SN=CGKK212461298), not in body
         sn = params.get("SN") or params.get("sn", "")
-
-        # Mark device online on every call
         await _mark_device_online(sn)
 
-        # Handshake / info-only call (no punch data in body)
+        # Resolve device once for metadata and punch de-duplication. Unknown
+        # devices are still accepted so the machine does not get stuck retrying;
+        # they are logged and can be registered from the admin UI afterwards.
+        device = None
+        if sn:
+            device = await db.identix_devices.find_one(
+                {"serial_number": sn}, {"_id": 0}
+            )
+            if not device:
+                logger.warning(f"⚠️ ADMS punch from unregistered SN={sn}")
+
         if not raw or raw.upper().startswith("SN="):
             logger.info(f"📡 Identix handshake from SN={sn}")
             return "OK\n"
 
-        logger.info(f"✅ Identix push received | params={params} | lines={len(raw.splitlines())}")
+        lines = [line.strip() for line in raw.splitlines() if line.strip()]
+        logger.info(
+            f"✅ Identix push received | SN={sn} | lines={len(lines)} | params={params}"
+        )
 
         inserted = 0
+        mirrored = 0
+        skipped = 0
+        invalid = 0
 
-        for line in raw.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-
+        for line in lines:
             parts = line.split("\t")
             if len(parts) < 4:
+                invalid += 1
+                logger.warning(f"Ignoring malformed Identix ADMS line: {line!r}")
                 continue
 
             device_user_id = parts[0].strip()
-            punch_time_raw = parts[1].strip()          # "2026-05-22 09:15:00"
-            punch_code     = parts[2].strip()          # "0"=in, "1"=out, "4"=OT-in, "5"=OT-out
-            punch_type     = "in" if punch_code in ("0", "4") else "out"
+            punch_time_raw = parts[1].strip()
+            punch_code = parts[2].strip()
+            punch_type = _punch_code_to_type(punch_code)
 
-            # ── Deduplicate ───────────────────────────────────────────────
-            existing = await db.identix_attendance.find_one({
-                "device_user_id": device_user_id,
-                "punch_time":     punch_time_raw,
-            })
-            if existing:
+            if not device_user_id or not punch_time_raw or punch_type is None:
+                invalid += 1
+                logger.warning(
+                    f"Ignoring invalid Identix punch: uid={device_user_id!r}, "
+                    f"time={punch_time_raw!r}, code={punch_code!r}"
+                )
                 continue
 
-            # ── Save raw log ──────────────────────────────────────────────
-            record = {
-                "id":             str(uuid.uuid4()),
+            try:
+                # Validate the timestamp before accepting the event. This also
+                # prevents a malformed machine date from creating an attendance
+                # record on an unintended day.
+                _parse_machine_timestamp(punch_time_raw)
+            except ValueError as exc:
+                invalid += 1
+                logger.warning(f"Ignoring invalid Identix timestamp: {exc}")
+                continue
+
+            user = await _find_identix_user(device_user_id)
+            event_id = _machine_event_id(
+                sn, device_user_id, punch_time_raw, punch_type, punch_code
+            )
+
+            # Backward-compatible duplicate check for old raw records created
+            # before event_id existed. New records use the atomic event_id upsert.
+            legacy_duplicate = await db.identix_attendance.find_one({
+                "device_serial": sn or None,
                 "device_user_id": device_user_id,
-                "punch_time":     punch_time_raw,
-                "punch_type":     punch_type,
-                "source":         "machine_push",
-                "created_at":     datetime.now(timezone.utc).isoformat(),
-            }
-            await db.identix_attendance.insert_one(record)
+                "punch_time": punch_time_raw,
+                "punch_type": punch_type,
+            })
+            if not legacy_duplicate and sn:
+                # Legacy records may not have device_serial. Avoid treating a
+                # matching old record from another device as a duplicate unless
+                # its serial is known to match.
+                legacy_duplicate = await db.identix_attendance.find_one({
+                    "device_user_id": device_user_id,
+                    "punch_time": punch_time_raw,
+                    "punch_type": punch_type,
+                    "source": "machine_push",
+                    "device_serial": {"$exists": False},
+                })
+
+            if legacy_duplicate:
+                skipped += 1
+                continue
+
+            is_new = await _store_machine_raw_punch(
+                event_id=event_id,
+                device_serial=sn,
+                device_id=device.get("id") if device else None,
+                device_name=device.get("name") if device else None,
+                device_user_id=device_user_id,
+                punch_time_raw=punch_time_raw,
+                punch_type=punch_type,
+                punch_code=punch_code,
+                verify_mode=parts[3].strip() if len(parts) > 3 else 0,
+                source="machine_push",
+                user=user,
+            )
+            if not is_new:
+                skipped += 1
+                continue
+
             inserted += 1
 
-            # ── Mirror to main attendance collection ──────────────────────
+            if not user:
+                logger.warning(
+                    f"No Taskosphere user found for Identix UID={device_user_id}; "
+                    "raw punch retained for later mapping."
+                )
+                continue
+
             try:
-                # Look up user by identix_uid
-                user = await db.users.find_one(
-                    {"identix_uid": int(device_user_id)},
-                    {"_id": 0, "id": 1, "full_name": 1, "departments": 1,
-                     "punch_in_time": 1, "grace_time": 1, "punch_out_time": 1},
-                ) if device_user_id.isdigit() else None
-
-                if not user:
-                    # fallback: match by string user_id field
-                    user = await db.users.find_one(
-                        {"identix_uid": device_user_id},
-                        {"_id": 0, "id": 1, "full_name": 1, "departments": 1,
-                         "punch_in_time": 1, "grace_time": 1, "punch_out_time": 1},
-                    )
-
-                if not user:
-                    logger.warning(f"No user found for identix_uid={device_user_id}")
-                    continue
-
-                # Parse punch datetime → IST
-                punch_dt = datetime.strptime(punch_time_raw, "%Y-%m-%d %H:%M:%S")
-                punch_dt = punch_dt.replace(tzinfo=timezone.utc).astimezone(IST)
-                date_str = punch_dt.date().isoformat()
-                user_id  = user["id"]
-
-                if punch_type == "in":
-                    # Late calculation
-                    is_late = False
-                    try:
-                        pit_str       = user.get("punch_in_time", "10:30")
-                        gt_str        = user.get("grace_time",    "00:10")
-                        pit           = datetime.strptime(pit_str, "%H:%M")
-                        gt            = datetime.strptime(gt_str,  "%H:%M")
-                        grace_minutes = gt.hour * 60 + gt.minute
-                        deadline      = punch_dt.replace(
-                            hour=pit.hour, minute=pit.minute,
-                            second=0, microsecond=0,
-                        ) + timedelta(minutes=grace_minutes)
-                        is_late = punch_dt > deadline
-                    except Exception:
-                        pass
-
-                    existing_att = await db.attendance.find_one(
-                        {"user_id": user_id, "date": date_str}, {"_id": 0}
-                    )
-                    if not (existing_att and existing_att.get("punch_in")):
-                        await db.attendance.update_one(
-                            {"user_id": user_id, "date": date_str},
-                            {"$set": {
-                                "status":      "present",
-                                "punch_in":    punch_dt.isoformat(),
-                                "is_late":     is_late,
-                                "auto_marked": False,
-                                "source":      "machine_push",
-                            }},
-                            upsert=True,
-                        )
-
-                elif punch_type == "out":
-                    existing_att = await db.attendance.find_one(
-                        {"user_id": user_id, "date": date_str}, {"_id": 0}
-                    )
-                    if existing_att and existing_att.get("punch_in"):
-                        punch_in_raw = existing_att["punch_in"]
-                        punch_in_dt  = datetime.fromisoformat(punch_in_raw) \
-                            if isinstance(punch_in_raw, str) else punch_in_raw
-                        if punch_in_dt.tzinfo is None:
-                            punch_in_dt = punch_in_dt.replace(tzinfo=timezone.utc)
-
-                        duration_minutes = max(0, int(
-                            (punch_dt.astimezone(timezone.utc) - punch_in_dt.astimezone(timezone.utc))
-                            .total_seconds() / 60
-                        ))
-
-                        early = False
-                        try:
-                            pot_str  = user.get("punch_out_time", "19:00")
-                            pot      = datetime.strptime(pot_str, "%H:%M")
-                            expected = punch_dt.replace(
-                                hour=pot.hour, minute=pot.minute,
-                                second=0, microsecond=0,
-                            )
-                            early = punch_dt < expected
-                        except Exception:
-                            pass
-
-                        await db.attendance.update_one(
-                            {"user_id": user_id, "date": date_str},
-                            {"$set": {
-                                "punch_out":         punch_dt.isoformat(),
-                                "duration_minutes":  duration_minutes,
-                                "punched_out_early": early,
-                            }},
-                        )
-                    else:
-                        await db.attendance.update_one(
-                            {"user_id": user_id, "date": date_str},
-                            {"$set": {
-                                "punch_out": punch_dt.isoformat(),
-                                "source":    "machine_push",
-                            }},
-                            upsert=True,
-                        )
-
+                if await _mirror_machine_punch(
+                    user=user,
+                    punch_time_raw=punch_time_raw,
+                    punch_type=punch_type,
+                    source="machine_push",
+                    device_name=device.get("name") if device else None,
+                    device_serial=sn or None,
+                    event_id=event_id,
+                ):
+                    mirrored += 1
             except Exception as mirror_err:
-                logger.warning(f"Mirror failed for uid={device_user_id}: {mirror_err}")
+                # Raw punch has already been safely stored. Do not make the
+                # machine retry the same event forever because a main attendance
+                # calculation failed.
+                logger.exception(
+                    f"Failed to mirror Identix punch UID={device_user_id}: {mirror_err}"
+                )
 
-        logger.info(f"Identix push: inserted {inserted} new record(s)")
+        logger.info(
+            f"Identix push complete | SN={sn} | inserted={inserted} | "
+            f"mirrored={mirrored} | skipped={skipped} | invalid={invalid}"
+        )
         return "OK\n"
 
     except Exception as e:
+        # ADMS devices generally retry when they receive a non-OK response.
+        # Keep the protocol response stable while logging the actual failure.
         logger.error(f"❌ iclock/cdata error: {e}\n{traceback.format_exc()}")
-        return "OK\n"   # Always return OK so device doesn't retry indefinitely
+        return "OK\n"
 
 @identix_router.get("/cmd-queue")
 async def get_cmd_queue(
