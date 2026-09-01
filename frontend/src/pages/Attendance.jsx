@@ -3013,10 +3013,27 @@ export default function Attendance() {
       ${rows.map(r => `<tr><td>${esc(r.date)}</td><td>${esc(userMap[String(r.user_id)] || employeeLabel)}</td><td class="status">${esc((r.status || (r.punch_in ? 'present' : 'absent')).toUpperCase())}</td><td>${esc(fmt(r.punch_in))}</td><td>${esc(fmt(r.punch_out))}</td><td>${esc(duration(r.duration_minutes))}</td><td>${r.is_late ? 'Yes' : 'No'}</td></tr>`).join('') || '<tr><td colspan="7">No attendance records found for this period.</td></tr>'}
       </tbody></table></div><div class="footer">Taskosphere HR Management System · Confidential</div></body></html>`;
 
-    const win = window.open('', '_blank', 'noopener,noreferrer');
-    if (!win) { toast.error('Please allow pop-ups to view the report.'); return; }
-    win.document.write(html);
-    win.document.close();
+    // IMPORTANT: do not pass `noopener,noreferrer` to window.open here.
+    // Chrome can return `null` for a newly-created window when noopener is used,
+    // even though the about:blank tab was actually created. That was causing the
+    // false "Please allow pop-ups" toast and leaving the report tab blank.
+    // The report HTML is fully escaped above and contains no executable user data.
+    const win = window.open('', '_blank');
+    if (!win) {
+      toast.error('Please allow pop-ups for Taskosphere to view the report.');
+      return;
+    }
+
+    try {
+      win.document.open();
+      win.document.write(html);
+      win.document.close();
+      win.focus();
+    } catch (error) {
+      console.error('Attendance report preview failed:', error);
+      try { win.close(); } catch {}
+      toast.error('Unable to open the attendance report. Please try again.');
+    }
   }, [canGenerateReport, isEveryoneView, isAdmin, allUsers, selectedUserId, user, visibleCrossUserIds, attendanceHistory, selectedDate]);
 
   // ── Export PDF ─────────────────────────────────────────────────────────────
