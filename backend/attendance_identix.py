@@ -855,7 +855,7 @@ async def add_device(
         "ip_address":    payload.ip_address,
         "port":          payload.port,
         "comm_password": payload.comm_password,
-        "serial_number": payload.serial_number,
+        "serial_number": _normalize_serial_number(payload.serial_number),
         "location":      payload.location,
         "is_active":     True,
         "last_sync_at":  None,
@@ -873,6 +873,8 @@ async def update_device(
     current_user: User = Depends(require_admin()),
 ):
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if "serial_number" in updates:
+        updates["serial_number"] = _normalize_serial_number(updates["serial_number"])
     if not updates:
         raise HTTPException(status_code=400, detail="Nothing to update")
     result = await db.identix_devices.find_one_and_update(
@@ -1407,26 +1409,74 @@ async def sync_single_user_to_devices(
         "queued_devices": queued,
     }
 # 🔹 Device handshake (VERY IMPORTANT)
-async def _mark_device_online(sn: str):
-    """Update last_heartbeat_at for the device matching this serial number."""
-    if not sn:
-        return
-    now = datetime.now(timezone.utc).isoformat()
-    result = await db.identix_devices.update_one(
-        {"serial_number": sn},
-        {"$set": {"last_heartbeat_at": now, "is_online": True}},
+def _normalize_serial_number(sn: Optional[str]) -> str:
+    """Canonicalize ADMS serial numbers before comparing/storing them.
+
+    ADMS firmware can send the same serial with different casing or accidental
+    surrounding whitespace. The admin UI may still display the values as if
+    they match, while an exact MongoDB equality query would not.
+    """
+    if sn is None:
+        return ""
+    return "".join(str(sn).strip().split()).upper()
+
+
+async def _find_device_by_serial(sn: Optional[str], projection: Optional[dict] = None):
+    """Find a registered device using a normalized/case-insensitive serial.
+
+    First try the canonical exact value for the common path. Then fall back to
+    a case-insensitive, whitespace-tolerant lookup so existing registrations
+    created before serial normalization continue to work without manual edits.
+    """
+    canonical = _normalize_serial_number(sn)
+    if not canonical:
+        return None
+
+    device = await db.identix_devices.find_one(
+        {"serial_number": canonical}, projection
     )
-    if result.matched_count:
-        logger.info(f"✅ Device {sn} marked online")
-    else:
+    if device:
+        return device
+
+    # Existing records may contain case/whitespace differences.
+    # The stored value is normalized after a successful match.
+    escaped = re.escape(canonical)
+    return await db.identix_devices.find_one(
+        {"serial_number": {"$regex": f"^\\s*{escaped}\\s*$", "$options": "i"}},
+        projection,
+    )
+
+
+# 🔹 Device handshake (VERY IMPORTANT)
+async def _mark_device_online(sn: str):
+    """Update heartbeat for the registered device, tolerating serial formatting differences."""
+    canonical = _normalize_serial_number(sn)
+    if not canonical:
+        return
+
+    now = datetime.now(timezone.utc).isoformat()
+    device = await _find_device_by_serial(canonical, {"_id": 0, "id": 1, "serial_number": 1})
+    if not device:
         logger.warning(f"⚠️  Heartbeat from unknown SN={sn} — not registered in DB")
+        return
+
+    # Also repair the stored serial once we have a valid registration.
+    await db.identix_devices.update_one(
+        {"id": device.get("id")} if device.get("id") else {"serial_number": device.get("serial_number")},
+        {"$set": {
+            "serial_number": canonical,
+            "last_heartbeat_at": now,
+            "is_online": True,
+        }},
+    )
+    logger.info(f"✅ Device {canonical} marked online (received SN={sn!r})")
 
 
 @identix_router.api_route("/iclock/getrequest", methods=["GET", "POST"])
 async def iclock_getrequest(request: Request):
     from fastapi.responses import PlainTextResponse
     params = dict(request.query_params)
-    sn = params.get("SN") or params.get("sn", "")
+    sn = _normalize_serial_number(params.get("SN") or params.get("sn", ""))
     logger.info(f"📡 GETREQUEST from SN={sn}")
     await _mark_device_online(sn)
 
@@ -1492,7 +1542,7 @@ async def iclock_cdata(request: Request):
         body = await request.body()
         raw = body.decode("utf-8", errors="replace").strip()
 
-        sn = params.get("SN") or params.get("sn", "")
+        sn = _normalize_serial_number(params.get("SN") or params.get("sn", ""))
         await _mark_device_online(sn)
 
         # Resolve device once for metadata and punch de-duplication. Unknown
@@ -1500,9 +1550,8 @@ async def iclock_cdata(request: Request):
         # they are logged and can be registered from the admin UI afterwards.
         device = None
         if sn:
-            device = await db.identix_devices.find_one(
-                {"serial_number": sn}, {"_id": 0}
-            )
+            sn = _normalize_serial_number(sn)
+            device = await _find_device_by_serial(sn, {"_id": 0})
             if not device:
                 logger.warning(f"⚠️ ADMS punch from unregistered SN={sn}")
 
@@ -1680,7 +1729,8 @@ async def iclock_devicecmd(request: Request):
         return "OK\n"
 
     # Find the device
-    device = await db.identix_devices.find_one({"serial_number": sn}, {"_id": 0})
+    sn = _normalize_serial_number(sn)
+    device = await _find_device_by_serial(sn, {"_id": 0})
     if not device:
         return "OK\n"
 
