@@ -34,11 +34,13 @@ HOW TO INTEGRATE:
 """
 
 import asyncio
+import re
 import uuid
 import socket
 import logging
 import traceback
 import hashlib
+from urllib.parse import parse_qsl
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from typing import Optional, Dict, Any
@@ -1747,29 +1749,93 @@ async def root_test():
     return {"status": "API LIVE"}
 
 
-# 🔹 Device command endpoint — machine polls for pending commands (e.g. user enroll/delete)
+# 🔹 Device command endpoint
 @identix_router.api_route("/iclock/devicecmd", methods=["GET", "POST"])
 async def iclock_devicecmd(request: Request):
     """
-    Machine polls this endpoint for pending commands (user add/delete).
-    ADMS command format understood by Identix/ZKTeco:
-      C:ID:DATA USER UID=1\tUserID=1\tName=John\tPri=0\tPasswd=\tCard=0\tGrp=1\tTZ=0000000000000000\tVerify=0\tViceCard=0
+    Per the ZKTeco PUSH SDK spec, this endpoint has ONE real job: the device
+    POSTs here to report the result of a command it already received via
+    /iclock/getrequest. The POST body (form-encoded) looks like:
+
+        ID=<seq>&Return=<code>&CMD=<name>[&Content=<...>]
+
+    Return=0 means the command executed successfully on-device; any other
+    value is a device-reported failure. We look the command up by its
+    seq_id + device_serial in identix_cmd_queue and record the real
+    outcome ("acknowledged" / "failed") instead of leaving it stuck on
+    "sent" forever with no visibility into whether the push actually
+    worked.
+
+    Some firmware observed against this deployment also GETs this same
+    path expecting the next pending command directly (mirroring
+    /iclock/getrequest). That legacy behavior is preserved below as a
+    fallback for requests that carry no ID/Return fields at all, so it
+    keeps working for any device relying on it.
     """
+    from fastapi.responses import PlainTextResponse
+
     params = dict(request.query_params)
-    sn = params.get("SN") or params.get("sn", "")
-    logger.info(f"📡 DEVICECMD poll from SN={sn}")
+    sn_raw = params.get("SN") or params.get("sn", "")
+    sn = _normalize_serial_number(sn_raw)
+    logger.info(f"📡 DEVICECMD from SN={sn} ({request.method})")
     await _mark_device_online(sn)
 
+    # Acknowledgment fields can arrive as query params or as a form-encoded
+    # POST body depending on firmware — merge both, body taking precedence.
+    ack_fields = dict(params)
+    if request.method == "POST":
+        body = await request.body()
+        raw = body.decode("utf-8", errors="replace").strip()
+        if raw:
+            for key, value in parse_qsl(raw, keep_blank_values=True):
+                ack_fields[key] = value
+
+    cmd_id = ack_fields.get("ID") or ack_fields.get("id")
+    return_code = ack_fields.get("Return") or ack_fields.get("return")
+
+    if cmd_id is not None and return_code is not None:
+        # ── This is a command-result acknowledgment, not a poll ──────────
+        cmd_name = ack_fields.get("CMD") or ack_fields.get("cmd")
+        logger.info(
+            f"📬 DEVICECMD ack from SN={sn}: ID={cmd_id} Return={return_code} CMD={cmd_name!r}"
+        )
+        try:
+            seq_id = int(cmd_id)
+        except (TypeError, ValueError):
+            seq_id = None
+
+        if seq_id is not None and sn:
+            matching = await db.identix_cmd_queue.find_one(
+                {"device_serial": sn, "seq_id": seq_id}, {"_id": 0, "cmd_id": 1}
+            )
+            if matching:
+                success = str(return_code).strip() == "0"
+                await db.identix_cmd_queue.update_one(
+                    {"cmd_id": matching["cmd_id"]},
+                    {"$set": {
+                        "status": "acknowledged" if success else "failed",
+                        "return_code": return_code,
+                        "acknowledged_at": datetime.now(timezone.utc).isoformat(),
+                    }},
+                )
+                logger.info(
+                    f"{'✅' if success else '❌'} Command seq={seq_id} SN={sn} "
+                    f"marked {'acknowledged' if success else 'failed'} (Return={return_code})"
+                )
+            else:
+                logger.warning(
+                    f"⚠️ DEVICECMD ack for unknown seq={seq_id} SN={sn} — no matching queued command"
+                )
+        return "OK\n"
+
+    # ── Legacy poll fallback (no ack fields present) ─────────────────────
     if not sn:
         return "OK\n"
 
-    # Find the device
-    sn = _normalize_serial_number(sn)
     device = await _find_device_by_serial(sn, {"_id": 0})
     if not device:
         return "OK\n"
 
-    # Fetch the oldest pending command for this device
     pending = await db.identix_cmd_queue.find_one(
         {"device_serial": sn, "status": "pending"},
         sort=[("created_at", 1)],
@@ -1786,6 +1852,5 @@ async def iclock_devicecmd(request: Request):
     )
 
     logger.info(f"📤 Sending command to SN={sn}: {cmd_str[:80]}")
-    from fastapi.responses import PlainTextResponse
     response_body = f"C:{pending.get('seq_id', 1)}:{cmd_str}\n"
     return PlainTextResponse(response_body, headers={"Pragma": "no-cache", "Cache-Control": "no-store"})
