@@ -67,6 +67,8 @@ if (typeof document !== 'undefined' && !document.getElementById('users-slim-scro
     .users-slim::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
     .dark .users-slim::-webkit-scrollbar-thumb { background: #475569; }
     @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.82); } }
+    @keyframes admsShimmer { from { transform: translateX(-120%); } to { transform: translateX(260%); } }
   `;
   document.head.appendChild(s);
 }
@@ -1093,6 +1095,10 @@ function IdentixDevicesTab() {
   const [testingId,   setTestingId]   = useState(null);
   const [testResults, setTestResults] = useState({});
   const [syncingId,   setSyncingId]   = useState(null);
+  // Real-time ADMS sync runs keyed by device id. Each run is tied to the
+  // backend batch_id so the progress bar reflects the actual machine queue,
+  // not merely the fact that the button was clicked.
+  const [syncRuns, setSyncRuns] = useState({});
 
   const load = async () => {
     setLoading(true);
@@ -1147,12 +1153,38 @@ function IdentixDevicesTab() {
 
   const syncUsers = async (d) => {
     setSyncingId(d.id);
+    const startedAt = new Date().toISOString();
+    setSyncRuns(prev => ({
+      ...prev,
+      [d.id]: {
+        batchId: null,
+        total: 0,
+        startedAt,
+        phase: 'starting',
+        error: null,
+      },
+    }));
     try {
       const { data } = await api.post(`/identix/devices/${d.id}/sync-users`);
-      toast.success(data.message || 'Users queued for push');
-      setCmdQueueCount(q => q + (data.synced || 0));
+      const total = Number(data.synced || 0);
+      setSyncRuns(prev => ({
+        ...prev,
+        [d.id]: {
+          batchId: data.batch_id || null,
+          total,
+          startedAt,
+          phase: total ? 'queued' : 'complete',
+          error: null,
+        },
+      }));
+      toast.success(data.message || `${total} users queued for push`);
+      await loadCmdQueue();
     }
-    catch (e) { toast.error(e?.response?.data?.detail || 'Sync failed'); }
+    catch (e) {
+      const message = e?.response?.data?.detail || 'Sync failed';
+      setSyncRuns(prev => ({ ...prev, [d.id]: { ...(prev[d.id] || {}), phase: 'failed', error: message } }));
+      toast.error(message);
+    }
     finally { setSyncingId(null); }
   };
 
@@ -1163,11 +1195,37 @@ function IdentixDevicesTab() {
   const loadCmdQueue = async () => {
     try {
       const { data } = await api.get('/identix/cmd-queue');
-      setCmdQueue(data.commands || []);
-      setCmdQueueCount((data.commands || []).filter(c => c.status === 'pending').length);
-    } catch { /* ignore */ }
+      const commands = data.commands || [];
+      setCmdQueue(commands);
+      setCmdQueueCount(commands.filter(c => ['pending', 'sent'].includes(c.status)).length);
+
+      setSyncRuns(prev => {
+        const next = { ...prev };
+        Object.entries(prev).forEach(([deviceId, run]) => {
+          if (!run?.batchId || !run?.total) return;
+          const batch = commands.filter(c => c.batch_id === run.batchId);
+          if (!batch.length) return;
+          const pending = batch.filter(c => c.status === 'pending').length;
+          const sent = batch.filter(c => c.status === 'sent').length;
+          const acknowledged = batch.filter(c => c.status === 'acknowledged').length;
+          const failed = batch.filter(c => c.status === 'failed').length;
+          const completed = acknowledged + failed;
+          let phase = run.phase;
+          if (failed > 0 && completed >= batch.length) phase = 'failed';
+          else if (completed >= batch.length) phase = 'complete';
+          else if (sent > 0 || acknowledged > 0) phase = 'delivering';
+          else if (pending > 0) phase = 'waiting';
+          next[deviceId] = { ...run, pending, sent, acknowledged, failed, completed, phase };
+        });
+        return next;
+      });
+    } catch { /* keep last known real-time state */ }
   };
-  useEffect(() => { loadCmdQueue(); const t = setInterval(loadCmdQueue, 10000); return () => clearInterval(t); }, []);
+  useEffect(() => {
+    loadCmdQueue();
+    const t = setInterval(loadCmdQueue, Object.values(syncRuns).some(r => ['starting', 'queued', 'waiting', 'delivering'].includes(r?.phase)) ? 2000 : 8000);
+    return () => clearInterval(t);
+  }, [Object.values(syncRuns).map(r => r?.phase).join('|')]);
 
   const clearQueue = async () => {
     try { await api.delete('/identix/cmd-queue'); toast.success('Queue cleared'); loadCmdQueue(); }
@@ -1290,6 +1348,44 @@ function IdentixDevicesTab() {
                     </button>
                   ))}
                 </div>
+                {(() => {
+                  const run = syncRuns[d.id];
+                  if (!run || !run.total) return null;
+                  const total = run.total || 0;
+                  const completed = run.completed || 0;
+                  const sent = run.sent || 0;
+                  const pending = run.pending || 0;
+                  const failed = run.failed || 0;
+                  const pct = total ? Math.min(100, Math.round((completed / total) * 100)) : 0;
+                  const deliveryPct = total ? Math.min(100, Math.round(((sent + completed) / total) * 100)) : 0;
+                  const phaseText = run.phase === 'starting' ? 'Starting sync…'
+                    : run.phase === 'queued' ? `Queued ${total} users — waiting for machine poll…`
+                    : run.phase === 'waiting' ? `Waiting for ADMS machine to pick up commands (${pending} pending)`
+                    : run.phase === 'delivering' ? `Machine is processing users — ${completed}/${total} confirmed`
+                    : run.phase === 'failed' ? `Sync finished with ${failed} failure${failed === 1 ? '' : 's'}`
+                    : `Sync complete — ${completed}/${total}`;
+                  return (
+                    <div style={{ width: '100%', marginTop: 4, padding: '10px 12px', borderRadius: 10, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 7 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                          <span style={{ width: 8, height: 8, borderRadius: 999, background: run.phase === 'failed' ? '#ef4444' : '#10b981', boxShadow: run.phase === 'failed' ? 'none' : '0 0 0 4px rgba(16,185,129,.12)', animation: ['starting','queued','waiting','delivering'].includes(run.phase) ? 'pulse 1.4s ease-in-out infinite' : 'none', flexShrink: 0 }} />
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>{phaseText}</span>
+                        </div>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', whiteSpace: 'nowrap' }}>{completed}/{total}</span>
+                      </div>
+                      <div style={{ height: 8, borderRadius: 999, background: '#e2e8f0', overflow: 'hidden', position: 'relative' }}>
+                        <div style={{ position: 'absolute', inset: 0, width: `${deliveryPct}%`, background: 'linear-gradient(90deg,#60a5fa,#22c55e)', transition: 'width .35s ease' }} />
+                        <div style={{ position: 'absolute', inset: 0, width: `${pct}%`, background: '#16a34a', transition: 'width .35s ease' }} />
+                        {['starting','queued','waiting','delivering'].includes(run.phase) && <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,.65) 50%, transparent 100%)', animation: 'admsShimmer 1.3s linear infinite', width: '45%' }} />}
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 10.5, color: '#64748b' }}>
+                        <span>Delivered: {Math.min(total, sent + completed)}</span>
+                        <span>Confirmed: {completed}</span>
+                        <span>Pending: {pending}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}
