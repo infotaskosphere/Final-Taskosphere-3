@@ -1919,9 +1919,14 @@ export default function Attendance() {
   const isManager = user?.role === 'manager';
   const crossVisAttendance  = user?.permissions?.view_other_attendance || [];
   const hasCrossVisAttendance = crossVisAttendance.length > 0;
-  const canGenerateReport = isAdmin || hasPermission('can_view_selected_users_reports') || hasCrossVisAttendance;
-  // canSwitchUser: admin can switch to any user; others if they have cross-vis OR backend returned other users
-  const canSwitchUser = isAdmin || hasCrossVisAttendance || allUsers.some(u => u.id !== user?.id);
+  const canGenerateReport = isAdmin || hasCrossVisAttendance;
+  // Non-admins may switch ONLY to users explicitly granted through cross-visibility.
+  // Never infer access from /users returning additional user records.
+  const canSwitchUser = isAdmin || hasCrossVisAttendance;
+  const visibleCrossUserIds = useMemo(
+    () => new Set((Array.isArray(crossVisAttendance) ? crossVisAttendance : []).map(String)),
+    [crossVisAttendance]
+  );
 
   // ── Layout customizer ─────────────────────────────────────────────────────
   const ATT_SECTIONS = ['today_status', 'stat_cards', 'holidays_reminders', 'calendar_area'];
@@ -2971,6 +2976,49 @@ export default function Attendance() {
     setFiredReminder(null);
   }, [firedReminder]);
 
+  // ── View Report (browser preview) ─────────────────────────────────────────
+  // This uses ONLY the attendance records already fetched for the current scoped
+  // user. It never fetches arbitrary users, so cross-visibility cannot be
+  // bypassed from the browser.
+  const handleViewReport = useCallback(() => {
+    if (!canGenerateReport) {
+      toast.error('You do not have permission to view attendance reports.');
+      return;
+    }
+
+    const targetIds = isEveryoneView
+      ? (Array.isArray(allUsers) ? allUsers.map(u => String(u.id)) : [])
+      : [String(selectedUserId || user?.id)];
+
+    if (!isAdmin && targetIds.some(id => id !== String(user?.id) && !visibleCrossUserIds.has(id))) {
+      toast.error('This user is outside your cross-visibility permission.');
+      return;
+    }
+
+    const userMap = Object.fromEntries((Array.isArray(allUsers) ? allUsers : []).map(u => [String(u.id), u.full_name]));
+    const rows = (Array.isArray(attendanceHistory) ? attendanceHistory : [])
+      .filter(r => targetIds.includes(String(r.user_id || user?.id)))
+      .filter(r => !r.date || r.date.startsWith(format(selectedDate, 'yyyy-MM')))
+      .sort((a,b) => String(a.date || '').localeCompare(String(b.date || '')));
+
+    const employeeLabel = isEveryoneView ? 'All Employees' : (userMap[String(targetIds[0])] || user?.full_name || 'Employee');
+    const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
+    const fmt = (v) => v ? formatAttendanceTime(v) : '—';
+    const duration = (m) => (m === 0 || Number.isFinite(Number(m))) ? `${Math.floor(Number(m)/60)}h ${Number(m)%60}m` : '—';
+
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Taskosphere Attendance Report</title>
+      <style>body{font-family:Segoe UI,Arial,sans-serif;background:#f8fafc;color:#0f172a;margin:0;padding:28px} .head{background:linear-gradient(135deg,#0D3B66,#1F6FB2);color:#fff;padding:24px;border-radius:16px;margin-bottom:20px}.head h1{margin:0 0 6px;font-size:22px}.meta{opacity:.85;font-size:12px}.card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden}table{width:100%;border-collapse:collapse;font-size:12px}th{background:#0D3B66;color:#fff;text-align:left;padding:10px}td{padding:9px;border-bottom:1px solid #e2e8f0}tr:nth-child(even) td{background:#f8fafc}.status{font-weight:700}.footer{margin-top:18px;color:#64748b;font-size:11px;text-align:center}</style>
+      </head><body><div class="head"><h1>TASKOSPHERE — ATTENDANCE REPORT</h1><div class="meta">Employee: ${esc(employeeLabel)} · Period: ${esc(format(selectedDate,'MMMM yyyy'))} · Generated: ${esc(format(new Date(),'dd MMM yyyy, hh:mm a'))} IST</div></div>
+      <div class="card"><table><thead><tr><th>Date</th><th>Employee</th><th>Status</th><th>Punch In</th><th>Punch Out</th><th>Duration</th><th>Late</th></tr></thead><tbody>
+      ${rows.map(r => `<tr><td>${esc(r.date)}</td><td>${esc(userMap[String(r.user_id)] || employeeLabel)}</td><td class="status">${esc((r.status || (r.punch_in ? 'present' : 'absent')).toUpperCase())}</td><td>${esc(fmt(r.punch_in))}</td><td>${esc(fmt(r.punch_out))}</td><td>${esc(duration(r.duration_minutes))}</td><td>${r.is_late ? 'Yes' : 'No'}</td></tr>`).join('') || '<tr><td colspan="7">No attendance records found for this period.</td></tr>'}
+      </tbody></table></div><div class="footer">Taskosphere HR Management System · Confidential</div></body></html>`;
+
+    const win = window.open('', '_blank', 'noopener,noreferrer');
+    if (!win) { toast.error('Please allow pop-ups to view the report.'); return; }
+    win.document.write(html);
+    win.document.close();
+  }, [canGenerateReport, isEveryoneView, isAdmin, allUsers, selectedUserId, user, visibleCrossUserIds, attendanceHistory, selectedDate]);
+
   // ── Export PDF ─────────────────────────────────────────────────────────────
   const handleExportPDF = useCallback(async () => {
     setExportingPDF(true);
@@ -3527,11 +3575,13 @@ export default function Attendance() {
                     <option value="" style={{ color: '#1e293b', background: '#ffffff' }}>
                       {user?.full_name ? `${user.full_name} (Me)` : 'My Attendance'}
                     </option>
-                    {(Array.isArray(allUsers) ? allUsers : []).filter(u => u.id !== user?.id).map(u => (
-                      <option key={u.id} value={u.id} style={{ color: '#1e293b', background: '#ffffff' }}>
-                        {u.full_name}
-                      </option>
-                    ))}
+                    {(Array.isArray(allUsers) ? allUsers : [])
+                      .filter(u => u.id !== user?.id && (isAdmin || visibleCrossUserIds.has(String(u.id))))
+                      .map(u => (
+                        <option key={u.id} value={u.id} style={{ color: '#1e293b', background: '#ffffff' }}>
+                          {u.full_name}
+                        </option>
+                      ))}
                     {/* Everyone option at the bottom */}
                     {isAdmin && (
                       <option value="everyone" style={{ color: '#1e293b', background: '#ffffff' }}>Everyone (All Users)</option>
@@ -3547,6 +3597,17 @@ export default function Attendance() {
                   >
                     <UserX className="w-3.5 h-3.5" />
                     {absentLoading ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Marking…</> : 'Mark Absent'}
+                  </button>
+                )}
+                {canGenerateReport && (
+                  <button
+                    onClick={handleViewReport}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all active:scale-95 border"
+                    style={{ backgroundColor: 'rgba(255,255,255,0.15)', borderColor: 'rgba(255,255,255,0.25)', color: '#ffffff' }}
+                    title={isAdmin ? 'View the attendance report' : 'View reports only for users explicitly granted to you'}
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    View Report
                   </button>
                 )}
                 {canGenerateReport && (
