@@ -315,12 +315,16 @@ async def _queue_user_cmd(sn: str, identix_uid: int, name: str, user_id: str):
     """
     safe_name = (name or "")[:24].replace("\t", " ").replace("\n", " ")
     # UserID must be SHORT numeric string — Identix firmware rejects UUIDs
+    # ZKTeco/Identix ADMS firmware accepts USERINFO updates using the
+    # DATA UPDATE USERINFO command.  The older `DATA USER ...` syntax is
+    # rejected by a number of PUSH/ADMS firmwares (often with -1002).
     cmd_str = (
-        f"DATA USER UID={identix_uid}\t"
-        f"UserID={identix_uid}\t"
+        f"DATA UPDATE USERINFO PIN={identix_uid}\t"
         f"Name={safe_name}\t"
-        f"Pri=0\tPasswd=\tCard=0\tGrp=1\t"
-        f"TZ=0000000000000000\tVerify=0\tViceCard=0"
+        f"Privilege=0\t"
+        f"Password=\t"
+        f"Card=0\t"
+        f"Group=1"
     )
     seq = await _next_seq_id(sn)
     await db.identix_cmd_queue.insert_one({
@@ -1508,11 +1512,15 @@ async def iclock_getrequest(request: Request):
             seq = cmd.get("seq_id", 1)
             cmd_str = cmd.get("cmd_str", "")
             cmd_lines.append(f"C:{seq}:{cmd_str}")
-            await db.identix_cmd_queue.update_one(
-                {"cmd_id": cmd["cmd_id"]},
-                {"$set": {"status": "sent", "sent_at": datetime.now(timezone.utc).isoformat()}}
-            )
-        logger.info(f"📤 Sending {len(cmd_lines)} command(s) to SN={sn}")
+
+        # IMPORTANT: GETREQUEST only delivers/signals commands.  Keep them
+        # pending until /iclock/devicecmd acknowledges execution.  If the
+        # device drops the connection after receiving GETREQUEST, the command
+        # must remain retryable on the next poll.
+        logger.info(
+            f"📤 Sending {len(cmd_lines)} pending command(s) to SN={sn}; "
+            "waiting for /iclock/devicecmd acknowledgement"
+        )
         return PlainTextResponse("\n".join(cmd_lines) + "\n", headers={
             "Pragma": "no-cache",
             "Cache-Control": "no-store",
@@ -1575,17 +1583,25 @@ async def iclock_cdata(request: Request):
         # update via _mark_device_online on every cdata hit).
         if params.get("options", "").strip().lower() == "all":
             logger.info(f"📡 Identix ADMS options=all handshake from SN={sn}")
+            # Use the standard ADMS registration/config response.  In
+            # particular, do not answer the options=all handshake with a
+            # bare OK: several firmware versions will keep calling cdata
+            # forever and never start polling /iclock/getrequest.
             config_lines = [
                 f"GET OPTION FROM: {sn or 'SERVER'}",
-                "Stamp=0",
-                "OpStamp=0",
-                "ErrorDelay=60",
-                "Delay=30",
-                "TransTimes=00:00;14:05",
+                "Stamp=9999",
+                "OpStamp=9999",
+                "ATTLOGStamp=9999",
+                "OPERLOGStamp=9999",
+                "ATTPHOTOStamp=9999",
+                "ErrorDelay=30",
+                "Delay=10",
+                "TransTimes=00:00;23:59",
                 "TransInterval=1",
-                "TransFlag=1111000000",
+                "TransFlag=TransData AttLog\tOpLog\tEnrollUser\tChgUser\tEnrollFP\tChgFP\tFPImag",
+                "TimeZone=5.5",
                 "Realtime=1",
-                "Encrypt=0",
+                "Encrypt=None",
             ]
             return PlainTextResponse(
                 "\n".join(config_lines) + "\n",
