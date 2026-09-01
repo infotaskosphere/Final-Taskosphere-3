@@ -291,114 +291,6 @@ app.add_middleware(
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
-# ── ADMS serial compatibility safety net ─────────────────────────────────────
-# The machine sends the hardware serial number in every /iclock/* request.
-# If an administrator manually entered a one-character typo while registering
-# the device, exact MongoDB matching leaves the device stuck at "Awaiting
-# Heartbeat" even though ADMS is correctly reaching this server.
-#
-# This middleware is intentionally conservative:
-#   * only ADMS root endpoints are affected;
-#   * exact serial matches remain the normal fast path;
-#   * an alias already stored on a device is accepted;
-#   * otherwise only a one-character Hamming-distance match is considered;
-#   * the fallback is accepted only when exactly one active device matches;
-#   * the request SN is rewritten to the registered canonical serial so the
-#     existing attendance_identix handlers work without changing their logic;
-#   * the observed SN is stored as an alias for subsequent requests.
-#
-# No unrelated /api traffic is changed, and ambiguous/multiple-device matches
-# are deliberately left untouched so one machine can never silently attach to
-# another machine's record.
-from urllib.parse import parse_qsl, urlencode
-
-
-def _adms_canonical_serial(value):
-    if value is None:
-        return ""
-    return "".join(str(value).strip().split()).upper()
-
-
-def _adms_one_char_difference(left, right):
-    if not left or not right or len(left) != len(right):
-        return False
-    return sum(a != b for a, b in zip(left, right)) == 1
-
-
-@app.middleware("http")
-async def _adms_serial_compatibility(request: Request, call_next):
-    if request.url.path in {
-        "/iclock/cdata", "/iclock/cdata.aspx",
-        "/iclock/getrequest", "/iclock/getrequest.aspx",
-        "/iclock/devicecmd", "/iclock/devicecmd.aspx",
-    }:
-        params = parse_qsl(
-            request.scope.get("query_string", b"").decode("utf-8", errors="ignore"),
-            keep_blank_values=True,
-        )
-        incoming = ""
-        for key, value in params:
-            if key.lower() == "sn":
-                incoming = _adms_canonical_serial(value)
-                break
-
-        if incoming:
-            try:
-                device = await db.identix_devices.find_one(
-                    {"serial_number": incoming},
-                    {"_id": 0, "id": 1, "serial_number": 1, "is_active": 1},
-                )
-
-                # Existing deployments may already have stored aliases.
-                if not device:
-                    device = await db.identix_devices.find_one(
-                        {"adms_serial_aliases": incoming},
-                        {"_id": 0, "id": 1, "serial_number": 1, "is_active": 1},
-                    )
-
-                # Conservative recovery for a single-character manual-entry
-                # typo. Never pick a device when there is more than one match.
-                if not device:
-                    candidates = await db.identix_devices.find(
-                        {"is_active": {"$ne": False}},
-                        {"_id": 0, "id": 1, "serial_number": 1, "is_active": 1},
-                    ).to_list(100)
-                    matches = [
-                        candidate
-                        for candidate in candidates
-                        if _adms_one_char_difference(
-                            incoming,
-                            _adms_canonical_serial(candidate.get("serial_number")),
-                        )
-                    ]
-                    if len(matches) == 1:
-                        device = matches[0]
-                        canonical = _adms_canonical_serial(device.get("serial_number"))
-                        if device.get("id") and canonical:
-                            await db.identix_devices.update_one(
-                                {"id": device["id"]},
-                                {"$addToSet": {"adms_serial_aliases": incoming}},
-                            )
-                            logger.warning(
-                                "[identix] Accepted one-character ADMS serial alias "
-                                f"{incoming} -> {canonical}"
-                            )
-
-                if device:
-                    canonical = _adms_canonical_serial(device.get("serial_number"))
-                    if canonical and canonical != incoming:
-                        request.scope["query_string"] = urlencode([
-                            (key, canonical if key.lower() == "sn" else value)
-                            for key, value in params
-                        ]).encode("utf-8")
-            except Exception:
-                # ADMS must never be blocked by the compatibility lookup. The
-                # original handler will continue and log its normal warning.
-                logger.exception("[identix] ADMS serial compatibility lookup failed")
-
-    return await call_next(request)
-
-
 # =============================================================
 # ABSENT MARKING CORE LOGIC
 # Runs via APScheduler at 19:00 IST every working day.
@@ -15154,21 +15046,18 @@ app.include_router(
 )
 from backend.attendance_identix import iclock_getrequest, iclock_cdata, iclock_devicecmd
 
-# Support BOTH ADMS firmware URL conventions.
-#
-# Some Identix/ZKTeco firmware versions append the legacy ".aspx" suffix
-# automatically (for example /iclock/cdata.aspx), while other firmware sends
-# the modern extensionless paths (/iclock/cdata).  The device in production
-# has been observed using /iclock/cdata.aspx, so both forms must hit the exact
-# same handlers.  Do NOT redirect these requests: ADMS firmware may not follow
-# redirects and a redirect would prevent the heartbeat from being recorded.
-for _path, _handler in (
+# ADMS firmware compatibility: many Identix/ZKTeco terminals use the
+# .aspx suffix even when the configured server URL does not show it.
+# Keep both canonical and .aspx endpoints live.
+for _adms_path, _adms_handler in (
     ("/iclock/cdata", iclock_cdata),
+    ("/iclock/cdata.aspx", iclock_cdata),
     ("/iclock/getrequest", iclock_getrequest),
+    ("/iclock/getrequest.aspx", iclock_getrequest),
     ("/iclock/devicecmd", iclock_devicecmd),
+    ("/iclock/devicecmd.aspx", iclock_devicecmd),
 ):
-    app.add_api_route(_path, _handler, methods=["GET", "POST"])
-    app.add_api_route(f"{_path}.aspx", _handler, methods=["GET", "POST"])
+    app.add_api_route(_adms_path, _adms_handler, methods=["GET", "POST"])
 app.include_router(whatsapp_hub_router, prefix="/api")
 
 
