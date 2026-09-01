@@ -1537,6 +1537,8 @@ async def iclock_cdata(request: Request):
     The machine timestamp is interpreted in Asia/Kolkata. Raw logs are kept
     permanently, while the main attendance collection receives UTC datetimes.
     """
+    from fastapi.responses import PlainTextResponse
+
     try:
         params = dict(request.query_params)
         body = await request.body()
@@ -1554,6 +1556,39 @@ async def iclock_cdata(request: Request):
             device = await _find_device_by_serial(sn, {"_id": 0})
             if not device:
                 logger.warning(f"⚠️ ADMS punch from unregistered SN={sn}")
+
+        # ── ADMS registration/config handshake ───────────────────────────────
+        # Before a ZKTeco/Identix device will EVER poll /iclock/getrequest for
+        # commands, it performs a one-time handshake on first connect/restart:
+        #   GET /iclock/cdata?SN=xxx&options=all&pushver=...&language=...
+        # Per the ZKTeco PUSH SDK spec, the server MUST answer this with the
+        # "GET OPTION FROM: SERVER" configuration block below — a bare "OK" is
+        # NOT a valid response to this specific request. Firmware that doesn't
+        # receive a valid config block here never considers itself registered,
+        # so it keeps re-hitting /iclock/cdata forever and never advances to
+        # its normal poll cycle (which is what calls /iclock/getrequest).
+        # This was previously falling through to the generic "OK\n" branch
+        # below, which is why commands queued in identix_cmd_queue were never
+        # picked up even though the device showed as Online (heartbeats still
+        # update via _mark_device_online on every cdata hit).
+        if params.get("options", "").strip().lower() == "all":
+            logger.info(f"📡 Identix ADMS options=all handshake from SN={sn}")
+            config_lines = [
+                f"GET OPTION FROM: {sn or 'SERVER'}",
+                "Stamp=0",
+                "OpStamp=0",
+                "ErrorDelay=60",
+                "Delay=30",
+                "TransTimes=00:00;14:05",
+                "TransInterval=1",
+                "TransFlag=1111000000",
+                "Realtime=1",
+                "Encrypt=0",
+            ]
+            return PlainTextResponse(
+                "\n".join(config_lines) + "\n",
+                headers={"Pragma": "no-cache", "Cache-Control": "no-store"},
+            )
 
         if not raw or raw.upper().startswith("SN="):
             logger.info(f"📡 Identix handshake from SN={sn}")
