@@ -15046,9 +15046,21 @@ app.include_router(
 )
 from backend.attendance_identix import iclock_getrequest, iclock_cdata, iclock_devicecmd
 
-app.add_api_route("/iclock/cdata", iclock_cdata, methods=["GET", "POST"])
-app.add_api_route("/iclock/getrequest", iclock_getrequest, methods=["GET", "POST"])
-app.add_api_route("/iclock/devicecmd", iclock_devicecmd, methods=["GET", "POST"])
+# Support BOTH ADMS firmware URL conventions.
+#
+# Some Identix/ZKTeco firmware versions append the legacy ".aspx" suffix
+# automatically (for example /iclock/cdata.aspx), while other firmware sends
+# the modern extensionless paths (/iclock/cdata).  The device in production
+# has been observed using /iclock/cdata.aspx, so both forms must hit the exact
+# same handlers.  Do NOT redirect these requests: ADMS firmware may not follow
+# redirects and a redirect would prevent the heartbeat from being recorded.
+for _path, _handler in (
+    ("/iclock/cdata", iclock_cdata),
+    ("/iclock/getrequest", iclock_getrequest),
+    ("/iclock/devicecmd", iclock_devicecmd),
+):
+    app.add_api_route(_path, _handler, methods=["GET", "POST"])
+    app.add_api_route(f"{_path}.aspx", _handler, methods=["GET", "POST"])
 app.include_router(whatsapp_hub_router, prefix="/api")
 
 
