@@ -2977,64 +2977,303 @@ export default function Attendance() {
   }, [firedReminder]);
 
   // ── View Report (browser preview) ─────────────────────────────────────────
-  // This uses ONLY the attendance records already fetched for the current scoped
-  // user. It never fetches arbitrary users, so cross-visibility cannot be
-  // bypassed from the browser.
-  const handleViewReport = useCallback(() => {
+  // Admin + Everyone uses the dedicated staff-report endpoint. This is important:
+  // attendanceHistory can be scoped to the currently selected employee, while
+  // /attendance/staff-report is explicitly designed to aggregate all employees
+  // for an admin.
+  const handleViewReport = useCallback(async () => {
     if (!canGenerateReport) {
       toast.error('You do not have permission to view attendance reports.');
       return;
     }
 
-    const targetIds = isEveryoneView
-      ? (Array.isArray(allUsers) ? allUsers.map(u => String(u.id)) : [])
-      : [String(selectedUserId || user?.id)];
-
-    if (!isAdmin && targetIds.some(id => id !== String(user?.id) && !visibleCrossUserIds.has(id))) {
-      toast.error('This user is outside your cross-visibility permission.');
-      return;
-    }
-
-    const userMap = Object.fromEntries((Array.isArray(allUsers) ? allUsers : []).map(u => [String(u.id), u.full_name]));
-    const rows = (Array.isArray(attendanceHistory) ? attendanceHistory : [])
-      .filter(r => targetIds.includes(String(r.user_id || user?.id)))
-      .filter(r => !r.date || r.date.startsWith(format(selectedDate, 'yyyy-MM')))
-      .sort((a,b) => String(a.date || '').localeCompare(String(b.date || '')));
-
-    const employeeLabel = isEveryoneView ? 'All Employees' : (userMap[String(targetIds[0])] || user?.full_name || 'Employee');
-    const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
-    const fmt = (v) => v ? formatAttendanceTime(v) : '—';
-    const duration = (m) => (m === 0 || Number.isFinite(Number(m))) ? `${Math.floor(Number(m)/60)}h ${Number(m)%60}m` : '—';
-
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Taskosphere Attendance Report</title>
-      <style>body{font-family:Segoe UI,Arial,sans-serif;background:#f8fafc;color:#0f172a;margin:0;padding:28px} .head{background:linear-gradient(135deg,#0D3B66,#1F6FB2);color:#fff;padding:24px;border-radius:16px;margin-bottom:20px}.head h1{margin:0 0 6px;font-size:22px}.meta{opacity:.85;font-size:12px}.card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden}table{width:100%;border-collapse:collapse;font-size:12px}th{background:#0D3B66;color:#fff;text-align:left;padding:10px}td{padding:9px;border-bottom:1px solid #e2e8f0}tr:nth-child(even) td{background:#f8fafc}.status{font-weight:700}.footer{margin-top:18px;color:#64748b;font-size:11px;text-align:center}</style>
-      </head><body><div class="head"><h1>TASKOSPHERE — ATTENDANCE REPORT</h1><div class="meta">Employee: ${esc(employeeLabel)} · Period: ${esc(format(selectedDate,'MMMM yyyy'))} · Generated: ${esc(format(new Date(),'dd MMM yyyy, hh:mm a'))} IST</div></div>
-      <div class="card"><table><thead><tr><th>Date</th><th>Employee</th><th>Status</th><th>Punch In</th><th>Punch Out</th><th>Duration</th><th>Late</th></tr></thead><tbody>
-      ${rows.map(r => `<tr><td>${esc(r.date)}</td><td>${esc(userMap[String(r.user_id)] || employeeLabel)}</td><td class="status">${esc((r.status || (r.punch_in ? 'present' : 'absent')).toUpperCase())}</td><td>${esc(fmt(r.punch_in))}</td><td>${esc(fmt(r.punch_out))}</td><td>${esc(duration(r.duration_minutes))}</td><td>${r.is_late ? 'Yes' : 'No'}</td></tr>`).join('') || '<tr><td colspan="7">No attendance records found for this period.</td></tr>'}
-      </tbody></table></div><div class="footer">Taskosphere HR Management System · Confidential</div></body></html>`;
-
-    // IMPORTANT: do not pass `noopener,noreferrer` to window.open here.
-    // Chrome can return `null` for a newly-created window when noopener is used,
-    // even though the about:blank tab was actually created. That was causing the
-    // false "Please allow pop-ups" toast and leaving the report tab blank.
-    // The report HTML is fully escaped above and contains no executable user data.
-    const win = window.open('', '_blank');
-    if (!win) {
-      toast.error('Please allow pop-ups for Taskosphere to view the report.');
-      return;
-    }
+    const monthKey = format(selectedDate, 'yyyy-MM');
 
     try {
+      let reportRows = [];
+      let employeeLabel = 'Employee';
+
+      if (isEveryoneView && isAdmin) {
+        const res = await api.get(`/attendance/staff-report?month=${monthKey}`);
+        const staffReports = Array.isArray(res.data) ? res.data : [];
+
+        const users = Array.isArray(allUsers) ? allUsers : [];
+        const userMap = Object.fromEntries(
+          users.map(u => [String(u.id), u.full_name])
+        );
+
+        const reportsByUser = new Map(
+          staffReports.map(item => [String(item.user_id), item])
+        );
+
+        // "Everyone" must really include every user, even when an employee
+        // has no attendance document for the selected month.
+        const employeeIds = users
+          .map(u => String(u.id))
+          .filter(Boolean);
+
+        for (const userId of employeeIds) {
+          const employee = reportsByUser.get(userId);
+          const employeeName =
+            userMap[userId] || employee?.user_name || 'Unknown Employee';
+          const records = Array.isArray(employee?.records)
+            ? employee.records
+            : [];
+
+          if (records.length === 0) {
+            reportRows.push({
+              user_id: userId,
+              employee_name: employeeName,
+              date: '—',
+              status: 'no_record',
+              punch_in: null,
+              punch_out: null,
+              duration_minutes: null,
+              is_late: false,
+            });
+          } else {
+            records.forEach(record => {
+              reportRows.push({
+                user_id: userId,
+                employee_name: employeeName,
+                date: record.date,
+                status:
+                  record.status ||
+                  (record.punch_in ? 'present' : 'absent'),
+                punch_in: record.punch_in,
+                punch_out: record.punch_out,
+                duration_minutes: record.duration_minutes,
+                is_late: !!record.is_late,
+              });
+            });
+          }
+        }
+
+        // Include any attendance user that is not currently present in the
+        // frontend user list, without exposing anything outside the admin scope.
+        for (const employee of staffReports) {
+          const userId = String(employee.user_id);
+          if (employeeIds.includes(userId)) continue;
+
+          const employeeName = employee.user_name || 'Unknown Employee';
+          const records = Array.isArray(employee.records)
+            ? employee.records
+            : [];
+
+          if (records.length === 0) {
+            reportRows.push({
+              user_id: userId,
+              employee_name: employeeName,
+              date: '—',
+              status: 'no_record',
+              punch_in: null,
+              punch_out: null,
+              duration_minutes: null,
+              is_late: false,
+            });
+          } else {
+            records.forEach(record => {
+              reportRows.push({
+                user_id: userId,
+                employee_name: employeeName,
+                date: record.date,
+                status:
+                  record.status ||
+                  (record.punch_in ? 'present' : 'absent'),
+                punch_in: record.punch_in,
+                punch_out: record.punch_out,
+                duration_minutes: record.duration_minutes,
+                is_late: !!record.is_late,
+              });
+            });
+          }
+        }
+
+        employeeLabel = `All Employees (${employeeIds.length || staffReports.length})`;
+      } else {
+        // Specific employee / own report. Keep the existing scoped path.
+        const targetId = String(selectedUserId || user?.id);
+        const users = Array.isArray(allUsers) ? allUsers : [];
+        const userMap = Object.fromEntries(
+          users.map(u => [String(u.id), u.full_name])
+        );
+
+        if (
+          !isAdmin &&
+          targetId !== String(user?.id) &&
+          !visibleCrossUserIds.has(targetId)
+        ) {
+          toast.error('This user is outside your cross-visibility permission.');
+          return;
+        }
+
+        reportRows = (Array.isArray(attendanceHistory) ? attendanceHistory : [])
+          .filter(r => String(r.user_id || user?.id) === targetId)
+          .filter(r => !r.date || r.date.startsWith(monthKey))
+          .map(r => ({
+            user_id: targetId,
+            employee_name:
+              userMap[targetId] || user?.full_name || 'Employee',
+            date: r.date,
+            status:
+              r.status || (r.punch_in ? 'present' : 'absent'),
+            punch_in: r.punch_in,
+            punch_out: r.punch_out,
+            duration_minutes: r.duration_minutes,
+            is_late: !!r.is_late,
+          }))
+          .sort((a, b) =>
+            String(a.date || '').localeCompare(String(b.date || ''))
+          );
+
+        employeeLabel =
+          userMap[targetId] || user?.full_name || 'Employee';
+      }
+
+      const esc = (v) =>
+        String(v ?? '').replace(/[&<>"']/g, c => ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#39;',
+        }[c]));
+
+      const fmt = v => (v ? formatAttendanceTime(v) : '—');
+
+      const duration = m =>
+        m === 0 || Number.isFinite(Number(m))
+          ? `${Math.floor(Number(m) / 60)}h ${Number(m) % 60}m`
+          : '—';
+
+      const statusLabel = status => {
+        if (status === 'no_record') return 'NO RECORD';
+        if (status === 'leave') return 'LEAVE';
+        if (status === 'absent') return 'ABSENT';
+        if (status === 'present') return 'PRESENT';
+        return String(status || '—').toUpperCase();
+      };
+
+      const employeeCount = new Set(
+        reportRows.map(r => String(r.user_id))
+      ).size;
+
+      const html = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Taskosphere Attendance Report</title>
+<style>
+body{font-family:Segoe UI,Arial,sans-serif;background:#f8fafc;color:#0f172a;margin:0;padding:28px}
+.head{background:linear-gradient(135deg,#0D3B66,#1F6FB2);color:#fff;padding:24px;border-radius:16px;margin-bottom:20px}
+.head h1{margin:0 0 6px;font-size:22px}
+.meta{opacity:.9;font-size:12px}
+.summary{display:flex;gap:12px;flex-wrap:wrap;margin:0 0 20px}
+.stat{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:12px 16px;min-width:130px}
+.stat b{display:block;font-size:18px}
+.stat span{color:#64748b;font-size:11px}
+.card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{background:#0D3B66;color:#fff;text-align:left;padding:10px}
+td{padding:9px;border-bottom:1px solid #e2e8f0}
+tr:nth-child(even) td{background:#f8fafc}
+.status{font-weight:700}
+.no-record{color:#64748b;font-style:italic}
+.footer{margin-top:18px;color:#64748b;font-size:11px;text-align:center}
+</style>
+</head>
+<body>
+<div class="head">
+  <h1>TASKOSPHERE — ATTENDANCE REPORT</h1>
+  <div class="meta">
+    Employee: ${esc(employeeLabel)} · Period: ${esc(
+      format(selectedDate, 'MMMM yyyy')
+    )} · Generated: ${esc(
+      format(new Date(), 'dd MMM yyyy, hh:mm a')
+    )} IST
+  </div>
+</div>
+
+<div class="summary">
+  <div class="stat"><b>${esc(employeeCount)}</b><span>Employees in report</span></div>
+  <div class="stat"><b>${esc(
+    reportRows.filter(r => r.status === 'present').length
+  )}</b><span>Present records</span></div>
+  <div class="stat"><b>${esc(
+    reportRows.filter(r => r.status === 'absent').length
+  )}</b><span>Absent records</span></div>
+  <div class="stat"><b>${esc(
+    reportRows.filter(r => r.status === 'no_record').length
+  )}</b><span>No records</span></div>
+</div>
+
+<div class="card">
+<table>
+<thead>
+<tr>
+<th>Date</th>
+<th>Employee</th>
+<th>Status</th>
+<th>Punch In</th>
+<th>Punch Out</th>
+<th>Duration</th>
+<th>Late</th>
+</tr>
+</thead>
+<tbody>
+${
+  reportRows.map(r => `<tr class="${r.status === 'no_record' ? 'no-record' : ''}">
+<td>${esc(r.date)}</td>
+<td>${esc(r.employee_name)}</td>
+<td class="status">${esc(statusLabel(r.status))}</td>
+<td>${esc(fmt(r.punch_in))}</td>
+<td>${esc(fmt(r.punch_out))}</td>
+<td>${esc(duration(r.duration_minutes))}</td>
+<td>${r.is_late ? 'Yes' : 'No'}</td>
+</tr>`).join('') ||
+  '<tr><td colspan="7">No attendance records found for this period.</td></tr>'
+}
+</tbody>
+</table>
+</div>
+
+<div class="footer">
+Taskosphere HR Management System · Confidential
+</div>
+</body>
+</html>`;
+
+      // Do not use noopener/noreferrer here. Chrome can return null for a
+      // newly-created tab even though the tab was actually opened.
+      const win = window.open('', '_blank');
+
+      if (!win) {
+        toast.error('Please allow pop-ups for Taskosphere to view the report.');
+        return;
+      }
+
       win.document.open();
       win.document.write(html);
       win.document.close();
       win.focus();
     } catch (error) {
       console.error('Attendance report preview failed:', error);
-      try { win.close(); } catch {}
-      toast.error('Unable to open the attendance report. Please try again.');
+      toast.error(
+        error?.response?.data?.detail ||
+        'Unable to load the attendance report. Please try again.'
+      );
     }
-  }, [canGenerateReport, isEveryoneView, isAdmin, allUsers, selectedUserId, user, visibleCrossUserIds, attendanceHistory, selectedDate]);
+  }, [
+    canGenerateReport,
+    isEveryoneView,
+    isAdmin,
+    allUsers,
+    selectedUserId,
+    user,
+    visibleCrossUserIds,
+    attendanceHistory,
+    selectedDate
+  ]);
 
   // ── Export PDF ─────────────────────────────────────────────────────────────
   const handleExportPDF = useCallback(async () => {
