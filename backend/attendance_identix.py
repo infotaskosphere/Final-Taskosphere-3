@@ -9,7 +9,6 @@ Routes provided:
     DELETE /identix/devices/{device_id}
     POST   /identix/devices/{device_id}/test
     POST   /identix/devices/{device_id}/sync-users
-    POST   /identix/devices/{device_id}/sync-time
     POST   /identix/devices/scan
     GET    /identix/devices/scan/{scan_id}
 
@@ -1047,34 +1046,6 @@ async def test_device(
     }
 
 
-@identix_router.post("/devices/{device_id}/sync-time")
-async def sync_device_time(
-    device_id: str, current_user: User = Depends(require_admin())
-):
-    """Admin-only immediate server -> physical device clock synchronization."""
-    device = await db.identix_devices.find_one(
-        {"id": device_id},
-        {"_id": 0, "id": 1, "serial_number": 1, "name": 1, "is_active": 1},
-    )
-    if not device:
-        raise HTTPException(status_code=404, detail="Identix device not found")
-    if device.get("is_active") is False:
-        raise HTTPException(status_code=400, detail="Identix device is inactive")
-
-    sn = _normalize_serial_number(device.get("serial_number"))
-    queued = await _queue_device_time_sync(sn, force=True)
-    if not queued:
-        raise HTTPException(status_code=409, detail="Time sync is already queued for this device")
-
-    now = datetime.now(timezone.utc)
-    return {
-        "message": f"Clock sync queued for {device.get('name') or sn}",
-        "device_serial": sn,
-        "server_utc": now.isoformat(),
-        "server_ist": now.astimezone(DEVICE_TIMEZONE).isoformat(),
-        "timezone": DEVICE_SERVER_TZ,
-    }
-
 
 @identix_router.post("/devices/{device_id}/sync-users")
 async def sync_users_to_device(
@@ -1636,148 +1607,6 @@ async def _find_device_by_serial(sn: Optional[str], projection: Optional[dict] =
     )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DEVICE CLOCK SYNC
-#
-# ADMS/PUSH devices support:
-#   C:<seq>:SET OPTIONS DateTime=<unix_seconds>,ServerTZ=+0530
-# and, after executing it, some firmware asks:
-#   GET /iclock/rtdata?SN=<SN>&type=time
-#
-# The server is the source of truth.  We use UTC epoch seconds (an absolute
-# instant) plus the device's India timezone offset, so the physical clock and
-# attendance timestamps stay aligned with Taskosphere.
-# ─────────────────────────────────────────────────────────────────────────────
-DEVICE_TIMEZONE = ZoneInfo("Asia/Kolkata")
-DEVICE_SERVER_TZ = "+0530"
-TIME_SYNC_MIN_INTERVAL = timedelta(hours=6)
-
-
-async def _queue_device_time_sync(sn: str, force: bool = False) -> bool:
-    """Queue a server-authoritative clock update for one ADMS device.
-
-    The command is queued through the same ADMS command queue used for users,
-    so delivery/acknowledgement is visible and retryable.  It does not run a
-    direct LAN connection and therefore works for a Render-hosted server.
-    """
-    canonical = _normalize_serial_number(sn)
-    if not canonical:
-        return False
-
-    device = await _find_device_by_serial(
-        canonical,
-        {"_id": 0, "id": 1, "serial_number": 1, "is_active": 1},
-    )
-    if not device or device.get("is_active") is False:
-        return False
-
-    now = datetime.now(timezone.utc)
-    now_iso = now.isoformat()
-
-    # Avoid flooding the device with SET OPTIONS on every heartbeat.
-    if not force:
-        last_sync = device.get("last_time_sync_at")
-        queued_at = device.get("time_sync_queued_at")
-        pending = bool(device.get("time_sync_pending"))
-        if pending:
-            return False
-        if last_sync:
-            try:
-                last_dt = datetime.fromisoformat(str(last_sync).replace("Z", "+00:00"))
-                if last_dt.tzinfo is None:
-                    last_dt = last_dt.replace(tzinfo=timezone.utc)
-                if now - last_dt.astimezone(timezone.utc) < TIME_SYNC_MIN_INTERVAL:
-                    return False
-            except Exception:
-                pass
-        if queued_at:
-            try:
-                queued_dt = datetime.fromisoformat(str(queued_at).replace("Z", "+00:00"))
-                if queued_dt.tzinfo is None:
-                    queued_dt = queued_dt.replace(tzinfo=timezone.utc)
-                if now - queued_dt.astimezone(timezone.utc) < timedelta(minutes=10):
-                    return False
-            except Exception:
-                pass
-
-    # Claim atomically so simultaneous cdata/getrequest/devicecmd heartbeats
-    # cannot queue multiple clock commands.
-    device_filter = {"id": device.get("id")} if device.get("id") else {
-        "serial_number": canonical
-    }
-    claim_query = dict(device_filter)
-    # Never queue a second clock command while one is already waiting for
-    # device acknowledgement, including when an admin presses Sync Time.
-    claim_query["time_sync_pending"] = {"$ne": True}
-
-    claimed = await db.identix_devices.find_one_and_update(
-        claim_query,
-        {"$set": {
-            "time_sync_pending": True,
-            "time_sync_queued_at": now_iso,
-            "time_sync_target_utc": now_iso,
-        }},
-        projection={"_id": 0, "id": 1, "serial_number": 1},
-        return_document=True,
-    )
-    if not claimed:
-        return False
-
-    epoch = int(now.timestamp())
-    seq = await _next_seq_id(canonical)
-    cmd_str = f"SET OPTIONS DateTime={epoch},ServerTZ={DEVICE_SERVER_TZ}"
-
-    try:
-        await db.identix_cmd_queue.insert_one({
-            "cmd_id": str(uuid.uuid4()),
-            "seq_id": seq,
-            "device_serial": canonical,
-            "cmd_str": cmd_str,
-            "command_type": "DEVICE_TIME_SYNC",
-            "status": "pending",
-            "created_at": now_iso,
-            "sent_at": None,
-            "acknowledged_at": None,
-            "time_sync_target_utc": now_iso,
-        })
-        logger.info(
-            f"🕒 Queued device clock sync | SN={canonical} | "
-            f"UTC={now_iso} | IST={now.astimezone(DEVICE_TIMEZONE).isoformat()} | "
-            f"epoch={epoch}"
-        )
-        return True
-    except Exception:
-        await db.identix_devices.update_one(
-            device_filter,
-            {"$set": {"time_sync_pending": False}},
-        )
-        raise
-
-
-@identix_router.api_route("/iclock/rtdata", methods=["GET", "POST"])
-async def iclock_rtdata(request: Request):
-    """Return the server clock when an ADMS device requests type=time."""
-    params = dict(request.query_params)
-    sn = _normalize_serial_number(params.get("SN") or params.get("sn", ""))
-    requested_type = str(params.get("type", "")).strip().lower()
-    now = datetime.now(timezone.utc)
-
-    if sn:
-        await _mark_device_online(sn)
-
-    if requested_type == "time":
-        epoch = int(now.timestamp())
-        response = f"DateTime={epoch},ServerTZ={DEVICE_SERVER_TZ}"
-        logger.info(
-            f"🕒 RTDATA time response | SN={sn} | "
-            f"UTC={now.isoformat()} | IST={now.astimezone(DEVICE_TIMEZONE).isoformat()}"
-        )
-        from fastapi.responses import PlainTextResponse
-        return PlainTextResponse(response + "\n")
-
-    from fastapi.responses import PlainTextResponse
-    return PlainTextResponse("OK\n")
-
 
 # 🔹 Device handshake (VERY IMPORTANT)
 async def _mark_device_online(sn: str):
@@ -1820,13 +1649,6 @@ async def _mark_device_online(sn: str):
     if reconcile_claim:
         asyncio.create_task(_prepare_fingerprint_reconciliation(canonical))
 
-    # Keep the physical device clock aligned with Taskosphere automatically.
-    # This is deliberately throttled to avoid a SET OPTIONS command on every
-    # heartbeat while still correcting drift after reconnects/restarts.
-    try:
-        asyncio.create_task(_queue_device_time_sync(canonical))
-    except Exception:
-        logger.exception(f"Failed to schedule device time sync for SN={canonical}")
 
 
 @identix_router.api_route("/iclock/getrequest", methods=["GET", "POST"])
@@ -2326,25 +2148,6 @@ async def iclock_devicecmd(request: Request):
                     }},
                 )
 
-                # DEVICE_TIME_SYNC is complete only after the physical device
-                # acknowledges the SET OPTIONS command.
-                if str(matching.get("cmd_str", "")).upper().startswith("SET OPTIONS DATETIME="):
-                    time_now = datetime.now(timezone.utc).isoformat()
-                    device_filter = {"serial_number": sn}
-                    await db.identix_devices.update_one(
-                        device_filter,
-                        {"$set": {
-                            "time_sync_pending": False,
-                            "last_time_sync_at": time_now if success else None,
-                            "time_sync_acknowledged_at": time_now if success else None,
-                            "time_sync_status": "acknowledged" if success else "failed",
-                            "time_sync_return_code": str(return_code),
-                        }},
-                    )
-                    logger.info(
-                        f"🕒 Device clock sync {'ACKNOWLEDGED' if success else 'FAILED'} | "
-                        f"SN={sn} | Return={return_code}"
-                    )
 
                 # USERINFO command success is the authoritative proof that the
                 # employee record was accepted by the physical device.
