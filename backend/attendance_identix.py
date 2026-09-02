@@ -387,11 +387,13 @@ async def sync_user_to_identix_devices(user_doc: dict):
 
         queued = await _queue_user_to_all_devices(user_doc)
         if queued:
+            # Do not mark the user as synced merely because a command was queued.
+            # The real device state is confirmed by /iclock/devicecmd Return=0.
             await db.users.update_one(
                 {"id": user_doc["id"]},
-                {"$set": {"identix_enrolled": True}},
+                {"$set": {"identix_enrolled": False}},
             )
-            logger.info(f"✅ User {user_doc.get('full_name')} queued for {queued} device(s)")
+            logger.info(f"📤 User {user_doc.get('full_name')} queued for {queued} device(s); waiting for device ACK")
         else:
             logger.warning(f"No devices with serial numbers found to queue user {user_doc.get('full_name')}")
 
@@ -1049,7 +1051,8 @@ async def sync_users_to_device(
             })
             logger.info(f"📥 Queued user cmd batch={batch_id} SN={sn} uid={identix_uid} name={safe_name}")
             command_ids.append(cmd_id)
-            await db.users.update_one({"id": u["id"]}, {"$set": {"identix_enrolled": True}})
+            # The device must ACK Return=0 before this is shown as Synced.
+            await db.users.update_one({"id": u["id"]}, {"$set": {"identix_enrolled": False}})
             queued += 1
         except Exception as eq:
             logger.warning(f"Failed to queue user {u.get('full_name')}: {eq}")
@@ -1396,6 +1399,10 @@ async def get_identix_users(current_user: User = Depends(require_admin())):
             "identix_uid": 1,
             "identix_enrolled": 1,
             "thumb_enrolled": 1,
+            "identix_fingerprint_fids": 1,
+            "identix_fingerprint_count": 1,
+            "fingerprint_last_enrolled_at": 1,
+            "fingerprint_last_seen_at": 1,
             "created_at": 1,
         },
     ).to_list(500)
@@ -1409,7 +1416,11 @@ async def mark_thumb_enrolled(
 ):
     result = await db.users.find_one_and_update(
         {"id": user_id},
-        {"$set": {"thumb_enrolled": True}},
+        {"$set": {
+            "thumb_enrolled": True,
+            "fingerprint_source": "manual",
+            "fingerprint_last_enrolled_at": datetime.now(timezone.utc).isoformat(),
+        }},
         return_document=True,
     )
     if not result:
@@ -1576,6 +1587,116 @@ async def iclock_getrequest(request: Request):
 
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# BIOMETRIC ENROLLMENT PUSH PARSER
+# ZKTeco/Identix ADMS sends fingerprint templates through /iclock/cdata with
+# table=OPERLOG.  Records have the form:
+#   FP PIN=2\tFID=0\tSize=1124\tValid=1\tTMP=<base64>
+# We deliberately do NOT persist the biometric template itself.  We only keep
+# the enrolled fingerprint slot(s) and timestamps needed by the UI.
+# ─────────────────────────────────────────────────────────────────────────────
+async def _mark_fingerprint_seen_from_verify_mode(user: Optional[dict], verify_mode: Any) -> bool:
+    """Infer fingerprint presence from a successful attendance verification.
+
+    ADMS verify mode 1 is fingerprint; several firmware variants also report
+    combined modes containing fingerprint (5, 6, 8, 9, 10, 12, 13, 14).
+    This does not claim which finger was used; it only confirms that the device
+    has a usable fingerprint template for this employee.
+    """
+    if not user:
+        return False
+    try:
+        mode = int(str(verify_mode).strip())
+    except (TypeError, ValueError):
+        return False
+    if mode not in {1, 5, 6, 8, 9, 10, 12, 13, 14}:
+        return False
+    now = datetime.now(timezone.utc).isoformat()
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {
+            "thumb_enrolled": True,
+            "fingerprint_source": "attendance_verify",
+            "fingerprint_last_seen_at": now,
+        }},
+    )
+    return True
+
+async def _process_fingerprint_uploads(sn: str, raw: str, params: dict) -> int:
+    table = str(params.get("table") or "").strip().upper()
+    if table not in {"OPERLOG", "FP", "FINGERTMP"} and not re.search(r"(?m)^FP\s+PIN=", raw):
+        return 0
+
+    # TMP may be very large, so only parse the header.  The template is never
+    # stored in MongoDB.  The lookahead stops at the next FP record or EOF.
+    pattern = re.compile(
+        r"(?m)^FP\s+PIN=(?P<pin>[^\t\s]+)\s*\t"
+        r"FID=(?P<fid>\d+)\s*\t"
+        r"Size=(?P<size>\d+)\s*\t"
+        r"Valid=(?P<valid>[01])\s*\tTMP=",
+        re.IGNORECASE,
+    )
+    matches = list(pattern.finditer(raw))
+    if not matches:
+        # A few firmware versions use spaces instead of tabs between fields.
+        pattern = re.compile(
+            r"(?m)^FP\s+PIN=(?P<pin>[^\t\s]+)\s+"
+            r"FID=(?P<fid>\d+)\s+"
+            r"Size=(?P<size>\d+)\s+"
+            r"Valid=(?P<valid>[01])\s+TMP=",
+            re.IGNORECASE,
+        )
+        matches = list(pattern.finditer(raw))
+
+    processed = 0
+    now = datetime.now(timezone.utc).isoformat()
+    for match in matches:
+        pin = match.group("pin").strip()
+        fid = int(match.group("fid"))
+        size = int(match.group("size"))
+        valid = match.group("valid") == "1"
+        if not pin or size <= 0:
+            continue
+
+        user = await _find_identix_user(pin)
+        if not user:
+            logger.warning(
+                f"⚠️ Fingerprint upload from SN={sn} for unknown Identix PIN={pin}"
+            )
+            continue
+
+        current = await db.users.find_one(
+            {"id": user["id"]},
+            {"_id": 0, "identix_fingerprint_fids": 1},
+        )
+        fids = {int(x) for x in (current or {}).get("identix_fingerprint_fids", []) if str(x).isdigit()}
+        if valid:
+            fids.add(fid)
+        else:
+            fids.discard(fid)
+
+        update = {
+            "identix_fingerprint_fids": sorted(fids),
+            "identix_fingerprint_count": len(fids),
+            # Keep the existing UI field for backward compatibility.
+            "thumb_enrolled": bool(fids),
+            "fingerprint_source": "machine_push",
+            "fingerprint_last_seen_at": now,
+        }
+        if valid:
+            update["fingerprint_last_enrolled_at"] = now
+            update["fingerprint_last_fid"] = fid
+
+        await db.users.update_one({"id": user["id"]}, {"$set": update})
+        processed += 1
+        logger.info(
+            f"🖐️ Fingerprint {'enrolled' if valid else 'removed'} | "
+            f"SN={sn} PIN={pin} FID={fid} total={len(fids)}"
+        )
+
+    return processed
+
+
 # 🔹 Main attendance data endpoint — ADMS cloud push (machine → Render)
 @identix_router.api_route("/iclock/cdata", methods=["GET", "POST"])
 async def iclock_cdata(request: Request):
@@ -1657,6 +1778,11 @@ async def iclock_cdata(request: Request):
             logger.info(f"📡 Identix handshake from SN={sn}")
             return "OK\n"
 
+        # Fingerprint enrollment/change events are pushed through the same
+        # cdata endpoint as attendance logs. Process them first so they are
+        # not mistaken for attendance rows.
+        fingerprint_events = await _process_fingerprint_uploads(sn, raw, params)
+
         lines = [line.strip() for line in raw.splitlines() if line.strip()]
         logger.info(
             f"✅ Identix push received | SN={sn} | lines={len(lines)} | params={params}"
@@ -1666,6 +1792,13 @@ async def iclock_cdata(request: Request):
         mirrored = 0
         skipped = 0
         invalid = 0
+
+        # A pure biometric upload contains no attendance rows. ACK it after
+        # updating enrollment state; do not try to parse the base64 template as
+        # an attendance timestamp.
+        if fingerprint_events and str(params.get("table") or "").strip().upper() in {"OPERLOG", "FP", "FINGERTMP"} and not re.search(r"(?m)^\s*\d+\t\d{4}-\d{2}-\d{2} ", raw):
+            logger.info(f"Identix fingerprint push complete | SN={sn} | events={fingerprint_events}")
+            return f"OK: {fingerprint_events}\n"
 
         for line in lines:
             parts = line.split("\t")
@@ -1698,6 +1831,8 @@ async def iclock_cdata(request: Request):
                 continue
 
             user = await _find_identix_user(device_user_id)
+            verify_mode_raw = parts[3].strip() if len(parts) > 3 else ""
+            await _mark_fingerprint_seen_from_verify_mode(user, verify_mode_raw)
             event_id = _machine_event_id(
                 sn, device_user_id, punch_time_raw, punch_type, punch_code
             )
@@ -1735,7 +1870,7 @@ async def iclock_cdata(request: Request):
                 punch_time_raw=punch_time_raw,
                 punch_type=punch_type,
                 punch_code=punch_code,
-                verify_mode=parts[3].strip() if len(parts) > 3 else 0,
+                verify_mode=verify_mode_raw or 0,
                 source="machine_push",
                 user=user,
             )
@@ -1877,7 +2012,8 @@ async def iclock_devicecmd(request: Request):
 
         if seq_id is not None and sn:
             matching = await db.identix_cmd_queue.find_one(
-                {"device_serial": sn, "seq_id": seq_id}, {"_id": 0, "cmd_id": 1}
+                {"device_serial": sn, "seq_id": seq_id},
+                {"_id": 0, "cmd_id": 1, "cmd_str": 1, "user_id": 1, "identix_uid": 1},
             )
             if matching:
                 success = str(return_code).strip() == "0"
@@ -1889,6 +2025,21 @@ async def iclock_devicecmd(request: Request):
                         "acknowledged_at": datetime.now(timezone.utc).isoformat(),
                     }},
                 )
+
+                # USERINFO command success is the authoritative proof that the
+                # employee record was accepted by the physical device.
+                if str(matching.get("cmd_str", "")).upper().startswith("DATA UPDATE USERINFO"):
+                    pin_match = re.search(r"\bPIN=(\d+)\b", matching.get("cmd_str", ""), re.IGNORECASE)
+                    if pin_match:
+                        try:
+                            pin_value = int(pin_match.group(1))
+                            await db.users.update_one(
+                                {"identix_uid": pin_value},
+                                {"$set": {"identix_enrolled": bool(success), "identix_last_sync_at": datetime.now(timezone.utc).isoformat()}},
+                            )
+                        except Exception:
+                            pass
+
                 logger.info(
                     f"{'✅' if success else '❌'} Command seq={seq_id} SN={sn} "
                     f"marked {'acknowledged' if success else 'failed'} (Return={return_code})"
