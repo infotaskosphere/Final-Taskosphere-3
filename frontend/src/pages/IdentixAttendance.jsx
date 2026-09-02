@@ -896,6 +896,7 @@ function IdentixEnrollmentTab() {
   const [search,   setSearch]   = useState('');
   const [syncingId, setSyncingId] = useState(null);
   const [thumbId,   setThumbId]   = useState(null);
+  const [reconciling, setReconciling] = useState(false);
 
   // The biometric machine pushes EnrollFP/ChgFP events asynchronously.
   // Refresh this tab periodically so the UI reflects a fingerprint added on
@@ -917,6 +918,19 @@ function IdentixEnrollmentTab() {
     const timer = setInterval(() => load(true), 5000);
     return () => clearInterval(timer);
   }, [load]);
+
+  const reconcileExisting = async () => {
+    setReconciling(true);
+    try {
+      const { data } = await api.post('/identix/users/reconcile-fingerprints');
+      toast.success(data?.message || 'Existing machine fingerprints are being fetched');
+      await load(true);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Fingerprint reconciliation failed');
+    } finally {
+      setReconciling(false);
+    }
+  };
 
   const markThumb = async (userId) => {
     setThumbId(userId);
@@ -949,9 +963,16 @@ function IdentixEnrollmentTab() {
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#0f172a' }}>Biometric Enrollment</h3>
           <div style={{ marginTop: 4, fontSize: 11, color: '#64748b' }}>Fingerprint status syncs automatically from the machine.</div>
         </div>
-        <div style={{ position: 'relative' }}>
-          <Search size={14} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search employees…" style={{ ...inputStyleIdentix, paddingLeft: 30, width: 210 }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative' }}>
+            <Search size={14} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search employees…" style={{ ...inputStyleIdentix, paddingLeft: 30, width: 210 }} />
+          </div>
+          <button onClick={reconcileExisting} disabled={reconciling}
+            style={{ padding: '7px 11px', background: 'transparent', color: COLORS.mediumBlue, border: `1.5px solid ${COLORS.mediumBlue}`, borderRadius: 7, fontWeight: 600, fontSize: 11, cursor: reconciling ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
+            <RefreshCw size={12} style={reconciling ? { animation: 'spin 1s linear infinite' } : undefined} />
+            {reconciling ? 'Fetching…' : 'Sync Existing Fingerprints'}
+          </button>
         </div>
       </div>
 
@@ -995,8 +1016,10 @@ function IdentixEnrollmentTab() {
                       : manuallyMarked
                         ? pill('#e0e7ff', '#3730a3', '✓ Marked')
                         : pill('#fee2e2', '#991b1b', 'Not Added')}
-                    {u.fingerprint_last_enrolled_at && (
-                      <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 3 }}>Auto-detected</div>
+                    {machineFingerprintAdded && (
+                      <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 3 }}>
+                        {u.fingerprint_source === 'machine_reconcile' ? 'Fetched from machine' : 'Machine detected'}
+                      </div>
                     )}
                   </td>
                   <td style={{ padding: '10px 14px' }}>
