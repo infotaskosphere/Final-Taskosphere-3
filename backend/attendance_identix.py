@@ -339,6 +339,80 @@ async def _queue_user_cmd(sn: str, identix_uid: int, name: str, user_id: str):
     logger.info(f"📥 Queued user cmd for SN={sn} uid={identix_uid} name={safe_name}")
 
 
+async def _queue_fingerprint_query(sn: str, identix_uid: int, user_id: Optional[str] = None):
+    """Ask the ADMS device to upload all fingerprints for one employee.
+
+    The device returns the templates through /iclock/cdata.  We never persist
+    the biometric template itself; _process_fingerprint_uploads() stores only
+    fingerprint slot/status metadata.
+    """
+    if not sn or identix_uid is None:
+        return None
+    seq = await _next_seq_id(sn)
+    cmd_str = f"DATA QUERY FINGERTMP PIN={identix_uid}"
+    await db.identix_cmd_queue.insert_one({
+        "cmd_id":        str(uuid.uuid4()),
+        "seq_id":        seq,
+        "device_serial": sn,
+        "cmd_str":        cmd_str,
+        "status":        "pending",
+        "created_at":    datetime.now(timezone.utc).isoformat(),
+        "sent_at":       None,
+        "user_id":       user_id,
+        "identix_uid":   identix_uid,
+        "purpose":       "fingerprint_reconcile",
+    })
+    logger.info(f"🖐️ Queued fingerprint query for SN={sn} PIN={identix_uid}")
+    return seq
+
+
+async def _prepare_fingerprint_reconciliation(sn: str):
+    """Queue a one-time fingerprint reconciliation for existing employees.
+
+    Existing employees may have been enrolled on the physical machine before
+    Taskosphere started tracking fingerprint events. Querying FINGERTMP asks
+    the device to send those existing templates through ADMS so the enrollment
+    tab can be brought up to date without re-pushing or re-enrolling users.
+    """
+    if not sn:
+        return 0
+
+    users = await db.users.find(
+        {
+            "is_active": {"$ne": False},
+            "identix_uid": {"$exists": True, "$ne": None},
+        },
+        {"_id": 0, "id": 1, "identix_uid": 1},
+    ).to_list(5000)
+
+    queued = 0
+    for user in users:
+        try:
+            identix_uid = int(user.get("identix_uid"))
+        except (TypeError, ValueError):
+            continue
+
+        # Reset only the local machine-derived fingerprint state before the
+        # query. If the machine has no fingerprint, the employee correctly
+        # remains "Not Added" after reconciliation.
+        await db.users.update_one(
+            {"id": user["id"]},
+            {"$set": {
+                "identix_fingerprint_fids": [],
+                "identix_fingerprint_count": 0,
+                "fingerprint_source": "machine_reconcile",
+                "fingerprint_reconcile_requested_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+        await _queue_fingerprint_query(sn, identix_uid, user.get("id"))
+        queued += 1
+
+    logger.info(
+        f"🔄 Existing fingerprint reconciliation queued | SN={sn} | employees={queued}"
+    )
+    return queued
+
+
 async def _queue_user_to_all_devices(user_doc: dict) -> int:
     """Queue a user-add command for every active device. Returns count of queued devices."""
     devices = await db.identix_devices.find({"is_active": True}).to_list(50)
@@ -1403,10 +1477,29 @@ async def get_identix_users(current_user: User = Depends(require_admin())):
             "identix_fingerprint_count": 1,
             "fingerprint_last_enrolled_at": 1,
             "fingerprint_last_seen_at": 1,
+            "fingerprint_source": 1,
+            "fingerprint_reconcile_requested_at": 1,
             "created_at": 1,
         },
     ).to_list(500)
     return {"users": users}
+
+
+@identix_router.post("/users/reconcile-fingerprints")
+async def reconcile_existing_fingerprints(
+    current_user: User = Depends(require_admin()),
+):
+    """Manually re-fetch fingerprints for all existing employees from devices."""
+    devices = await db.identix_devices.find({"is_active": True}, {"_id": 0, "serial_number": 1}).to_list(50)
+    total = 0
+    for device in devices:
+        sn = _normalize_serial_number(device.get("serial_number", ""))
+        if sn:
+            total += await _prepare_fingerprint_reconciliation(sn)
+    return {
+        "queued": total,
+        "message": f"Queued fingerprint reconciliation for {total} employee/device pair(s).",
+    }
 
 
 @identix_router.patch("/users/{user_id}/thumb-enrolled")
@@ -1459,7 +1552,7 @@ async def sync_single_user_to_devices(
     queued = await _queue_user_to_all_devices(user)
     await db.users.update_one(
         {"id": user_id},
-        {"$set": {"identix_enrolled": True}},
+        {"$set": {"identix_enrolled": False}},
     )
     return {
         "message": f"{user.get('full_name')} queued for push to {queued} device(s). Machine will receive the command on next poll.",
@@ -1518,8 +1611,9 @@ async def _mark_device_online(sn: str):
         return
 
     # Also repair the stored serial once we have a valid registration.
+    device_filter = {"id": device.get("id")} if device.get("id") else {"serial_number": device.get("serial_number")}
     await db.identix_devices.update_one(
-        {"id": device.get("id")} if device.get("id") else {"serial_number": device.get("serial_number")},
+        device_filter,
         {"$set": {
             "serial_number": canonical,
             "last_heartbeat_at": now,
@@ -1527,6 +1621,22 @@ async def _mark_device_online(sn: str):
         }},
     )
     logger.info(f"✅ Device {canonical} marked online (received SN={sn!r})")
+
+    # Existing employees may already have fingerprints on the machine from
+    # before Taskosphere started listening for EnrollFP/ChgFP events. Trigger
+    # one automatic reconciliation per device registration. The atomic update
+    # prevents every heartbeat/cdata request from queuing the same queries.
+    reconcile_claim = await db.identix_devices.find_one_and_update(
+        {
+            **device_filter,
+            "fingerprint_reconcile_queued_at": {"$exists": False},
+        },
+        {"$set": {"fingerprint_reconcile_queued_at": now}},
+        projection={"_id": 0, "id": 1, "serial_number": 1},
+        return_document=True,
+    )
+    if reconcile_claim:
+        asyncio.create_task(_prepare_fingerprint_reconciliation(canonical))
 
 
 @identix_router.api_route("/iclock/getrequest", methods=["GET", "POST"])
@@ -1624,26 +1734,26 @@ async def _mark_fingerprint_seen_from_verify_mode(user: Optional[dict], verify_m
 
 async def _process_fingerprint_uploads(sn: str, raw: str, params: dict) -> int:
     table = str(params.get("table") or "").strip().upper()
-    if table not in {"OPERLOG", "FP", "FINGERTMP"} and not re.search(r"(?m)^FP\s+PIN=", raw):
+    if table not in {"OPERLOG", "FP", "FINGERTMP"} and not re.search(r"(?m)^(?:FP|FINGERTMP)\s+PIN=", raw):
         return 0
 
     # TMP may be very large, so only parse the header.  The template is never
     # stored in MongoDB.  The lookahead stops at the next FP record or EOF.
     pattern = re.compile(
-        r"(?m)^FP\s+PIN=(?P<pin>[^\t\s]+)\s*\t"
-        r"FID=(?P<fid>\d+)\s*\t"
+        r"(?m)^(?:FP|FINGERTMP)\s+PIN=(?P<pin>[^\t\s]+)\s*\t"
+        r"(?:FID|FingerID)=(?P<fid>\d+)\s*\t"
         r"Size=(?P<size>\d+)\s*\t"
-        r"Valid=(?P<valid>[01])\s*\tTMP=",
+        r"Valid=(?P<valid>[01])\s*\t(?:TMP|Template)=",
         re.IGNORECASE,
     )
     matches = list(pattern.finditer(raw))
     if not matches:
         # A few firmware versions use spaces instead of tabs between fields.
         pattern = re.compile(
-            r"(?m)^FP\s+PIN=(?P<pin>[^\t\s]+)\s+"
-            r"FID=(?P<fid>\d+)\s+"
+            r"(?m)^(?:FP|FINGERTMP)\s+PIN=(?P<pin>[^\t\s]+)\s+"
+            r"(?:FID|FingerID)=(?P<fid>\d+)\s+"
             r"Size=(?P<size>\d+)\s+"
-            r"Valid=(?P<valid>[01])\s+TMP=",
+            r"Valid=(?P<valid>[01])\s+(?:TMP|Template)=",
             re.IGNORECASE,
         )
         matches = list(pattern.finditer(raw))
@@ -2033,10 +2143,23 @@ async def iclock_devicecmd(request: Request):
                     if pin_match:
                         try:
                             pin_value = int(pin_match.group(1))
-                            await db.users.update_one(
+                            sync_now = datetime.now(timezone.utc).isoformat()
+                            user_result = await db.users.find_one_and_update(
                                 {"identix_uid": pin_value},
-                                {"$set": {"identix_enrolled": bool(success), "identix_last_sync_at": datetime.now(timezone.utc).isoformat()}},
+                                {"$set": {
+                                    "identix_enrolled": bool(success),
+                                    "identix_last_sync_at": sync_now,
+                                }},
+                                projection={"_id": 0, "id": 1, "identix_uid": 1},
+                                return_document=True,
                             )
+                            if success and user_result:
+                                # The user record is now confirmed on the
+                                # device. Ask the device for any fingerprints
+                                # that were already enrolled before this push.
+                                await _queue_fingerprint_query(
+                                    sn, pin_value, user_result.get("id")
+                                )
                         except Exception:
                             pass
 
