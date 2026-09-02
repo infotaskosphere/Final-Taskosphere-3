@@ -15050,7 +15050,7 @@ app.include_router(ai_router_router, prefix="/api")
 app.include_router(
     qc_trademark_router, prefix="/api/trademark-qc", tags=["trademark-qc"]
 )
-from backend.attendance_identix import iclock_getrequest, iclock_cdata, iclock_devicecmd, iclock_rtdata
+from backend.attendance_identix import iclock_getrequest, iclock_cdata, iclock_devicecmd
 
 # Support BOTH ADMS firmware URL conventions.
 #
@@ -15064,7 +15064,6 @@ for _path, _handler in (
     ("/iclock/cdata", iclock_cdata),
     ("/iclock/getrequest", iclock_getrequest),
     ("/iclock/devicecmd", iclock_devicecmd),
-    ("/iclock/rtdata", iclock_rtdata),
 ):
     app.add_api_route(_path, _handler, methods=["GET", "POST"])
     app.add_api_route(f"{_path}.aspx", _handler, methods=["GET", "POST"])
