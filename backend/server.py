@@ -3306,7 +3306,10 @@ async def handle_attendance(data: dict, current_user: User = Depends(get_current
             raise HTTPException(status_code=400, detail="Not punched in yet")
 
         if attendance.get("punch_out"):
-            raise HTTPException(status_code=400, detail="Already punched out")
+            raise HTTPException(
+                status_code=409,
+                detail="Punch Out already recorded. A second Punch Out is not allowed unless an administrator edits/resets the previous Punch Out."
+            )
 
         punch_in_dt = attendance.get("punch_in")
         punch_out_utc = datetime.now(timezone.utc)
@@ -4051,6 +4054,8 @@ async def admin_reset_punch_out(
     update_fields = {
         "punch_out": None,
         "punch_out_location": None,
+        "punch_out_source": None,
+        "punch_out_device_serial": None,
         "duration_minutes": 0,
         "punched_out_early": False,
         "overtime_minutes": 0,
@@ -4339,11 +4344,12 @@ async def auto_punch_out(data: dict, current_user: User = Depends(get_current_us
     if not attendance or not attendance.get("punch_in"):
         raise HTTPException(status_code=400, detail="Not punched in yet")
     if attendance.get("punch_out"):
-        # Already punched out — return silently (idempotent)
-        return {
-            "message": "Already punched out",
-            "duration": attendance.get("duration_minutes", 0),
-        }
+        # A second punch-out is never permitted. The only way to reopen the
+        # attendance record is through the admin reset/edit workflow.
+        raise HTTPException(
+            status_code=409,
+            detail="Punch Out already recorded. A second Punch Out is not allowed unless an administrator edits/resets the previous Punch Out."
+        )
 
     punch_in_dt = attendance.get("punch_in")
     punch_out_utc = datetime.now(timezone.utc)
