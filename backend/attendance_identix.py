@@ -857,9 +857,16 @@ async def _mirror_machine_punch(
             existing_att.get("punch_out") if existing_att else None
         )
 
-        # Keep the latest OUT punch of the day. This handles a user pressing
-        # OUT more than once while preserving the real end-of-day punch.
-        if current_out is not None and punch_dt_utc <= current_out:
+        # STRICT SINGLE PUNCH-OUT RULE:
+        # Once any punch-out has been recorded for the day, the biometric
+        # device must never overwrite it with another OUT event. A second
+        # punch-out is allowed only after an administrator explicitly edits
+        # or resets the previous punch-out through the admin attendance flow.
+        if current_out is not None:
+            logger.warning(
+                "Ignoring duplicate machine OUT | user=%s date=%s existing=%s incoming=%s serial=%s",
+                user_id, date_str, current_out, punch_dt_utc, device_serial,
+            )
             return False
 
         punch_in_dt = _read_attendance_datetime(
@@ -869,6 +876,8 @@ async def _mirror_machine_punch(
         update_fields = {
             "status": "present",
             "punch_out": punch_dt_utc,
+            "punch_out_source": "machine",
+            "punch_out_device_serial": device_serial,
             "source": source,
             "device_name": device_name,
             "device_serial": device_serial,
