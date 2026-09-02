@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useDark } from '@/hooks/useDark';
 import { useAuth } from '@/contexts/AuthContext';
@@ -582,7 +581,6 @@ function IdentixDevicesTab() {
   const [testingId,   setTestingId]   = useState(null);
   const [testResults, setTestResults] = useState({});
   const [syncingId,   setSyncingId]   = useState(null);
-  const [timeSyncingId, setTimeSyncingId] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -640,21 +638,6 @@ function IdentixDevicesTab() {
     finally { setSyncingId(null); }
   };
 
-  const syncDeviceTime = async (d) => {
-    setTimeSyncingId(d.id);
-    try {
-      const { data } = await api.post(`/identix/devices/${d.id}/sync-time`);
-      toast.success(`Clock sync queued for ${d.name}`);
-      setDevices(prev => prev.map(x => x.id === d.id ? {
-        ...x,
-        time_sync_pending: true,
-        time_sync_status: 'queued',
-        time_sync_queued_at: new Date().toISOString(),
-      } : x));
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || 'Clock sync failed');
-    } finally { setTimeSyncingId(null); }
-  };
 
   const setField = (field, val) => setForm(f => ({ ...f, [field]: val }));
 
@@ -696,7 +679,6 @@ function IdentixDevicesTab() {
                     {d.location && <span>📍 {d.location}</span>}
                     {d.serial_number && <span>S/N: {d.serial_number}</span>}
                     {d.last_sync_at && <span>Last sync: {fmtTime(d.last_sync_at)}</span>}
-                    {d.last_time_sync_at && <span>Clock synced: {fmtTime(d.last_time_sync_at)}</span>}
                   </div>
                   {tr && !tr.testing && (
                     <div style={{ marginTop: 8, padding: '7px 12px', borderRadius: 8, fontSize: 12, background: tr.success ? '#d1fae5' : '#fee2e2', color: tr.success ? '#065f46' : '#991b1b' }}>
@@ -709,7 +691,6 @@ function IdentixDevicesTab() {
                   {[
                     { label: 'Test',       icon: Wifi,     color: '#3b82f6', action: () => testConn(d),  loading: testingId === d.id  },
                     { label: 'Sync Users', icon: UsersIcon,color: COLORS.green, action: () => syncUsers(d), loading: syncingId === d.id },
-                    { label: 'Sync Time',  icon: Clock,    color: '#7c3aed', action: () => syncDeviceTime(d), loading: timeSyncingId === d.id },
                     { label: 'Edit',       icon: Edit,     color: '#374151', action: () => openEdit(d), loading: false },
                     { label: 'Delete',     icon: Trash2,   color: COLORS.red,  action: () => remove(d),  loading: false },
                   ].map(btn => (
