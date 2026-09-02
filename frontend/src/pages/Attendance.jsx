@@ -2566,8 +2566,11 @@ export default function Attendance() {
   }, [haversineMetres]);
 
   const handlePunchAction = useCallback(async (action) => {
-    // Guard: if machine already synced, prevent duplicate manual punch
-    if (isMachineSynced) {
+    // A biometric punch-in must not be duplicated manually, but a machine
+    // punch-in must NEVER disable the web app's Punch Out button. Employees
+    // may punch in on the biometric machine and punch out from Taskosphere
+    // when needed.
+    if (isMachineSynced && action === 'punch_in') {
       toast.info('Attendance already recorded by biometric machine', { duration: 4000, id: 'machine-guard' });
       return;
     }
@@ -4235,7 +4238,7 @@ Taskosphere HR Management System · Confidential
                             style={{ backgroundColor: isDark ? 'rgba(59,130,246,0.08)' : '#f0f9ff', borderColor: isDark ? 'rgba(59,130,246,0.25)' : '#bfdbfe' }}>
                             <Activity className="w-3.5 h-3.5 flex-shrink-0" style={{ color: COLORS.mediumBlue }} />
                             <p className="text-xs font-semibold" style={{ color: isDark ? '#60a5fa' : COLORS.mediumBlue }}>
-                              Synced from biometric machine — no app punch needed
+                              Punch-in synced from biometric machine — web Punch Out remains available
                             </p>
                           </div>
                         )}
@@ -4251,12 +4254,20 @@ Taskosphere HR Management System · Confidential
                     {!isViewingOther && (
                       <div className="flex flex-col gap-2 pt-1">
                         {isMachineSynced ? (
-                          /* Machine already synced — show status instead of punch buttons */
+                          /* Machine punch-in is synced, but web Punch Out must remain available. */
                           !displayTodayAttendance?.punch_out ? (
-                            <div className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border"
-                              style={{ backgroundColor: isDark ? 'rgba(59,130,246,0.08)' : '#eff6ff', borderColor: isDark ? 'rgba(59,130,246,0.25)' : '#bfdbfe', color: isDark ? '#60a5fa' : COLORS.mediumBlue }}>
-                              <Activity className="w-4 h-4" /> Waiting for machine punch-out
-                            </div>
+                            isTodaySelected ? (
+                              <motion.button
+                                whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                                onClick={() => handlePunchAction('punch_out')} disabled={loading}
+                                className="flex items-center justify-center gap-2 w-full h-11 rounded-xl text-sm font-bold text-white transition-all"
+                                style={{ backgroundColor: COLORS.red }}
+                              >
+                                {loading
+                                  ? <><Loader2 className="w-4 h-4 animate-spin" />Punching Out…</>
+                                  : <><LogOut className="w-4 h-4" />Punch Out</>}
+                              </motion.button>
+                            ) : null
                           ) : (
                             <div className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border"
                               style={{ backgroundColor: isDark ? 'rgba(31,175,90,0.10)' : '#f0fdf4', borderColor: isDark ? '#14532d' : '#bbf7d0', color: COLORS.emeraldGreen }}>
