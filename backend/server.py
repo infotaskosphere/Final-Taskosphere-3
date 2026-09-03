@@ -11695,7 +11695,17 @@ def _build_clients_access_query(current_user, permissions, team_ids=None):
 
 
 def _normalize_client_dates(client: dict) -> dict:
-    """Coerce created_at/birthday strings to proper types in-place."""
+    """Normalize legacy client records for stable frontend filtering and JSON serialization."""
+    raw_type = str(client.get("client_type") or "").strip().lower().replace("-", "_").replace(" ", "_")
+    type_aliases = {
+        "llp": "llp", "limited_liability_partnership": "llp",
+        "limited_liability_partnership_llp": "llp",
+        "private_limited": "pvt_ltd", "private_limited_company": "pvt_ltd",
+        "public_limited": "public_ltd", "public_limited_company": "public_ltd",
+        "section8": "section_8", "section_8_company": "section_8",
+    }
+    if raw_type:
+        client["client_type"] = type_aliases.get(raw_type, raw_type)
     if isinstance(client.get("created_at"), str):
         try:
             client["created_at"] = datetime.fromisoformat(client["created_at"])
