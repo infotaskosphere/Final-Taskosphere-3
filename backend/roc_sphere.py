@@ -12,8 +12,9 @@ server.py (see INTEGRATION.md):
 Covers:
   - Company master (linked to an existing Client, or standalone)
   - Directors / shareholders register
-  - Upload & best-effort parse of AOC-4 / MGT-7 (PDF) and MGT-7A / master
-    data (Excel/CSV) to prefill the company master
+  - Upload & best-effort parse of AOC-4 / MGT-7 / MGT-7A PDFs plus the
+    separate macro-enabled MGT-7A shareholder workbook
+  - Share-transfer register, SH-4 instrument and share-certificate drafts
   - Companies Act 2013 compliance checklist engine (heuristic, based on
     company category/size — see COMPLIANCE_RULES below)
   - Word (.docx) generation for: Board Resolution, Notice of Meeting
@@ -119,11 +120,60 @@ class Shareholder(BaseModel):
     name: str
     folio_no: Optional[str] = None
     pan: Optional[str] = None
+    holder_type: Optional[str] = None
+    category: Optional[str] = None
+    details: Optional[str] = None
     class_of_shares: Optional[str] = "Equity"
+    security_type: Optional[str] = None
+    nationality: Optional[str] = None
+    gender: Optional[str] = None
+    identifier_type: Optional[str] = None
+    occupation: Optional[str] = None
     shares_held: float = 0
     face_value: Optional[float] = 10
+    total_value: Optional[float] = None
     percentage: Optional[float] = None
     address: Optional[str] = None
+
+
+class ShareTransferRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    transfer_date: Optional[str] = None
+    transferor_name: str
+    transferee_name: str
+    transferor_folio_no: Optional[str] = None
+    transferee_folio_no: Optional[str] = None
+    share_certificate_no: Optional[str] = None
+    distinctive_from: Optional[str] = None
+    distinctive_to: Optional[str] = None
+    number_of_shares: float = 0
+    class_of_shares: str = "Equity"
+    nominal_value_per_share: float = 10
+    consideration: float = 0
+    stamp_duty: float = 0
+    board_resolution_date: Optional[str] = None
+    instrument_date: Optional[str] = None
+    instrument_received_date: Optional[str] = None
+    sh4_status: str = "Pending review"
+    remarks: Optional[str] = None
+    update_register: bool = True
+
+
+class ShareCertificateRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    certificate_no: str
+    issue_date: Optional[str] = None
+    holder_name: str
+    holder_address: Optional[str] = None
+    folio_no: Optional[str] = None
+    class_of_shares: str = "Equity"
+    number_of_shares: float = 0
+    distinctive_from: Optional[str] = None
+    distinctive_to: Optional[str] = None
+    nominal_value_per_share: float = 10
+    amount_paid_per_share: float = 0
+    joint_holders: List[str] = Field(default_factory=list)
+    remarks: Optional[str] = None
 
 
 class Auditor(BaseModel):
@@ -160,6 +210,11 @@ class RocCompanyIn(BaseModel):
     master_data: Dict[str, Any] = Field(default_factory=dict)
     mgt_shareholder_data: Dict[str, Any] = Field(default_factory=dict)
     financial_data: Dict[str, Any] = Field(default_factory=dict)  # key figures pulled from AOC-4 (see FINANCIAL_DATA_FIELDS)
+    annual_return_data: Dict[str, Any] = Field(default_factory=dict)
+    audit_report_data: Dict[str, Any] = Field(default_factory=dict)
+    board_report_data: Dict[str, Any] = Field(default_factory=dict)
+    share_transfers: List[Dict[str, Any]] = Field(default_factory=list)
+    share_certificates: List[Dict[str, Any]] = Field(default_factory=list)
     roc_form_uploads: List[Dict[str, Any]] = Field(default_factory=list)
     auditor: Optional[Auditor] = None
     notes: Optional[str] = None
@@ -301,6 +356,11 @@ async def _sync_companies_from_clients() -> int:
             "shareholders": [],
             "master_data": {},
             "mgt_shareholder_data": {},
+            "annual_return_data": {},
+            "audit_report_data": {},
+            "board_report_data": {},
+            "share_transfers": [],
+            "share_certificates": [],
             "roc_form_uploads": [],
             "auditor": None,
             "notes": None,
@@ -482,12 +542,13 @@ async def delete_company(company_id: str, current_user: User = Depends(DELETE)):
 # still shown to the user in the "Extracted fields" preview and can be
 # corrected on the Company Master / Directors & Shareholders tabs.
 
-ROC_FORM_ALLOWED_EXT = (".pdf",)
+ROC_FORM_ALLOWED_EXT = (".pdf", ".xlsx", ".xlsm", ".csv")
 ROC_FORM_RECOGNIZED = (
     # order matters: more specific labels (mgt-7a) must be checked before
     # their substrings (mgt-7)
     ("mgt-7a", r"mgt[- ]?7a"),
     ("mgt-7", r"mgt[- ]?7\b"),
+    ("mgt-7a-attachment", r"details? of (?:share|debenture)|shareholder.*(?:xls|xlsx|xlsm)"),
     ("aoc-4", r"\baoc[- ]?4\b"),
     ("aoc-2", r"\baoc[- ]?2\b"),
     ("board-report", r"extract of board.?s report|board.?s report"),
@@ -502,7 +563,7 @@ ROC_FORM_RECOGNIZED = (
 
 # Forms whose MCA-prescribed content includes the statutory Director/
 # Signatory register and the shareholder/member register.
-DIRECTOR_SHAREHOLDER_SOURCE_TYPES = {"mgt-7", "mgt-7a"}
+DIRECTOR_SHAREHOLDER_SOURCE_TYPES = {"mgt-7", "mgt-7a", "mgt-7a-attachment"}
 # Form whose MCA-prescribed content includes the audited Balance Sheet,
 # Statement of Profit & Loss and Auditor Details block.
 FINANCIAL_SOURCE_TYPE = "aoc-4"
@@ -512,7 +573,7 @@ FINANCIAL_SOURCE_TYPE = "aoc-4"
 FINANCIAL_DATA_FIELDS = (
     "period_from", "period_to", "total_income", "total_expenses",
     "profit_before_tax", "profit_after_tax", "net_worth", "share_capital",
-    "reserves_and_surplus", "balance_sheet_total",
+    "reserves_and_surplus", "balance_sheet_total", "turnover",
 )
 
 
@@ -523,6 +584,10 @@ def _identify_roc_form_type(filename: str, text: str) -> str:
     which fields (if any) a given upload is allowed to touch, not just an
     audit-trail cosmetic."""
     hay = f"{filename}\n{text[:2000]}".lower()
+    if (filename or "").lower().endswith((".xlsx", ".xlsm", ".csv")) and re.search(
+        r"shareholder|debenture holder|security held|mgt[- ]?7", hay, re.I
+    ):
+        return "mgt-7a-attachment"
     for label, pattern in ROC_FORM_RECOGNIZED:
         if re.search(pattern, hay):
             return label
@@ -539,13 +604,19 @@ def _extract_text_from_upload(filename: str, raw: bytes) -> str:
                 for page in pdf.pages[:20]:
                     text_parts.append(page.extract_text() or "")
             return "\n".join(text_parts)
-        if name.endswith((".xlsx", ".xls")):
+        if name.endswith((".xlsx", ".xlsm", ".xls")):
             import openpyxl
-            wb = openpyxl.load_workbook(io.BytesIO(raw), data_only=True)
+            wb = openpyxl.load_workbook(
+                io.BytesIO(raw),
+                data_only=True,
+                read_only=True,
+                keep_vba=name.endswith(".xlsm"),
+            )
             lines = []
             for ws in wb.worksheets:
                 for row in ws.iter_rows(values_only=True):
                     lines.append(" ".join(str(c) for c in row if c is not None))
+            wb.close()
             return "\n".join(lines)
         if name.endswith(".csv"):
             return raw.decode("utf-8", errors="ignore")
@@ -553,6 +624,77 @@ def _extract_text_from_upload(filename: str, raw: bytes) -> str:
     except Exception as e:  # pragma: no cover
         logger.warning("roc_sphere: text extraction failed for %s: %s", filename, e)
         return ""
+
+
+def _parse_mgt_shareholder_workbook(raw: bytes) -> List[Dict[str, Any]]:
+    """Read the separate MCA MGT-7/MGT-7A shareholder attachment.
+
+    MCA supplies this attachment as a macro-enabled workbook.  The
+    shareholder table can move between sheets and the sheet may contain
+    instructions above it, so locate the header row by its labels instead of
+    relying on a fixed sheet/cell range.  VBA is never executed.
+    """
+    rows: List[Dict[str, Any]] = []
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(
+            io.BytesIO(raw), read_only=True, data_only=True, keep_vba=True
+        )
+        for ws in wb.worksheets:
+            header_row = None
+            headers: Dict[str, int] = {}
+            for row in ws.iter_rows(values_only=True):
+                values = [str(v).strip() if v is not None else "" for v in row]
+                lowered = [v.lower() for v in values]
+                if any("name of shareholder" in v for v in lowered):
+                    header_row = values
+                    headers = {v.lower(): i for i, v in enumerate(values) if v}
+                    break
+            if not header_row:
+                continue
+
+            def cell(values: List[Any], label: str) -> Any:
+                idx = next((i for h, i in headers.items() if label in h), None)
+                return values[idx] if idx is not None and idx < len(values) else None
+
+            for row in ws.iter_rows(values_only=True):
+                values = list(row)
+                name = cell(values, "name of shareholder")
+                if not name or not str(name).strip():
+                    continue
+                name = re.sub(r"\s+", " ", str(name).strip())
+                if name.lower().startswith("name of shareholder"):
+                    continue
+                share_count = _num(cell(values, "number of security"))
+                face_value = _num(cell(values, "nominal value per security"))
+                total_value = _num(cell(values, "total amount of securities"))
+                rows.append({
+                    "name": name,
+                    "holder_type": cell(values, "type of shareholder"),
+                    "category": cell(values, "category of shareholder"),
+                    "details": cell(values, "details of shareholder"),
+                    "class_of_shares": cell(values, "class of security") or cell(values, "type of security") or "Equity",
+                    "folio_no": str(cell(values, "folio number") or "").strip() or None,
+                    "nationality": cell(values, "nationality"),
+                    "gender": cell(values, "gender"),
+                    "identifier_type": cell(values, "type of identifier"),
+                    "pan": cell(values, "identification no"),
+                    "occupation": cell(values, "occupation"),
+                    "shares_held": share_count,
+                    "face_value": face_value or 10,
+                    "total_value": total_value or share_count * (face_value or 10),
+                    "percentage": None,
+                })
+        wb.close()
+    except Exception as e:  # pragma: no cover
+        logger.warning("roc_sphere: shareholder workbook parse failed: %s", e)
+        return []
+
+    total = sum(_num(row.get("shares_held")) for row in rows)
+    if total:
+        for row in rows:
+            row["percentage"] = round(_num(row.get("shares_held")) / total * 100, 2)
+    return rows
 
 
 # ── director / shareholder register (MGT-7 / MGT-7A only) ─────────────────
@@ -614,6 +756,174 @@ def _parse_mgt_shareholders(text: str) -> List[Dict[str, Any]]:
     return rows
 
 
+def _first_amount(text: str, patterns: List[str]) -> Optional[float]:
+    for pattern in patterns:
+        match = re.search(pattern, text, re.I | re.M)
+        if match:
+            return _num(match.group(1).replace(",", ""))
+    return None
+
+
+def parse_mgt_annual_return(text: str) -> Dict[str, Any]:
+    """Extract structured annual-return facts from MGT-7/MGT-7A.
+
+    The separate XLSM attachment is the source for member rows; this parser
+    captures the form-level facts that are useful for pre-filling filings and
+    compliance decisions.
+    """
+    out: Dict[str, Any] = {}
+    turnover = _first_amount(text, [
+        r"\*?\s*Turnover\s+(-?[\d,]+(?:\.\d+)?)",
+        r"Turnover\s*\(in Rs\.\)\s+(-?[\d,]+(?:\.\d+)?)",
+    ])
+    net_worth = _first_amount(text, [
+        r"\*?\s*Net worth of the Company\s+(-?[\d,]+(?:\.\d+)?)",
+        r"Net worth of the company\s+(-?[\d,]+(?:\.\d+)?)",
+    ])
+    paid_up = _first_amount(text, [
+        r"Paid Up capital\s+(-?[\d,]+(?:\.\d+)?)",
+        r"Paid-up capital\s+(-?[\d,]+(?:\.\d+)?)",
+    ])
+    if turnover is not None:
+        out["turnover"] = turnover
+    if net_worth is not None:
+        out["net_worth"] = net_worth
+    if paid_up is not None:
+        out["paid_up_capital"] = paid_up
+
+    count = _first_amount(text, [
+        r"Number of shareholder/ debenture holder\s+([\d,]+)",
+        r"Total number of shareholders \(Promoters \+ Other than promoters\)\s+([\d,]+(?:\.\d+)?)",
+    ])
+    if count is not None:
+        out["shareholder_count"] = int(count)
+
+    meeting_matches = re.findall(r"\*?Number of meetings held\s+([\d,]+)", text, re.I)
+    meeting_count = max((_num(v) for v in meeting_matches), default=None)
+    if meeting_count is not None:
+        out["board_meetings_held"] = int(meeting_count)
+
+    activity = re.search(
+        r"\d+\s+([A-Z])\s+\d+\s+(.+?)\s+(\d+(?:\.\d+)?)\s*$",
+        text,
+        re.I | re.M,
+    )
+    if activity:
+        out["principal_business_activity"] = {
+            "main_activity_group_code": activity.group(1),
+            "description": re.sub(r"\s+", " ", activity.group(2)).strip(),
+            "turnover_percentage": _num(activity.group(3)),
+        }
+
+    out["filing_source"] = "MGT-7A / MGT-7"
+    return out
+
+
+def parse_auditor_report(text: str) -> Dict[str, Any]:
+    """Capture audit-report facts for review and Board's Report drafting."""
+    out: Dict[str, Any] = {}
+    qualified = _first_amount(text, [
+        r"Number of qualifications, reservation or adverse remark or disclaimer\s+([\d,]+)",
+    ])
+    if qualified is not None:
+        out["qualifications_count"] = int(qualified)
+    out["caro_applicable"] = bool(re.search(
+        r"whether companies auditors report order.*?applicable.*?\bYes\b",
+        text,
+        re.I | re.S,
+    ))
+    opinion = _extract_section(text, "Opinion of the auditor", "Basis of Opinion")
+    if opinion:
+        out["opinion"] = opinion
+    basis = _extract_section(text, "Basis of Opinion", "Emphasis of matter")
+    if basis:
+        out["basis_of_opinion"] = basis
+    other = _extract_section(text, "State other matters as per Rule 11", "State any other matters")
+    if other:
+        out["rule_11_other_matters"] = other
+    controls = _extract_section(text, "Reporting on the Internal Financial Controls", "Attachments")
+    if controls:
+        out["internal_financial_controls"] = controls
+    return out
+
+
+def _extract_section(text: str, start_label: str, end_label: str) -> Optional[str]:
+    match = re.search(
+        rf"{re.escape(start_label)}(.*?){re.escape(end_label)}",
+        text,
+        re.I | re.S,
+    )
+    if not match:
+        return None
+    value = re.sub(r"\s+", " ", match.group(1)).strip(" :-")
+    return value[:4000] if value else None
+
+
+def parse_board_report(text: str) -> Dict[str, Any]:
+    """Capture Board's Report disclosures as structured filing context."""
+    out: Dict[str, Any] = {}
+    meetings = _first_amount(text, [r"Number of meetings held\s+([\d,]+)"])
+    if meetings is not None:
+        out["board_meetings_held"] = int(meetings)
+    for key, label, end in (
+        ("state_of_affairs", "Description of state of company’s affairs", "Disclosure relating to amounts"),
+        ("reserves_recommendation", "Disclosure relating to amounts if any which is proposed to carry to any reserves", "Disclosures relating to amount recommended"),
+        ("dividend_recommendation", "Disclosures relating to amount recommended to be paid as dividend", "Details of material changes"),
+        ("material_changes", "Details of material changes and commitment occurred during period", "Disclosure of statement on development"),
+        ("risk_management", "Disclosure of statement on development and implementation of risk management policy", "CSR details"),
+        ("financial_summary", "Disclosure of financial summary or highlights", "Disclosure of change in nature of business"),
+        ("business_change", "Disclosure of change in nature of business", "Details of directors or key managerial personnel"),
+    ):
+        value = _extract_section(text, label, end)
+        if value:
+            out[key] = value
+    out["csr_applicable"] = bool(re.search(
+        r"whether CSR is applicable as per section 135\s+Yes",
+        text,
+        re.I,
+    ))
+    return out
+
+
+def _parse_mgt_annual_return_directors(text: str) -> List[Dict[str, Any]]:
+    """Parse the DIN/name/attendance table embedded in MGT-7/MGT-7A."""
+    lines = [re.sub(r"\s+", " ", line).strip() for line in text.splitlines()]
+    people: List[Dict[str, Any]] = []
+    din_re = re.compile(r"^\d{8}$")
+    for i, line in enumerate(lines):
+        if not din_re.fullmatch(line):
+            continue
+        window = [x for x in lines[i + 1:i + 12] if x]
+        name_parts: List[str] = []
+        for candidate in window:
+            if re.fullmatch(r"\d+(?:\.\d+)?", candidate):
+                break
+            if re.search(
+                r"number of|meeting|attendance|whether|director|board|yes|no|name of|date of|designation|net worth|turnover|share holding|capital|pattern",
+                candidate,
+                re.I,
+            ):
+                break
+            if re.search(r"[A-Za-z]", candidate):
+                name_parts.append(candidate)
+        name = " ".join(name_parts[:3]) if name_parts else None
+        if not name or any(p.get("din") == line for p in people):
+            continue
+        people.append({
+            "name": name,
+            "din": line,
+            "designation": "Director",
+            "date_of_appointment": None,
+            "attendance": {
+                "meetings_entitled": _first_amount(
+                    " ".join(window),
+                    [r"(\d+)\s+\d+\s+\d+(?:\.\d+)?"],
+                ),
+            },
+        })
+    return people
+
+
 def _parse_directors_for_form(form_type: str, filename: str, raw: bytes, text: str) -> List[Dict[str, Any]]:
     """Directors register — gated to MGT-7/MGT-7A. Prefers the bordered
     table-grid reader (far more reliable than a text-line scan) and only
@@ -621,16 +931,22 @@ def _parse_directors_for_form(form_type: str, filename: str, raw: bytes, text: s
     found, e.g. an MGT-7A that was flattened/scanned oddly."""
     if form_type not in DIRECTOR_SHAREHOLDER_SOURCE_TYPES:
         return []
-    people = _parse_master_director_tables(raw) if (filename or "").lower().endswith(".pdf") else []
+    if (filename or "").lower().endswith((".xlsx", ".xlsm", ".csv")):
+        return []
+    people = _parse_mgt_annual_return_directors(text) if form_type in {"mgt-7", "mgt-7a"} else []
+    if not people:
+        people = _parse_master_director_tables(raw) if (filename or "").lower().endswith(".pdf") else []
     if not people:
         people = _parse_people(text)["people"]
     return people
 
 
-def _parse_shareholders_for_form(form_type: str, text: str) -> List[Dict[str, Any]]:
+def _parse_shareholders_for_form(form_type: str, filename: str, raw: bytes, text: str) -> List[Dict[str, Any]]:
     """Shareholder register — gated to MGT-7/MGT-7A."""
     if form_type not in DIRECTOR_SHAREHOLDER_SOURCE_TYPES:
         return []
+    if (filename or "").lower().endswith((".xlsx", ".xlsm")):
+        return _parse_mgt_shareholder_workbook(raw)
     return _parse_mgt_shareholders(text)
 
 
@@ -749,6 +1065,7 @@ AOC4_FINANCIAL_PATTERNS = {
     "net_worth": r"Net Worth of the company\s+(-?[\d,]+(?:\.\d+)?)",
     "share_capital": r"\(a\)\s*Share capital\s+(-?[\d,]+)",
     "reserves_and_surplus": r"\(b\)\s*Reserves and surplus\s+(-?[\d,]+)",
+    "turnover": r"Domestic turnover\s+(?:\n\s*)?(?:\(i\)\s*Sale of goods manufactured\s+)?(-?[\d,]+(?:\.\d+)?)",
 }
 
 
@@ -760,12 +1077,54 @@ def parse_aoc4_financials(text: str) -> Dict[str, Any]:
         m = re.search(pattern, text)
         if m:
             out[field] = _num(m.group(1))
+    lines = [re.sub(r"\s+", " ", x).strip() for x in text.splitlines()]
+
+    def nearby_amount(labels: List[str], lookahead: int = 12, prefer_last: bool = False) -> Optional[float]:
+        for i, line in enumerate(lines):
+            if not any(label.lower() in line.lower() for label in labels):
+                continue
+            values = []
+            for candidate in lines[i + 1:i + 1 + lookahead]:
+                if re.fullmatch(r"-?[\d,]+(?:\.\d+)?", candidate):
+                    values.append(_num(candidate))
+            if values:
+                if prefer_last:
+                    # Printed forms often put a two-digit row number before
+                    # the actual amount and the next row's zero after it.
+                    substantive = [value for value in values if abs(value) > 100]
+                    return (substantive[-1] if substantive else values[-1])
+                return values[0]
+        return None
+
+    # MCA's printable AOC-4 places some labels, row numbers and values on
+    # separate lines. Prefer the label-aware value over a regex hit that can
+    # accidentally capture a row index (for example, Net Worth's "42").
+    net_worth = nearby_amount(["Net Worth of the company"], prefer_last=True)
+    if net_worth is not None:
+        out["net_worth"] = net_worth
+    pbt = nearby_amount(["Profit before exceptional", "Profit before tax"])
+    if pbt is not None:
+        out["profit_before_tax"] = pbt
+    pat = nearby_amount(["Profit/(Loss) for the period from continuing operations", "Profit /(Loss) (XI+XIV)"])
+    if pat is not None:
+        out["profit_after_tax"] = pat
+    if "total_income" not in out and out.get("total_expenses") is not None and out.get("profit_before_tax") is not None:
+        out["total_income"] = out["total_expenses"] + out["profit_before_tax"]
+    if "turnover" not in out:
+        # Fallback for PDFs where the "Domestic turnover" label is on its
+        # own line and the first operating-revenue row follows later.
+        m = re.search(
+            r"Domestic turnover.*?\(i\)\s*Sale of goods manufactured\s+(-?[\d,]+(?:\.\d+)?)",
+            text,
+            re.I | re.S,
+        )
+        if m:
+            out["turnover"] = _num(m.group(1))
     # the Balance Sheet's grand total is printed twice (Equity & Liabilities
     # total, then Assets total) with identical figures — take the first.
     m = re.search(r"^Total\s+(-?[\d,]+\.\d{2})\s+(-?[\d,]+\.\d{2})\s*$", text, re.M)
     if m:
         out["balance_sheet_total"] = _num(m.group(1))
-    lines = [re.sub(r"\s+", " ", x).strip() for x in text.splitlines()]
     idx, _ = _find_label_line(lines, ["financial year to which financial statements relates"])
     if idx != -1:
         idx_from, p1 = _find_label_line(lines, ["from (dd/mm/yyyy)"], idx)
@@ -826,17 +1185,18 @@ async def upload_master_data(
     if not company:
         raise HTTPException(404, "Company not found")
     if not files:
-        raise HTTPException(400, "Choose at least one ROC form (PDF)")
+        raise HTTPException(400, "Choose at least one ROC form or MGT-7/MGT-7A attachment")
 
     results = []
     errors: List[str] = []
+    conflicts: List[Dict[str, Any]] = []
     roc_extracted: Dict[str, Any] = {}
     total_size = 0
 
     for uploaded in files:
         filename = uploaded.filename or "uploaded-file"
         if not filename.lower().endswith(ROC_FORM_ALLOWED_EXT):
-            errors.append(f"{filename}: skipped — ROC Forms must be PDF (use the Master Data tab for XLSX/CSV)")
+            errors.append(f"{filename}: skipped — use PDF, XLSX, XLSM or CSV for ROC filing data")
             continue
         raw = await uploaded.read()
         total_size += len(raw)
@@ -862,7 +1222,7 @@ async def upload_master_data(
         directors = _parse_directors_for_form(form_type, filename, raw, text)
         if directors:
             extracted["_directors"] = directors
-        shareholders = _parse_shareholders_for_form(form_type, text)
+        shareholders = _parse_shareholders_for_form(form_type, filename, raw, text)
         if shareholders:
             extracted["_shareholders"] = shareholders
 
@@ -873,13 +1233,35 @@ async def upload_master_data(
             auditor = parse_aoc4_auditor(text)
             if auditor:
                 extracted["_auditor"] = auditor
+        if form_type in {"mgt-7", "mgt-7a"} and filename.lower().endswith(".pdf"):
+            annual_return = parse_mgt_annual_return(text)
+            if annual_return:
+                extracted["_annual_return"] = annual_return
+        if form_type == "auditor-report":
+            audit_report = parse_auditor_report(text)
+            if audit_report:
+                extracted["_audit_report"] = audit_report
+        if form_type == "board-report":
+            board_report = parse_board_report(text)
+            if board_report:
+                extracted["_board_report"] = board_report
 
         extracted["_source_type"] = form_type
         fields_found = {k: v for k, v in extracted.items() if not k.startswith("_")}
         results.append({"filename": filename, "source_type": form_type, "extracted": fields_found,
-                         "fields_found": len(fields_found)})
+                         "fields_found": len(fields_found),
+                         "director_rows": len(extracted.get("_directors") or []),
+                         "shareholder_rows": len(extracted.get("_shareholders") or [])})
         for key, value in extracted.items():
             if not key.startswith("_") and value:
+                if key in roc_extracted and roc_extracted[key] != value:
+                    conflicts.append({
+                        "field": key,
+                        "kept": value,
+                        "previous": roc_extracted[key],
+                        "source": filename,
+                        "message": "Later upload value is shown as the candidate; review before Apply.",
+                    })
                 roc_extracted[key] = value
         if extracted.get("_directors"):
             roc_extracted["_directors"] = (roc_extracted.get("_directors") or []) + extracted["_directors"]
@@ -889,13 +1271,22 @@ async def upload_master_data(
             roc_extracted["_financials"] = {**(roc_extracted.get("_financials") or {}), **extracted["_financials"]}
         if extracted.get("_auditor"):
             roc_extracted["_auditor"] = {**(roc_extracted.get("_auditor") or {}), **extracted["_auditor"]}
+        if extracted.get("_annual_return"):
+            roc_extracted["_annual_return"] = {**(roc_extracted.get("_annual_return") or {}), **extracted["_annual_return"]}
+        if extracted.get("_audit_report"):
+            roc_extracted["_audit_report"] = {**(roc_extracted.get("_audit_report") or {}), **extracted["_audit_report"]}
+        if extracted.get("_board_report"):
+            roc_extracted["_board_report"] = {**(roc_extracted.get("_board_report") or {}), **extracted["_board_report"]}
 
-    if not any(k for k in roc_extracted if not k.startswith("_")):
+    if not any(k for k in roc_extracted if not k.startswith("_")) and not any(
+        roc_extracted.get(k) for k in ("_directors", "_shareholders", "_financials", "_auditor", "_annual_return", "_audit_report", "_board_report")
+    ):
         return {
             "extracted": {},
             "results": results,
             "applied": False,
             "errors": errors,
+            "conflicts": conflicts,
             "message": errors[0] if errors and len(errors) == len(files) else
                        "Could not confidently extract fields from these forms — please enter details manually.",
         }
@@ -912,10 +1303,23 @@ async def upload_master_data(
             clean["shareholders"] = roc_extracted["_shareholders"]
         if roc_extracted.get("_financials"):
             clean["financial_data"] = {**(company.get("financial_data") or {}), **roc_extracted["_financials"]}
+            if roc_extracted["_financials"].get("turnover") is not None:
+                clean["last_year_turnover"] = roc_extracted["_financials"]["turnover"]
         if roc_extracted.get("_auditor"):
             existing_auditor = dict(company.get("auditor") or {})
             existing_auditor.update({k: v for k, v in roc_extracted["_auditor"].items() if v})
             clean["auditor"] = existing_auditor
+        if roc_extracted.get("_annual_return"):
+            annual_return = {**(company.get("annual_return_data") or {}), **roc_extracted["_annual_return"]}
+            clean["annual_return_data"] = annual_return
+            if annual_return.get("turnover") is not None:
+                clean["last_year_turnover"] = annual_return["turnover"]
+            if annual_return.get("paid_up_capital") is not None and not _num(company.get("paid_up_capital")):
+                clean["paid_up_capital"] = annual_return["paid_up_capital"]
+        if roc_extracted.get("_audit_report"):
+            clean["audit_report_data"] = {**(company.get("audit_report_data") or {}), **roc_extracted["_audit_report"]}
+        if roc_extracted.get("_board_report"):
+            clean["board_report_data"] = {**(company.get("board_report_data") or {}), **roc_extracted["_board_report"]}
         clean["mgt_shareholder_data"] = {k: v for k, v in roc_extracted.items() if not k.startswith("_") and k not in ("directors", "shareholders", "financial_data", "auditor")}
         clean["roc_form_uploads"] = (company.get("roc_form_uploads") or []) + [
             {"filename": r["filename"], "form_type": r["source_type"], "uploaded_at": _now().isoformat()}
@@ -934,7 +1338,13 @@ async def upload_master_data(
         visible["financial_data"] = roc_extracted["_financials"]
     if roc_extracted.get("_auditor"):
         visible["auditor"] = roc_extracted["_auditor"]
-    return {"extracted": visible, "results": results, "applied": bool(apply), "errors": errors}
+    if roc_extracted.get("_annual_return"):
+        visible["annual_return_data"] = roc_extracted["_annual_return"]
+    if roc_extracted.get("_audit_report"):
+        visible["audit_report_data"] = roc_extracted["_audit_report"]
+    if roc_extracted.get("_board_report"):
+        visible["board_report_data"] = roc_extracted["_board_report"]
+    return {"extracted": visible, "results": results, "applied": bool(apply), "errors": errors, "conflicts": conflicts}
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -1261,6 +1671,181 @@ async def fetch_master_data(
         "results": results,
         "errors": errors,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# STATUTORY REGISTERS — share transfers, certificates and SH-4
+# ─────────────────────────────────────────────────────────────────────────
+
+def _same_holder(left: Dict[str, Any], name: str, folio: Optional[str]) -> bool:
+    if folio and str(left.get("folio_no") or "").strip().lower() == str(folio).strip().lower():
+        return True
+    return bool(name) and str(left.get("name") or "").strip().lower() == name.strip().lower()
+
+
+def _apply_transfer_to_register(
+    shareholders: List[Dict[str, Any]], transfer: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Apply a reviewed transfer to the in-app register of members.
+
+    This intentionally reports what could not be matched instead of silently
+    inventing a transferor holding. A CS can correct the register and rerun
+    the record with `update_register` disabled when the legal instrument is
+    still under review.
+    """
+    quantity = _num(transfer.get("number_of_shares"))
+    if quantity <= 0:
+        return {"updated": False, "reason": "Number of shares must be greater than zero"}
+    transferor = next(
+        (s for s in shareholders if _same_holder(s, transfer.get("transferor_name", ""), transfer.get("transferor_folio_no"))),
+        None,
+    )
+    transferee = next(
+        (s for s in shareholders if _same_holder(s, transfer.get("transferee_name", ""), transfer.get("transferee_folio_no"))),
+        None,
+    )
+    if not transferor:
+        return {"updated": False, "reason": "Transferor was not found in the current shareholder register"}
+    if _num(transferor.get("shares_held")) < quantity:
+        return {"updated": False, "reason": "Transferor holding is lower than the transfer quantity"}
+
+    transferor["shares_held"] = _num(transferor.get("shares_held")) - quantity
+    if transferee:
+        transferee["shares_held"] = _num(transferee.get("shares_held")) + quantity
+    else:
+        shareholders.append({
+            "name": transfer.get("transferee_name"),
+            "folio_no": transfer.get("transferee_folio_no"),
+            "class_of_shares": transfer.get("class_of_shares") or "Equity",
+            "shares_held": quantity,
+            "face_value": _num(transfer.get("nominal_value_per_share")) or 10,
+            "percentage": None,
+        })
+
+    total = sum(_num(s.get("shares_held")) for s in shareholders)
+    if total:
+        for shareholder in shareholders:
+            shareholder["percentage"] = round(_num(shareholder.get("shares_held")) / total * 100, 2)
+    return {
+        "updated": True,
+        "transferor_remaining": transferor["shares_held"],
+        "transferee_new_holding": next(
+            (_num(s.get("shares_held")) for s in shareholders if _same_holder(
+                s, transfer.get("transferee_name", ""), transfer.get("transferee_folio_no")
+            )),
+            quantity,
+        ),
+    }
+
+
+@router.get("/companies/{company_id}/statutory-records")
+async def get_statutory_records(company_id: str, current_user: User = Depends(VIEW)):
+    company = await COMPANIES.find_one({"id": company_id})
+    if not company:
+        raise HTTPException(404, "Company not found")
+    shareholders = company.get("shareholders") or []
+    return {
+        "company_name": company.get("company_name"),
+        "cin": company.get("cin"),
+        "shareholders": shareholders,
+        "financial_data": company.get("financial_data") or {},
+        "annual_return_data": company.get("annual_return_data") or {},
+        "audit_report_data": company.get("audit_report_data") or {},
+        "board_report_data": company.get("board_report_data") or {},
+        "share_transfers": company.get("share_transfers") or [],
+        "share_certificates": company.get("share_certificates") or [],
+        "register_status": {
+            "members": bool(shareholders),
+            "share_transfer_register": bool(company.get("share_transfers")),
+            "share_certificates": bool(company.get("share_certificates")),
+        },
+        "disclaimer": "Generated records are working drafts. Verify the executed instrument, stamp duty, board approvals, folio balances and applicable MCA requirements before signing or filing.",
+    }
+
+
+@router.get("/companies/{company_id}/filing-preparation")
+async def get_filing_preparation(company_id: str, current_user: User = Depends(VIEW)):
+    """Return source-separated working data for the next AOC-4/MGT-7A cycle."""
+    company = await COMPANIES.find_one({"id": company_id})
+    if not company:
+        raise HTTPException(404, "Company not found")
+    aoc4 = company.get("financial_data") or {}
+    mgt7a = company.get("annual_return_data") or {}
+    required = {
+        "company_name": company.get("company_name"),
+        "cin": company.get("cin"),
+        "registered_office_address": company.get("registered_office_address"),
+        "period_to": aoc4.get("period_to"),
+        "turnover": mgt7a.get("turnover") or aoc4.get("turnover") or company.get("last_year_turnover"),
+        "net_worth": mgt7a.get("net_worth") or aoc4.get("net_worth"),
+        "auditor": (company.get("auditor") or {}).get("name"),
+        "directors": company.get("directors") or [],
+        "shareholders": company.get("shareholders") or [],
+    }
+    missing = [key for key, value in required.items() if value in (None, "", [])]
+    return {
+        "company_id": company_id,
+        "aoc4": aoc4,
+        "mgt7a": mgt7a,
+        "audit_report": company.get("audit_report_data") or {},
+        "board_report": company.get("board_report_data") or {},
+        "required_working_fields": required,
+        "missing_working_fields": missing,
+        "source_rules": {
+            "financials_and_auditor": "AOC-4",
+            "directors_and_shareholders": "MGT-7 / MGT-7A and its shareholder attachment",
+            "disclosure_context": "Auditor's Report and Board's Report",
+        },
+    }
+
+
+@router.post("/companies/{company_id}/share-transfers")
+async def create_share_transfer(
+    company_id: str,
+    payload: ShareTransferRequest,
+    current_user: User = Depends(CREATE),
+):
+    company = await COMPANIES.find_one({"id": company_id})
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if _num(payload.number_of_shares) <= 0:
+        raise HTTPException(422, "Number of shares must be greater than zero")
+    transfer = payload.model_dump()
+    transfer.update({"id": _uid(), "created_at": _now().isoformat(), "created_by": _who(current_user)})
+    shareholders = [dict(s) for s in (company.get("shareholders") or [])]
+    register_update = {"updated": False, "reason": "Register update was not requested"}
+    if payload.update_register:
+        register_update = _apply_transfer_to_register(shareholders, transfer)
+        if not register_update["updated"]:
+            raise HTTPException(422, register_update["reason"])
+    transfers = list(company.get("share_transfers") or [])
+    transfers.append(transfer)
+    clean = {"share_transfers": transfers, "updated_at": _now()}
+    if payload.update_register:
+        clean["shareholders"] = shareholders
+    await COMPANIES.update_one({"id": company_id}, {"$set": clean})
+    await _sync_company_to_client({**company, **clean})
+    return {"transfer": transfer, "register_update": register_update, "shareholders": shareholders}
+
+
+@router.post("/companies/{company_id}/share-certificates")
+async def create_share_certificate(
+    company_id: str,
+    payload: ShareCertificateRequest,
+    current_user: User = Depends(CREATE),
+):
+    company = await COMPANIES.find_one({"id": company_id})
+    if not company:
+        raise HTTPException(404, "Company not found")
+    certificate = payload.model_dump()
+    certificate.update({"id": _uid(), "created_at": _now().isoformat(), "created_by": _who(current_user)})
+    certificates = list(company.get("share_certificates") or [])
+    certificates.append(certificate)
+    await COMPANIES.update_one(
+        {"id": company_id},
+        {"$set": {"share_certificates": certificates, "updated_at": _now()}},
+    )
+    return {"certificate": certificate}
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -1744,6 +2329,135 @@ def build_shareholders_doc(company: Dict[str, Any], prepared_by: str) -> bytes:
     return buf.getvalue()
 
 
+def build_share_transfer_register_doc(company: Dict[str, Any], prepared_by: str) -> bytes:
+    d = _base_doc()
+    name = company.get("company_name", "").upper()
+    _heading(d, name, size=16)
+    _para(d, f"CIN: {company.get('cin') or '—'}", center=True)
+    d.add_paragraph()
+    _heading(d, "REGISTER OF SHARE TRANSFERS", size=13, underline=True)
+    _para(d, "Working register — update after receipt, stamping, approval and registration of the instrument.")
+    d.add_paragraph()
+    table = d.add_table(rows=1, cols=9)
+    table.style = "Table Grid"
+    headers = [
+        "Sl. No.", "Date", "Transferor", "Transferee", "Folio / Certificate",
+        "Distinctive Nos.", "Shares", "Consideration (Rs.)", "SH-4 Status",
+    ]
+    for i, header in enumerate(headers):
+        table.rows[0].cells[i].text = header
+    for index, transfer in enumerate(company.get("share_transfers") or [], 1):
+        row = table.add_row().cells
+        distinctive = " - ".join(filter(None, [
+            str(transfer.get("distinctive_from") or ""),
+            str(transfer.get("distinctive_to") or ""),
+        ])) or "—"
+        row[0].text = str(index)
+        row[1].text = _fmt_date(transfer.get("transfer_date"))
+        row[2].text = transfer.get("transferor_name") or "—"
+        row[3].text = transfer.get("transferee_name") or "—"
+        row[4].text = " / ".join(filter(None, [
+            transfer.get("transferor_folio_no"),
+            transfer.get("share_certificate_no"),
+        ])) or "—"
+        row[5].text = distinctive
+        row[6].text = f"{_num(transfer.get('number_of_shares')):,.0f}"
+        row[7].text = f"{_num(transfer.get('consideration')):,.2f}"
+        row[8].text = transfer.get("sh4_status") or "Pending review"
+    d.add_paragraph()
+    _para(d, "Prepared by: " + prepared_by + " (ROC Sphere)", italic=True)
+    _para(d, "This register is a controlled working draft and must be reconciled with the Register of Members and executed SH-4 instruments.", italic=True)
+    buf = io.BytesIO()
+    d.save(buf)
+    return buf.getvalue()
+
+
+def build_sh4_doc(company: Dict[str, Any], req: ShareTransferRequest, prepared_by: str) -> bytes:
+    d = _base_doc()
+    name = company.get("company_name", "").upper()
+    _heading(d, "FORM NO. SH-4", size=16)
+    _heading(d, "SECURITIES TRANSFER FORM", size=13, underline=True)
+    _para(d, "(Pursuant to Section 56 of the Companies Act, 2013 and applicable rules)", center=True, italic=True)
+    d.add_paragraph()
+    details = [
+        ("Name of company", name),
+        ("CIN", company.get("cin") or "—"),
+        ("Registered office", company.get("registered_office_address") or "—"),
+        ("Date of execution", _fmt_date(req.instrument_date or req.transfer_date)),
+        ("Class of securities", req.class_of_shares),
+        ("Number of securities transferred", f"{_num(req.number_of_shares):,.0f}"),
+        ("Nominal value per security", f"Rs. {_num(req.nominal_value_per_share):,.2f}"),
+        ("Consideration", f"Rs. {_num(req.consideration):,.2f}"),
+        ("Distinctive numbers", " - ".join(filter(None, [req.distinctive_from, req.distinctive_to])) or "—"),
+        ("Existing share certificate no.", req.share_certificate_no or "—"),
+        ("Transferor / registered holder", req.transferor_name),
+        ("Transferor folio no.", req.transferor_folio_no or "—"),
+        ("Transferee", req.transferee_name),
+        ("Transferee folio no.", req.transferee_folio_no or "To be allotted"),
+        ("Stamp duty", f"Rs. {_num(req.stamp_duty):,.2f}"),
+        ("Date instrument received by company", _fmt_date(req.instrument_received_date)),
+    ]
+    table = d.add_table(rows=0, cols=2)
+    table.style = "Table Grid"
+    for label, value in details:
+        cells = table.add_row().cells
+        cells[0].text = label
+        cells[1].text = str(value)
+    d.add_paragraph()
+    _para(d, "Declaration by transferor", bold=True)
+    _para(d, "I / We hereby transfer the above securities to the transferee named above, subject to the terms and conditions applicable to the company and the Companies Act, 2013.")
+    d.add_paragraph()
+    _para(d, "Transferor signature: ______________________________")
+    _para(d, "Transferee signature: ______________________________")
+    _para(d, "Witness name, address and signature: ______________________________")
+    d.add_paragraph()
+    _para(d, "For office use", bold=True)
+    _para(d, "Board approval date: " + _fmt_date(req.board_resolution_date))
+    _para(d, "Registration / SH-4 status: " + (req.sh4_status or "Pending review"))
+    _para(d, "Company authorised signatory: ______________________________")
+    _para(d, "Prepared by: " + prepared_by + " (ROC Sphere)", italic=True)
+    _para(d, "Draft only — verify stamp duty, execution, witness details, board approval and applicable exemptions before use.", italic=True)
+    buf = io.BytesIO()
+    d.save(buf)
+    return buf.getvalue()
+
+
+def build_share_certificate_doc(company: Dict[str, Any], req: ShareCertificateRequest, prepared_by: str) -> bytes:
+    d = _base_doc()
+    name = company.get("company_name", "").upper()
+    _heading(d, name, size=16)
+    _para(d, f"CIN: {company.get('cin') or '—'}", center=True)
+    _heading(d, "SHARE CERTIFICATE", size=14, underline=True)
+    _para(d, "Certificate No. " + req.certificate_no, center=True, bold=True)
+    d.add_paragraph()
+    _para(d, f"This is to certify that {req.holder_name} is/are the registered holder(s) of the following {req.class_of_shares} share(s) in the Company, subject to its Memorandum and Articles of Association.")
+    table = d.add_table(rows=0, cols=2)
+    table.style = "Table Grid"
+    values = [
+        ("Registered holder", req.holder_name),
+        ("Address", req.holder_address or "—"),
+        ("Folio number", req.folio_no or "—"),
+        ("Class of shares", req.class_of_shares),
+        ("Number of shares", f"{_num(req.number_of_shares):,.0f}"),
+        ("Nominal value per share", f"Rs. {_num(req.nominal_value_per_share):,.2f}"),
+        ("Amount paid per share", f"Rs. {_num(req.amount_paid_per_share):,.2f}"),
+        ("Distinctive numbers", " - ".join(filter(None, [req.distinctive_from, req.distinctive_to])) or "—"),
+        ("Date of issue", _fmt_date(req.issue_date)),
+    ]
+    for label, value in values:
+        cells = table.add_row().cells
+        cells[0].text = label
+        cells[1].text = str(value)
+    d.add_paragraph()
+    _para(d, "Authorised signatory: ______________________________")
+    _para(d, "Authorised signatory: ______________________________")
+    _para(d, "Prepared by: " + prepared_by + " (ROC Sphere)", italic=True)
+    _para(d, "Draft only — verify certificate numbering, Register of Members, share allotment/transfer records and applicable statutory requirements before issue.", italic=True)
+    buf = io.BytesIO()
+    d.save(buf)
+    return buf.getvalue()
+
+
 def build_checklist_doc(company: Dict[str, Any], checklist: List[Dict[str, Any]], prepared_by: str) -> bytes:
     d = _base_doc()
     name = company.get("company_name", "").upper()
@@ -1857,6 +2571,48 @@ async def generate_shareholders(company_id: str, current_user: User = Depends(VI
         raise HTTPException(500, f"Document generator not installed on the server: {e}")
     fname = f"Shareholders_{_safe(company.get('company_name'))}.docx"
     await _log_doc(company_id, "shareholders", fname, current_user)
+    return _docx_response(content, fname)
+
+
+@router.get("/companies/{company_id}/generate/share-transfer-register")
+async def generate_share_transfer_register(company_id: str, current_user: User = Depends(VIEW)):
+    company = await COMPANIES.find_one({"id": company_id})
+    if not company:
+        raise HTTPException(404, "Company not found")
+    try:
+        content = build_share_transfer_register_doc(company, _who(current_user))
+    except ImportError as e:
+        raise HTTPException(500, f"Document generator not installed on the server: {e}")
+    fname = f"Share_Transfer_Register_{_safe(company.get('company_name'))}.docx"
+    await _log_doc(company_id, "share_transfer_register", fname, current_user)
+    return _docx_response(content, fname)
+
+
+@router.post("/companies/{company_id}/generate/sh-4")
+async def generate_sh4(company_id: str, req: ShareTransferRequest, current_user: User = Depends(VIEW)):
+    company = await COMPANIES.find_one({"id": company_id})
+    if not company:
+        raise HTTPException(404, "Company not found")
+    try:
+        content = build_sh4_doc(company, req, _who(current_user))
+    except ImportError as e:
+        raise HTTPException(500, f"Document generator not installed on the server: {e}")
+    fname = f"SH-4_{_safe(req.transferor_name)}_to_{_safe(req.transferee_name)}_{_safe(req.transfer_date or datetime.now().date().isoformat())}.docx"
+    await _log_doc(company_id, "sh4", fname, current_user)
+    return _docx_response(content, fname)
+
+
+@router.post("/companies/{company_id}/generate/share-certificate")
+async def generate_share_certificate(company_id: str, req: ShareCertificateRequest, current_user: User = Depends(VIEW)):
+    company = await COMPANIES.find_one({"id": company_id})
+    if not company:
+        raise HTTPException(404, "Company not found")
+    try:
+        content = build_share_certificate_doc(company, req, _who(current_user))
+    except ImportError as e:
+        raise HTTPException(500, f"Document generator not installed on the server: {e}")
+    fname = f"Share_Certificate_{_safe(req.certificate_no)}_{_safe(req.holder_name)}.docx"
+    await _log_doc(company_id, "share_certificate", fname, current_user)
     return _docx_response(content, fname)
 
 
