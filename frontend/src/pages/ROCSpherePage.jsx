@@ -96,6 +96,8 @@ const TABS = [
   { key: 'minutes', label: 'Minutes of Meeting', icon: NotebookPen },
   { key: 'checklist', label: 'Compliance Checklist', icon: ClipboardList },
   { key: 'applicable', label: 'Applicable Compliances', icon: ListChecks },
+  { key: 'filing', label: 'Filing Desk', icon: FileSpreadsheet },
+  { key: 'documents', label: 'Document Vault', icon: ScrollText },
 ];
 
 export default function ROCSpherePage() {
@@ -110,6 +112,9 @@ export default function ROCSpherePage() {
   const [search, setSearch] = useState('');
   const [companyTypeFilter, setCompanyTypeFilter] = useState('all');
   const [syncing, setSyncing] = useState(false);
+  const [filingPrep, setFilingPrep] = useState(null);
+  const [generatedDocs, setGeneratedDocs] = useState([]);
+  const [filingLoading, setFilingLoading] = useState(false);
 
   const card = isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-white border-slate-200';
   const text = isDark ? 'text-slate-100' : 'text-slate-900';
@@ -124,6 +129,24 @@ export default function ROCSpherePage() {
     } catch (e) {
       toast.error('Failed to load companies');
       return [];
+    }
+  }, []);
+
+  const loadFilingDesk = useCallback(async (companyId) => {
+    if (!companyId) return;
+    setFilingLoading(true);
+    try {
+      const [prepRes, docsRes] = await Promise.all([
+        api.get(`/roc-sphere/companies/${companyId}/filing-preparation`),
+        api.get(`/roc-sphere/companies/${companyId}/documents`),
+      ]);
+      setFilingPrep(prepRes.data || null);
+      setGeneratedDocs(docsRes.data || []);
+    } catch (e) {
+      console.error('Filing desk load failed', e);
+      toast.error('Unable to load ROC filing desk');
+    } finally {
+      setFilingLoading(false);
     }
   }, []);
 
@@ -145,14 +168,15 @@ export default function ROCSpherePage() {
   }, [loadCompanies, loadEligibleClients]);
 
   const loadOne = useCallback(async (id) => {
-    if (!id) { setCompany(null); return; }
+    if (!id) { setCompany(null); setFilingPrep(null); setGeneratedDocs([]); return; }
     try {
       const { data } = await api.get(`/roc-sphere/companies/${id}`);
       setCompany(data);
+      void loadFilingDesk(id);
     } catch (e) {
       toast.error('Failed to load company');
     }
-  }, []);
+  }, [loadFilingDesk]);
 
   useEffect(() => { loadOne(selectedId); }, [selectedId, loadOne]);
 
@@ -331,6 +355,8 @@ export default function ROCSpherePage() {
                   {tab === 'minutes' && <MinutesTab company={company} isDark={isDark} input={input} text={text} muted={muted} />}
                   {tab === 'checklist' && <ChecklistTab company={company} isDark={isDark} text={text} muted={muted} />}
                   {tab === 'applicable' && <ApplicableCompliancesTab company={company} isDark={isDark} text={text} muted={muted} />}
+                  {tab === 'filing' && <FilingDeskTab company={company} prep={filingPrep} docs={generatedDocs} loading={filingLoading} isDark={isDark} text={text} muted={muted} onRefresh={() => loadFilingDesk(company.id)} />}
+                  {tab === 'documents' && <FilingDeskTab company={company} prep={filingPrep} docs={generatedDocs} loading={filingLoading} isDark={isDark} text={text} muted={muted} onRefresh={() => loadFilingDesk(company.id)} />}
                   {tab === 'upload' && <UploadTab company={company} isDark={isDark} input={input} text={text} muted={muted} onApplied={() => loadOne(company.id)} />}
                 </div>
               </div>
@@ -353,6 +379,77 @@ export default function ROCSpherePage() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * Filing Desk / Document Vault
+ * ═══════════════════════════════════════════════════════════════════════ */
+function FilingDeskTab({ company, prep, docs, loading, isDark, text, muted, onRefresh }) {
+  const missing = prep?.missing_working_fields || [];
+  const ready = prep && missing.length === 0;
+  const labelMap = {
+    company_name: 'Company name', cin: 'CIN', registered_office_address: 'Registered office',
+    period_to: 'Financial year end', turnover: 'Turnover', net_worth: 'Net worth',
+    auditor: 'Auditor', directors: 'Directors', shareholders: 'Shareholders',
+  };
+  return (
+    <div className="space-y-4">
+      <div className={`rounded-xl border p-4 ${isDark ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className={`font-semibold ${text}`}>ROC Filing Readiness</h3>
+            <p className={`text-xs mt-1 ${muted}`}>Prepare the source data for AOC-4 / MGT-7 / MGT-7A before final MCA filing.</p>
+          </div>
+          <button onClick={onRefresh} className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border ${isDark ? 'border-slate-700 text-slate-200' : 'border-slate-300 text-slate-700'}`}>
+            <RefreshCw size={13} className={loading ? 'animate-spin' : ''}/> Refresh
+          </button>
+        </div>
+        {loading ? (
+          <div className={`py-8 text-center text-sm ${muted}`}>Loading filing data…</div>
+        ) : (
+          <>
+            <div className={`mt-4 rounded-lg p-3 border ${ready ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-950/20' : 'border-amber-300 bg-amber-50 dark:bg-amber-950/20'}`}>
+              <div className={`font-semibold text-sm ${ready ? 'text-emerald-700' : 'text-amber-700'}`}>
+                {ready ? '✓ Filing data appears complete' : `⚠ ${missing.length} field${missing.length === 1 ? '' : 's'} need attention`}
+              </div>
+              {!ready && <div className="mt-2 flex flex-wrap gap-1.5">{missing.map(k => <span key={k} className="px-2 py-1 rounded-full text-[10px] font-semibold bg-white/70 border border-amber-200 text-amber-800">{labelMap[k] || k}</span>)}</div>}
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3">
+              {[
+                ['AOC-4', prep?.aoc4 && Object.keys(prep.aoc4).length ? 'Source loaded' : 'Awaiting source'],
+                ['MGT-7 / 7A', prep?.mgt7a && Object.keys(prep.mgt7a).length ? 'Source loaded' : 'Awaiting source'],
+                ['Audit Report', prep?.audit_report && Object.keys(prep.audit_report).length ? 'Loaded' : 'Missing'],
+                ['Board Report', prep?.board_report && Object.keys(prep.board_report).length ? 'Loaded' : 'Missing'],
+              ].map(([name, state]) => (
+                <div key={name} className={`rounded-lg border p-3 ${isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-200 bg-white'}`}>
+                  <div className={`text-[10px] uppercase tracking-wider font-bold ${muted}`}>{name}</div>
+                  <div className={`text-xs font-semibold mt-1 ${text}`}>{state}</div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+      <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+        <div className={`px-4 py-3 border-b flex items-center justify-between ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+          <div><h3 className={`font-semibold text-sm ${text}`}>Generated Documents</h3><p className={`text-[11px] ${muted}`}>Audit trail of documents generated from ROC Sphere.</p></div>
+          <span className={`text-xs font-semibold ${muted}`}>{docs.length} document{docs.length === 1 ? '' : 's'}</span>
+        </div>
+        {docs.length === 0 ? <div className={`p-6 text-center text-sm ${muted}`}>No generated documents yet. Use Board Resolution, Notice, Minutes or Checklist to create working documents.</div> :
+          <div className="divide-y divide-slate-200 dark:divide-slate-700">
+            {docs.slice(0, 20).map((d, i) => (
+              <div key={d.id || i} className={`px-4 py-3 flex items-center gap-3 ${isDark ? 'bg-slate-900/20' : 'bg-white'}`}>
+                <FileText size={16} className="text-blue-600 shrink-0"/>
+                <div className="min-w-0 flex-1"><div className={`text-xs font-medium truncate ${text}`}>{d.filename}</div><div className={`text-[10px] ${muted}`}>{d.doc_type} · {d.generated_at ? new Date(d.generated_at).toLocaleString() : '—'}</div></div>
+                <BadgeCheck size={15} className="text-emerald-500 shrink-0" title="Generated"/>
+              </div>
+            ))}
+          </div>}
+      </div>
+      <p className={`text-[10px] ${muted}`}>This desk is a preparation and documentation layer; final MCA submission, signing, DSC use and statutory verification remain subject to the applicable filing requirements.</p>
     </div>
   );
 }
