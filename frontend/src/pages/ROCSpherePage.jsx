@@ -9,6 +9,7 @@ import {
   Download, FileText, Search, RefreshCw, Save, CheckCircle2, Upload,
   ClipboardList, Gavel, NotebookPen, ChevronRight, AlertTriangle, Info,
   ScrollText, Pencil, DatabaseZap, ListChecks, FileSpreadsheet, FileUp,
+  BookOpen, ArrowLeftRight, BadgeCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '@/lib/api';
@@ -58,6 +59,7 @@ const FINANCIAL_DATA_LABELS = [
   ['share_capital', 'Share Capital (Rs.)'],
   ['reserves_and_surplus', 'Reserves & Surplus (Rs.)'],
   ['balance_sheet_total', 'Balance Sheet Total (Rs.)'],
+  ['turnover', 'Turnover (Rs.)'],
 ];
 
 const emptyCompanyForm = () => ({
@@ -76,6 +78,11 @@ const emptyCompanyForm = () => ({
   directors: [],
   shareholders: [],
   auditor: { name: '', firm_reg_no: '', membership_no: '', appointed_from: '', appointed_till: '' },
+  annual_return_data: {},
+  audit_report_data: {},
+  board_report_data: {},
+  share_transfers: [],
+  share_certificates: [],
   notes: '',
 });
 
@@ -83,6 +90,7 @@ const TABS = [
   { key: 'master', label: 'Company Master', icon: Building2 },
   { key: 'masterdata', label: 'Master Data', icon: DatabaseZap },
   { key: 'directors', label: 'Directors & Shareholders', icon: UsersIcon },
+  { key: 'statutory', label: 'Statutory Registers', icon: BookOpen },
   { key: 'resolution', label: 'Board Resolution', icon: Gavel },
   { key: 'notice', label: 'Notice of Meeting', icon: ScrollText },
   { key: 'minutes', label: 'Minutes of Meeting', icon: NotebookPen },
@@ -301,6 +309,7 @@ export default function ROCSpherePage() {
                   {tab === 'master' && <MasterTab company={company} isDark={isDark} onSave={saveCompany} input={input} text={text} muted={muted} />}
                   {tab === 'masterdata' && <MasterDataTab company={company} isDark={isDark} text={text} muted={muted} onApplied={() => loadOne(company.id)} />}
                   {tab === 'directors' && <DirectorsTab company={company} isDark={isDark} onSave={saveCompany} input={input} text={text} muted={muted} />}
+                  {tab === 'statutory' && <StatutoryRecordsTab company={company} isDark={isDark} input={input} text={text} muted={muted} onApplied={() => loadOne(company.id)} />}
                   {tab === 'resolution' && <ResolutionTab company={company} isDark={isDark} input={input} text={text} muted={muted} />}
                   {tab === 'notice' && <NoticeTab company={company} isDark={isDark} input={input} text={text} muted={muted} />}
                   {tab === 'minutes' && <MinutesTab company={company} isDark={isDark} input={input} text={text} muted={muted} />}
@@ -747,6 +756,204 @@ function DirectorsTab({ company, isDark, onSave, input, text, muted }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+ * Statutory registers — transfer register, SH-4 and share certificates
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+function StatutoryRecordsTab({ company, isDark, input, text, muted, onApplied }) {
+  const [mode, setMode] = useState('transfer');
+  const [saving, setSaving] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [data, setData] = useState(null);
+  const [transfer, setTransfer] = useState({
+    transfer_date: '', transferor_name: company.shareholders?.[0]?.name || '',
+    transferee_name: '', transferor_folio_no: '', transferee_folio_no: '',
+    share_certificate_no: '', distinctive_from: '', distinctive_to: '',
+    number_of_shares: 0, class_of_shares: 'Equity', nominal_value_per_share: 10,
+    consideration: 0, stamp_duty: 0, board_resolution_date: '',
+    instrument_date: '', instrument_received_date: '', sh4_status: 'Pending review',
+    remarks: '', update_register: true,
+  });
+  const [certificate, setCertificate] = useState({
+    certificate_no: '', issue_date: '', holder_name: company.shareholders?.[0]?.name || '',
+    holder_address: '', folio_no: '', class_of_shares: 'Equity', number_of_shares: 0,
+    distinctive_from: '', distinctive_to: '', nominal_value_per_share: 10,
+    amount_paid_per_share: 0, remarks: '',
+  });
+
+  const load = useCallback(async () => {
+    try {
+      const { data: d } = await api.get(`/roc-sphere/companies/${company.id}/statutory-records`);
+      setData(d);
+    } catch { toast.error('Failed to load statutory records'); }
+  }, [company.id]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (!transfer.transferor_name && company.shareholders?.[0]?.name) {
+      setTransfer((p) => ({ ...p, transferor_name: company.shareholders[0].name }));
+    }
+    if (!certificate.holder_name && company.shareholders?.[0]?.name) {
+      setCertificate((p) => ({ ...p, holder_name: company.shareholders[0].name }));
+    }
+  }, [company.shareholders, transfer.transferor_name, certificate.holder_name]);
+
+  const setTransferField = (key) => (e) => setTransfer((p) => ({
+    ...p, [key]: ['number_of_shares', 'nominal_value_per_share', 'consideration', 'stamp_duty'].includes(key)
+      ? (parseFloat(e.target.value) || 0) : e.target.value,
+  }));
+  const setCertificateField = (key) => (e) => setCertificate((p) => ({
+    ...p, [key]: ['number_of_shares', 'nominal_value_per_share', 'amount_paid_per_share'].includes(key)
+      ? (parseFloat(e.target.value) || 0) : e.target.value,
+  }));
+  const download = async (url, filename, payload) => {
+    setGenerating(true);
+    try {
+      const res = payload
+        ? await api.post(url, payload, { responseType: 'blob' })
+        : await api.get(url, { responseType: 'blob' });
+      triggerBlobDownload(res.data, filename);
+      toast.success('Document downloaded');
+    } catch (e) { toast.error(await parseBlobError(e) || 'Download failed'); }
+    finally { setGenerating(false); }
+  };
+  const saveTransfer = async () => {
+    if (!transfer.transferor_name || !transfer.transferee_name || !transfer.number_of_shares) {
+      toast.error('Transferor, transferee and number of shares are required'); return;
+    }
+    setSaving(true);
+    try {
+      await api.post(`/roc-sphere/companies/${company.id}/share-transfers`, transfer);
+      toast.success('Transfer added to the Share Transfer Register');
+      await load(); onApplied();
+      setTransfer((p) => ({ ...p, transferee_name: '', number_of_shares: 0, share_certificate_no: '' }));
+    } catch (e) { toast.error(await parseBlobError(e) || 'Could not save transfer'); }
+    finally { setSaving(false); }
+  };
+  const saveCertificate = async () => {
+    if (!certificate.certificate_no || !certificate.holder_name || !certificate.number_of_shares) {
+      toast.error('Certificate number, holder and number of shares are required'); return;
+    }
+    setSaving(true);
+    try {
+      await api.post(`/roc-sphere/companies/${company.id}/share-certificates`, certificate);
+      toast.success('Share certificate record saved');
+      await load(); onApplied();
+    } catch (e) { toast.error(await parseBlobError(e) || 'Could not save certificate'); }
+    finally { setSaving(false); }
+  };
+  const Field = ({ label, value, onChange, type = 'text', placeholder }) => (
+    <div>
+      <label className={`text-[11px] font-medium ${muted} mb-1 block`}>{label}</label>
+      <input className={input} type={type} value={value ?? ''} onChange={onChange} placeholder={placeholder} />
+    </div>
+  );
+  const transferUrlName = `SH-4_${(transfer.transferor_name || 'Transferor').replace(/\s+/g, '_')}_to_${(transfer.transferee_name || 'Transferee').replace(/\s+/g, '_')}.docx`;
+  const certUrlName = `Share_Certificate_${(certificate.certificate_no || 'Draft')}.docx`;
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className={`text-sm font-semibold ${text}`}>Statutory registers & instruments</h3>
+          <p className={`text-xs ${muted} mt-1`}>Record reviewed transfers, keep holdings aligned, and prepare SH-4 / share certificate drafts.</p>
+        </div>
+        <button onClick={() => download(`/roc-sphere/companies/${company.id}/generate/share-transfer-register`, `Share_Transfer_Register_${company.company_name.replace(/\s+/g, '_')}.docx`)} disabled={generating}
+          className="text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white disabled:opacity-60">
+          <Download size={12} /> Download Transfer Register
+        </button>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        {[
+          ['members', 'Register of Members', BookOpen],
+          ['share_transfer_register', 'Share Transfers', ArrowLeftRight],
+          ['share_certificates', 'Certificates', BadgeCheck],
+        ].map(([key, label, Icon]) => (
+          <div key={key} className={`rounded-lg border p-3 ${isDark ? 'border-slate-700 bg-slate-900/40' : 'border-slate-200 bg-slate-50'}`}>
+            <Icon size={15} className={data?.register_status?.[key] ? 'text-emerald-500' : muted} />
+            <p className={`text-[11px] font-medium ${text} mt-2`}>{label}</p>
+            <p className={`text-[10px] ${muted}`}>{data?.register_status?.[key] ? 'Data available' : 'Awaiting data'}</p>
+          </div>
+        ))}
+      </div>
+      <div className={`rounded-lg border p-4 ${isDark ? 'border-slate-700 bg-slate-900/30' : 'border-slate-200 bg-white'}`}>
+        <div className="flex items-center gap-2 mb-3"><FileSpreadsheet size={15} className="text-blue-500" /><h4 className={`text-xs font-semibold ${text}`}>Current-year filing preparation</h4></div>
+        <div className="grid sm:grid-cols-4 gap-3">
+          {[
+            ['Turnover', data?.annual_return_data?.turnover ?? data?.financial_data?.turnover ?? company.last_year_turnover, 'Rs.'],
+            ['Net worth', data?.annual_return_data?.net_worth ?? data?.financial_data?.net_worth, 'Rs.'],
+            ['AOC-4 period', data?.financial_data?.period_from && data?.financial_data?.period_to ? `${data.financial_data.period_from} → ${data.financial_data.period_to}` : 'Not uploaded', ''],
+            ['Board meetings', data?.annual_return_data?.board_meetings_held ?? data?.board_report_data?.board_meetings_held, 'held'],
+          ].map(([label, value, suffix]) => <div key={label}><p className={`text-[10px] ${muted}`}>{label}</p><p className={`text-xs font-medium ${text} mt-1`}>{value === undefined || value === null || value === '' ? 'Not extracted' : typeof value === 'number' ? `${value.toLocaleString('en-IN')} ${suffix}` : `${value} ${suffix}`}</p></div>)}
+        </div>
+        <p className={`text-[10px] ${muted} mt-3`}>Sources are kept separate: AOC-4 supplies financials and auditor details; MGT-7/MGT-7A supplies annual-return and member data; Board/Auditor reports supply disclosure context.</p>
+      </div>
+
+      <div className={`flex rounded-lg p-1 gap-1 ${isDark ? 'bg-slate-900' : 'bg-slate-100'}`}>
+        <button onClick={() => setMode('transfer')} className={`flex-1 text-xs rounded-md py-2 ${mode === 'transfer' ? 'bg-white text-blue-600 shadow-sm' : muted}`}>Share Transfer / SH-4</button>
+        <button onClick={() => setMode('certificate')} className={`flex-1 text-xs rounded-md py-2 ${mode === 'certificate' ? 'bg-white text-blue-600 shadow-sm' : muted}`}>Share Certificate (SH-1)</button>
+      </div>
+
+      {mode === 'transfer' ? (
+        <div className={`rounded-lg border p-4 ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+          <div className="grid sm:grid-cols-3 gap-3">
+            <Field label="Transfer date" value={transfer.transfer_date} onChange={setTransferField('transfer_date')} type="date" />
+            <Field label="Transferor / registered holder *" value={transfer.transferor_name} onChange={setTransferField('transferor_name')} />
+            <Field label="Transferee *" value={transfer.transferee_name} onChange={setTransferField('transferee_name')} />
+            <Field label="Transferor folio" value={transfer.transferor_folio_no} onChange={setTransferField('transferor_folio_no')} />
+            <Field label="Transferee folio" value={transfer.transferee_folio_no} onChange={setTransferField('transferee_folio_no')} />
+            <Field label="Existing share certificate no." value={transfer.share_certificate_no} onChange={setTransferField('share_certificate_no')} />
+            <Field label="Distinctive no. from" value={transfer.distinctive_from} onChange={setTransferField('distinctive_from')} />
+            <Field label="Distinctive no. to" value={transfer.distinctive_to} onChange={setTransferField('distinctive_to')} />
+            <Field label="Number of shares *" value={transfer.number_of_shares} onChange={setTransferField('number_of_shares')} type="number" />
+            <Field label="Nominal value per share" value={transfer.nominal_value_per_share} onChange={setTransferField('nominal_value_per_share')} type="number" />
+            <Field label="Consideration (Rs.)" value={transfer.consideration} onChange={setTransferField('consideration')} type="number" />
+            <Field label="Stamp duty (Rs.)" value={transfer.stamp_duty} onChange={setTransferField('stamp_duty')} type="number" />
+            <Field label="Instrument date" value={transfer.instrument_date} onChange={setTransferField('instrument_date')} type="date" />
+            <Field label="Instrument received date" value={transfer.instrument_received_date} onChange={setTransferField('instrument_received_date')} type="date" />
+            <Field label="Board approval date" value={transfer.board_resolution_date} onChange={setTransferField('board_resolution_date')} type="date" />
+            <div><label className={`text-[11px] font-medium ${muted} mb-1 block`}>SH-4 status</label><select className={input} value={transfer.sh4_status} onChange={setTransferField('sh4_status')}><option>Pending review</option><option>Received</option><option>Approved</option><option>Registered</option><option>Rejected</option></select></div>
+          </div>
+          <div className="mt-3"><label className={`text-[11px] font-medium ${muted} mb-1 block`}>Remarks</label><textarea className={input} rows={2} value={transfer.remarks} onChange={setTransferField('remarks')} /></div>
+          <label className={`flex items-center gap-2 text-xs ${muted} mt-3`}><input type="checkbox" checked={transfer.update_register} onChange={(e) => setTransfer((p) => ({ ...p, update_register: e.target.checked }))} /> Update Register of Members after saving this reviewed transfer</label>
+          <div className="flex flex-wrap gap-2 mt-4">
+            <button onClick={() => download(`/roc-sphere/companies/${company.id}/generate/sh-4`, transferUrlName, transfer)} disabled={generating} className="px-3 py-2 rounded-lg text-xs bg-slate-700 text-white disabled:opacity-60"><Download size={12} className="inline mr-1" />Prepare SH-4 Draft</button>
+            <button onClick={saveTransfer} disabled={saving} className="px-3 py-2 rounded-lg text-xs bg-blue-600 text-white disabled:opacity-60">{saving ? 'Saving…' : 'Save Transfer & Register'}</button>
+          </div>
+        </div>
+      ) : (
+        <div className={`rounded-lg border p-4 ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+          <div className="grid sm:grid-cols-3 gap-3">
+            <Field label="Certificate no. *" value={certificate.certificate_no} onChange={setCertificateField('certificate_no')} placeholder="e.g. 001" />
+            <Field label="Issue date" value={certificate.issue_date} onChange={setCertificateField('issue_date')} type="date" />
+            <Field label="Holder name *" value={certificate.holder_name} onChange={setCertificateField('holder_name')} />
+            <Field label="Holder address" value={certificate.holder_address} onChange={setCertificateField('holder_address')} />
+            <Field label="Folio no." value={certificate.folio_no} onChange={setCertificateField('folio_no')} />
+            <Field label="Class of shares" value={certificate.class_of_shares} onChange={setCertificateField('class_of_shares')} />
+            <Field label="Number of shares *" value={certificate.number_of_shares} onChange={setCertificateField('number_of_shares')} type="number" />
+            <Field label="Distinctive no. from" value={certificate.distinctive_from} onChange={setCertificateField('distinctive_from')} />
+            <Field label="Distinctive no. to" value={certificate.distinctive_to} onChange={setCertificateField('distinctive_to')} />
+            <Field label="Nominal value per share" value={certificate.nominal_value_per_share} onChange={setCertificateField('nominal_value_per_share')} type="number" />
+            <Field label="Amount paid per share" value={certificate.amount_paid_per_share} onChange={setCertificateField('amount_paid_per_share')} type="number" />
+          </div>
+          <div className="flex flex-wrap gap-2 mt-4">
+            <button onClick={() => download(`/roc-sphere/companies/${company.id}/generate/share-certificate`, certUrlName, certificate)} disabled={generating} className="px-3 py-2 rounded-lg text-xs bg-slate-700 text-white disabled:opacity-60"><Download size={12} className="inline mr-1" />Prepare Certificate Draft</button>
+            <button onClick={saveCertificate} disabled={saving} className="px-3 py-2 rounded-lg text-xs bg-blue-600 text-white disabled:opacity-60">{saving ? 'Saving…' : 'Save Certificate Record'}</button>
+          </div>
+        </div>
+      )}
+
+      {!!data?.share_transfers?.length && (
+        <div>
+          <h4 className={`text-xs font-semibold ${text} mb-2`}>Recorded transfers</h4>
+          <div className="overflow-x-auto rounded-lg border border-slate-700/30"><table className="w-full text-[11px]"><thead className={isDark ? 'bg-slate-900' : 'bg-slate-100'}><tr>{['Date', 'Transferor', 'Transferee', 'Shares', 'SH-4 status'].map((h) => <th key={h} className={`text-left px-3 py-2 ${muted}`}>{h}</th>)}</tr></thead><tbody>{data.share_transfers.map((r) => <tr key={r.id} className={`border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}><td className={`px-3 py-2 ${muted}`}>{r.transfer_date || '—'}</td><td className={`px-3 py-2 ${text}`}>{r.transferor_name}</td><td className={`px-3 py-2 ${text}`}>{r.transferee_name}</td><td className={`px-3 py-2 ${muted}`}>{Number(r.number_of_shares || 0).toLocaleString('en-IN')}</td><td className={`px-3 py-2 ${muted}`}>{r.sh4_status || 'Pending review'}</td></tr>)}</tbody></table></div>
+        </div>
+      )}
+      <p className={`text-[11px] ${muted} flex items-start gap-1.5`}><AlertTriangle size={13} className="shrink-0 mt-0.5" />{data?.disclaimer || 'Working drafts must be checked against the executed instrument and applicable Companies Act requirements.'}</p>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
  * Shared: resolution-list editor used by Board Resolution + Notice(special business)
  * ═══════════════════════════════════════════════════════════════════════ */
 
@@ -1145,11 +1352,12 @@ function UploadTab({ company, isDark, input, text, muted, onApplied }) {
   const [extracted, setExtracted] = useState(null);
   const [results, setResults] = useState([]);
   const [errors, setErrors] = useState([]);
+  const [conflicts, setConflicts] = useState([]);
 
   // ROC Forms filing-extraction path — separate endpoint/parser from the
   // Master Data tab (see MasterDataTab above / /master-data/fetch below).
   const handleUpload = async (apply) => {
-    if (!rocFiles.length) { toast.error('Choose at least one ROC form (PDF) first'); return; }
+    if (!rocFiles.length) { toast.error('Choose at least one ROC form or MGT-7/MGT-7A attachment first'); return; }
     setExtracting(true);
     try {
       const fd = new FormData();
@@ -1162,7 +1370,11 @@ function UploadTab({ company, isDark, input, text, muted, onApplied }) {
       setExtracted(data.extracted);
       setResults(data.results || []);
       setErrors(data.errors || []);
-      const hasFields = Object.keys(data.extracted || {}).some((k) => !k.startsWith('_'));
+      setConflicts(data.conflicts || []);
+      const hasFields = Object.keys(data.extracted || {}).some((k) => !k.startsWith('_') && (
+        !['annual_return_data', 'audit_report_data', 'board_report_data'].includes(k)
+        || Object.keys(data.extracted[k] || {}).length
+      ));
       if (apply && data.applied) {
         toast.success('Company master updated from uploaded ROC forms');
         onApplied();
@@ -1183,8 +1395,8 @@ function UploadTab({ company, isDark, input, text, muted, onApplied }) {
     <div className="space-y-4">
       <h3 className={`text-sm font-semibold ${text}`}>Upload ROC Forms</h3>
       <p className={`text-xs ${muted}`}>
-        Upload AOC-4, AOC-2, MGT-7, MGT-7A, Board's/Auditor's Report extracts, DIR-12, ADT-1, INC-22, PAS-3, MGT-14 or
-        DPT-3 acknowledgement PDFs — multiple files are merged into one extraction, and each field is only ever
+         Upload AOC-4, MGT-7/MGT-7A, the separate MGT-7A shareholder XLSM, Board's/Auditor's Report extracts, DIR-12, ADT-1, INC-22, PAS-3, MGT-14 or
+         DPT-3 acknowledgement files — multiple PDFs and spreadsheets are merged into one extraction, and each field is only ever
         pulled from its statutory source form: the <strong>Directors &amp; Shareholders register comes only from
         MGT-7 / MGT-7A</strong>, <strong>financial data and the Statutory Auditor come only from AOC-4</strong>, and
         general Company Master fields (CIN, name, address, capital, AGM/board meeting dates) are read from whichever
@@ -1196,8 +1408,8 @@ function UploadTab({ company, isDark, input, text, muted, onApplied }) {
       </p>
       <div className={`rounded-lg border-2 border-dashed p-4 ${isDark ? 'border-slate-700' : 'border-slate-300'}`}>
         <p className={`text-xs font-semibold ${text} mb-1`}>ROC Forms (filing extraction)</p>
-        <p className={`text-[11px] ${muted} mb-3`}>PDF only — one bad/scanned file no longer blocks the rest of the batch.</p>
-        <input type="file" multiple accept=".pdf" onChange={(e) => setRocFiles(Array.from(e.target.files || []))}
+         <p className={`text-[11px] ${muted} mb-3`}>PDF, XLSX, XLSM or CSV — the MGT-7A shareholder attachment is read without running macros.</p>
+         <input type="file" multiple accept=".pdf,.xlsx,.xlsm,.xls,.csv" onChange={(e) => setRocFiles(Array.from(e.target.files || []))}
           className={`text-xs ${muted}`} />
         {!!rocFiles.length && <p className={`text-xs mt-2 ${text}`}>{rocFiles.length} ROC form(s) selected</p>}
         <div className="flex gap-2 mt-3">
@@ -1221,13 +1433,19 @@ function UploadTab({ company, isDark, input, text, muted, onApplied }) {
           ))}
         </div>
       )}
+      {!!conflicts.length && (
+        <div className={`rounded-lg border p-3 ${isDark ? 'border-orange-700/40 bg-orange-900/10' : 'border-orange-200 bg-orange-50'}`}>
+          <p className={`text-xs font-semibold mb-1 ${isDark ? 'text-orange-300' : 'text-orange-800'}`}>Conflicting filing values — review before Apply</p>
+          {conflicts.map((c, i) => <p key={i} className={`text-[11px] ${isDark ? 'text-orange-200' : 'text-orange-700'}`}>{c.field.replace(/_/g, ' ')}: kept “{String(c.kept)}”; previous “{String(c.previous)}” ({c.source})</p>)}
+        </div>
+      )}
 
       {extracted && (
         <div className={`rounded-lg border p-3 ${isDark ? 'border-slate-700 bg-slate-900/40' : 'border-slate-200 bg-slate-50'}`}>
           <p className={`text-xs font-semibold ${muted} mb-2`}>Extracted fields</p>
-          {results.length > 0 && <p className={`text-[11px] ${muted} mb-2`}>{results.map((r) => `${r.filename} (${r.source_type})`).join(' · ')}</p>}
+           {results.length > 0 && <p className={`text-[11px] ${muted} mb-2`}>{results.map((r) => `${r.filename} (${r.source_type}${r.shareholder_rows ? `, ${r.shareholder_rows} shareholder rows` : ''}${r.director_rows ? `, ${r.director_rows} director rows` : ''})`).join(' · ')}</p>}
           <div className="grid sm:grid-cols-2 gap-2 text-xs">
-            {Object.entries(extracted).filter(([k, v]) => !k.startsWith('_') && !Array.isArray(v) && !['financial_data', 'auditor'].includes(k)).map(([k, v]) => (
+            {Object.entries(extracted).filter(([k, v]) => !k.startsWith('_') && !Array.isArray(v) && typeof v !== 'object' && !['financial_data', 'auditor'].includes(k)).map(([k, v]) => (
               <div key={k} className="flex justify-between gap-2">
                 <span className={muted}>{k.replace(/_/g, ' ')}</span>
                 <span className={text}>{String(v)}</span>
@@ -1261,8 +1479,19 @@ function UploadTab({ company, isDark, input, text, muted, onApplied }) {
                 </span>
               </div>
             )}
-            {!Object.keys(extracted).filter((k) => !k.startsWith('_') && !['directors', 'shareholders', 'financial_data', 'auditor'].includes(k)).length
-              && !extracted.directors && !extracted.shareholders && !extracted.financial_data && !extracted.auditor && (
+            {[
+              ['annual_return_data', 'annual return data (from MGT-7/MGT-7A)'],
+              ['audit_report_data', 'audit report data'],
+              ['board_report_data', 'Board’s Report data'],
+            ].map(([key, label]) => extracted[key] && Object.keys(extracted[key]).length > 0 && (
+              <div key={key} className="sm:col-span-2">
+                <span className={muted}>{label}</span>
+                <span className={`${text} block`}>{Object.entries(extracted[key]).map(([k, v]) => `${k.replace(/_/g, ' ')}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' · ')}</span>
+              </div>
+            ))}
+            {!Object.keys(extracted).filter((k) => !k.startsWith('_') && !['directors', 'shareholders', 'financial_data', 'auditor', 'annual_return_data', 'audit_report_data', 'board_report_data'].includes(k)).length
+              && !extracted.directors && !extracted.shareholders && !extracted.financial_data && !extracted.auditor
+              && !extracted.annual_return_data && !extracted.audit_report_data && !extracted.board_report_data && (
               <p className={muted}>No fields could be confidently extracted from this file.</p>
             )}
           </div>
