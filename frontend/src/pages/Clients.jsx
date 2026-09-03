@@ -102,6 +102,26 @@ const CLIENT_TYPES = [
   { value: 'other', label: 'Other' },
 ];
 
+// Normalize constitution values from legacy/imported records so filters and counts
+// remain correct even when older data contains LLP / LLPIN-style variants.
+const normalizeClientType = (value) => {
+  const raw = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  const aliases = {
+    llp: 'llp',
+    limited_liability_partnership: 'llp',
+    limited_liability_partnership_llp: 'llp',
+    private_limited: 'pvt_ltd',
+    private_limited_company: 'pvt_ltd',
+    private_company: 'pvt_ltd',
+    public_limited: 'public_ltd',
+    public_limited_company: 'public_ltd',
+    section8: 'section_8',
+    section_8_company: 'section_8',
+    one_person_company: 'other',
+  };
+  return aliases[raw] || raw || 'proprietor';
+};
+
 const SERVICES = [
   'GST', 'Trademark', 'Income Tax', 'ROC', 'Audit', 'Compliance',
   'Company Registration', 'Tax Planning', 'Accounting', 'Payroll', 'Other'
@@ -5098,7 +5118,7 @@ export default function Clients() {
     }
     if (serviceFilter !== 'all' && !(c?.services ?? []).some(s => (s || '').toLowerCase().includes(serviceFilter.toLowerCase()))) return false;
     if (statusFilter !== 'all' && (c?.status || 'active') !== statusFilter) return false;
-    if (!itrTabActive && clientTypeFilter !== 'all' && (c?.client_type || 'proprietor') !== clientTypeFilter) return false;
+    if (!itrTabActive && clientTypeFilter !== 'all' && normalizeClientType(c?.client_type) !== normalizeClientType(clientTypeFilter)) return false;
     if (referredByFilter !== 'all' && (c?.referred_by || '') !== referredByFilter) return false;
     if (auditorFilter !== 'all' && (c?.auditor || '') !== auditorFilter) return false;
     if (assignedToFilter !== 'all') {
@@ -5128,8 +5148,16 @@ export default function Clients() {
     const totalClients  = filteredClients.length;
     const activeClients = filteredClients.filter(c => (c?.status || 'active') === 'active').length;
     const serviceCounts = {};
-    filteredClients.forEach(c => { (c?.services || []).forEach(s => { const n = s?.startsWith('Other:') ? 'Other' : s; serviceCounts[n] = (serviceCounts[n] || 0) + 1; }); });
-    return { totalClients, activeClients, serviceCounts };
+    const typeCounts = {};
+    filteredClients.forEach(c => {
+      const type = normalizeClientType(c?.client_type);
+      typeCounts[type] = (typeCounts[type] || 0) + 1;
+      (c?.services || []).forEach(s => {
+        const n = s?.startsWith('Other:') ? 'Other' : s;
+        serviceCounts[n] = (serviceCounts[n] || 0) + 1;
+      });
+    });
+    return { totalClients, activeClients, serviceCounts, typeCounts };
   }, [filteredClients]);
 
   // ── DSC alert — clients with DSC expiring within 30 days ─────────────────
@@ -7165,7 +7193,14 @@ export default function Clients() {
             </Select>
             <Select value={clientTypeFilter} onValueChange={setClientTypeFilter}>
               <SelectTrigger className={`h-9 w-[110px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue placeholder="All Types" /></SelectTrigger>
-              <SelectContent><SelectItem value="all">All Types</SelectItem>{CLIENT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
+              <SelectContent>
+                <SelectItem value="all">All Types ({stats.totalClients})</SelectItem>
+                {CLIENT_TYPES.map(t => (
+                  <SelectItem key={t.value} value={t.value}>
+                    {t.label} ({stats.typeCounts[t.value] || 0})
+                  </SelectItem>
+                ))}
+              </SelectContent>
             </Select>
             <Select value={serviceFilter} onValueChange={setServiceFilter}>
               <SelectTrigger className={`h-9 w-[120px] border-none rounded-xl text-xs flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-100' : 'bg-slate-50'}`}><SelectValue /></SelectTrigger>
@@ -7189,6 +7224,23 @@ export default function Clients() {
               </Select>
             </div>
           </div>
+        {/* Quick constitution filters — counts are calculated from the same normalized dataset
+            used by the filter, so legacy LLP/LLP variants cannot appear as zero. */}
+        <div className={`flex items-center gap-1.5 overflow-x-auto px-3.5 py-2 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mr-1">Constitution</span>
+          <button
+            onClick={() => setClientTypeFilter('all')}
+            className={`px-2.5 py-1 rounded-full text-[10px] font-semibold whitespace-nowrap transition ${clientTypeFilter === 'all' ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900' : (isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600')}`}>
+            All {stats.totalClients}
+          </button>
+          {CLIENT_TYPES.filter(t => (stats.typeCounts[t.value] || 0) > 0).map(t => (
+            <button key={t.value} onClick={() => setClientTypeFilter(t.value)}
+              className={`px-2.5 py-1 rounded-full text-[10px] font-semibold whitespace-nowrap transition ${clientTypeFilter === t.value ? 'bg-blue-600 text-white' : (isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200')}`}>
+              {t.label} {stats.typeCounts[t.value] || 0}
+            </button>
+          ))}
+        </div>
+
         {/* Row 4: active filter chips */}
         <ActiveFilterChips
           statusFilter={statusFilter} clientTypeFilter={clientTypeFilter}
