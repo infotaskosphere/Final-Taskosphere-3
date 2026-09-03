@@ -108,6 +108,7 @@ export default function ROCSpherePage() {
   const [tab, setTab] = useState('master');
   const [showNewCompany, setShowNewCompany] = useState(false);
   const [search, setSearch] = useState('');
+  const [companyTypeFilter, setCompanyTypeFilter] = useState('all');
   const [syncing, setSyncing] = useState(false);
 
   const card = isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-white border-slate-200';
@@ -156,10 +157,13 @@ export default function ROCSpherePage() {
   useEffect(() => { loadOne(selectedId); }, [selectedId, loadOne]);
 
   const filteredCompanies = useMemo(() => {
-    if (!search.trim()) return companies;
     const q = search.toLowerCase();
-    return companies.filter((c) => (c.company_name || '').toLowerCase().includes(q) || (c.cin || '').toLowerCase().includes(q));
-  }, [companies, search]);
+    return companies.filter((c) => {
+      const matchesType = companyTypeFilter === 'all' || c.category === companyTypeFilter;
+      const matchesSearch = !q || (c.company_name || '').toLowerCase().includes(q) || (c.cin || '').toLowerCase().includes(q);
+      return matchesType && matchesSearch;
+    });
+  }, [companies, search, companyTypeFilter]);
 
   const saveCompany = async (patch) => {
     if (!company?.id) return;
@@ -238,6 +242,18 @@ export default function ROCSpherePage() {
             </div>
           </div>
           <p className={`text-[11px] ${muted} mb-3 -mt-2`}>Auto-synced from Pvt Ltd / Public Ltd / LLP / OPC / Section 8 clients</p>
+           <select
+             value={companyTypeFilter}
+             onChange={(e) => setCompanyTypeFilter(e.target.value)}
+             aria-label="Filter companies by entity type"
+             className={`${input} mb-2 py-1.5 text-xs`}
+           >
+             <option value="all">All entity types ({companies.length})</option>
+             <option value="private">Pvt Ltd ({companies.filter((c) => c.category === 'private').length})</option>
+             <option value="llp">LLP ({companies.filter((c) => c.category === 'llp').length})</option>
+             <option value="section_8">Section 8 ({companies.filter((c) => c.category === 'section_8').length})</option>
+             <option value="public">Public Ltd ({companies.filter((c) => c.category === 'public').length})</option>
+           </select>
           <div className="relative mb-3">
             <Search size={14} className={`absolute left-2.5 top-2.5 ${muted}`} />
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search company / CIN…"
