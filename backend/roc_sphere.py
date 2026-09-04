@@ -33,7 +33,7 @@ import io
 import logging
 import re
 import uuid
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 from typing import Optional, List, Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
@@ -176,6 +176,15 @@ class ShareCertificateRequest(BaseModel):
     remarks: Optional[str] = None
 
 
+class CSPracticeRunRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    financial_year: Optional[str] = None
+    assignee_id: Optional[str] = None
+    lead_days: int = Field(default=15, ge=0, le=90)
+    include_review_tasks: bool = True
+    replace_existing: bool = False
+
+
 class Auditor(BaseModel):
     model_config = ConfigDict(extra="ignore")
     name: Optional[str] = None
@@ -215,6 +224,9 @@ class RocCompanyIn(BaseModel):
     board_report_data: Dict[str, Any] = Field(default_factory=dict)
     share_transfers: List[Dict[str, Any]] = Field(default_factory=list)
     share_certificates: List[Dict[str, Any]] = Field(default_factory=list)
+    # Persistent meeting / event history used by MGT-7/MGT-7A preparation.
+    # Stored with the company master so it survives page refreshes and deployments.
+    record_history: List[Dict[str, Any]] = Field(default_factory=list)
     roc_form_uploads: List[Dict[str, Any]] = Field(default_factory=list)
     auditor: Optional[Auditor] = None
     notes: Optional[str] = None
@@ -269,6 +281,46 @@ class MinutesRequest(BaseModel):
     quorum_present: bool = True
     resolutions: List[ResolutionItem] = Field(default_factory=list)
     discussion_notes: Optional[str] = None
+
+
+class MeetingAttendance(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    name: str
+    din: Optional[str] = None
+    designation: Optional[str] = None
+    status: str = "Present"  # Present / Absent / Leave of Absence
+    mode: Optional[str] = None  # Physical / VC / OAVM / Other
+    remarks: Optional[str] = None
+
+
+class RecordHistoryEntry(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    meeting_type: str = "board"  # board / agm / egm / committee / partner / other
+    meeting_number: Optional[str] = None
+    meeting_date: str
+    meeting_time: Optional[str] = None
+    notice_date: Optional[str] = None
+    venue: Optional[str] = None
+    mode: Optional[str] = None
+    chairman: Optional[str] = None
+    quorum_present: Optional[bool] = True
+    attendance: List[MeetingAttendance] = Field(default_factory=list)
+    members_present_count: Optional[int] = None
+    members_entitled_count: Optional[int] = None
+    leave_of_absence: List[str] = Field(default_factory=list)
+    agenda_items: List[str] = Field(default_factory=list)
+    resolutions_passed: List[str] = Field(default_factory=list)
+    special_business: List[str] = Field(default_factory=list)
+    minutes_date: Optional[str] = None
+    minutes_signed_date: Optional[str] = None
+    adjourned: bool = False
+    adjourned_to: Optional[str] = None
+    auditor_attended: Optional[bool] = None
+    secretarial_notes: Optional[str] = None
+    attachments: List[str] = Field(default_factory=list)
+    status: str = "Completed"
+    remarks: Optional[str] = None
+
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -1818,6 +1870,8 @@ async def get_filing_preparation(company_id: str, current_user: User = Depends(V
         raise HTTPException(404, "Company not found")
     aoc4 = company.get("financial_data") or {}
     mgt7a = company.get("annual_return_data") or {}
+    record_history = list(company.get("record_history") or [])
+    history_summary = _record_history_summary(company)
     required = {
         "company_name": company.get("company_name"),
         "cin": company.get("cin"),
@@ -1836,6 +1890,13 @@ async def get_filing_preparation(company_id: str, current_user: User = Depends(V
         "mgt7a": mgt7a,
         "audit_report": company.get("audit_report_data") or {},
         "board_report": company.get("board_report_data") or {},
+        "record_history": record_history,
+        "record_history_summary": history_summary,
+        "mgt7_meeting_data": {
+            "agm": history_summary.get("latest_agm"),
+            "board_meetings": [r for r in record_history if str(r.get("meeting_type", "")).lower() == "board"],
+            "egms": [r for r in record_history if str(r.get("meeting_type", "")).lower() == "egm"],
+        },
         "required_working_fields": required,
         "missing_working_fields": missing,
         "source_rules": {
@@ -1844,6 +1905,103 @@ async def get_filing_preparation(company_id: str, current_user: User = Depends(V
             "disclosure_context": "Auditor's Report and Board's Report",
         },
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# RECORD HISTORY — persistent Board / AGM / EGM / meeting register
+# ─────────────────────────────────────────────────────────────────────────
+
+def _record_history_summary(company: Dict[str, Any]) -> Dict[str, Any]:
+    records = list(company.get("record_history") or [])
+    def key(r):
+        try:
+            return datetime.fromisoformat(str(r.get("meeting_date", "")).replace("Z", "+00:00"))
+        except Exception:
+            return datetime.min.replace(tzinfo=timezone.utc)
+    ordered = sorted(records, key=key, reverse=True)
+    agms = [r for r in ordered if str(r.get("meeting_type", "")).lower() == "agm"]
+    boards = [r for r in ordered if str(r.get("meeting_type", "")).lower() == "board"]
+    egms = [r for r in ordered if str(r.get("meeting_type", "")).lower() == "egm"]
+    return {
+        "total": len(records),
+        "board_meetings": len(boards),
+        "agms": len(agms),
+        "egms": len(egms),
+        "latest_board_meeting": boards[0] if boards else None,
+        "latest_agm": agms[0] if agms else None,
+        "latest_egm": egms[0] if egms else None,
+    }
+
+
+@router.get("/companies/{company_id}/record-history")
+async def get_record_history(company_id: str, current_user: User = Depends(VIEW)):
+    company = await COMPANIES.find_one({"id": company_id})
+    if not company:
+        raise HTTPException(404, "Company not found")
+    records = list(company.get("record_history") or [])
+    records.sort(key=lambda r: str(r.get("meeting_date") or ""), reverse=True)
+    return {"company_id": company_id, "records": records, "summary": _record_history_summary(company)}
+
+
+@router.post("/companies/{company_id}/record-history")
+async def create_record_history(company_id: str, payload: RecordHistoryEntry, current_user: User = Depends(EDIT)):
+    company = await COMPANIES.find_one({"id": company_id})
+    if not company:
+        raise HTTPException(404, "Company not found")
+    record = payload.model_dump()
+    record.update({"id": _uid(), "created_at": _now().isoformat(), "created_by": _who(current_user), "updated_at": _now().isoformat()})
+    records = list(company.get("record_history") or [])
+    records.append(record)
+    clean = {"record_history": records, "updated_at": _now()}
+    # Keep the master date fields synchronized for older filing/document flows.
+    if record.get("meeting_type") == "agm":
+        clean["last_agm_date"] = record.get("meeting_date")
+    if record.get("meeting_type") == "board":
+        clean["last_board_meeting_date"] = record.get("meeting_date")
+    await COMPANIES.update_one({"id": company_id}, {"$set": clean})
+    await _sync_company_to_client({**company, **clean})
+    return {"record": record, "summary": _record_history_summary({**company, **clean})}
+
+
+@router.put("/companies/{company_id}/record-history/{record_id}")
+async def update_record_history(company_id: str, record_id: str, payload: RecordHistoryEntry, current_user: User = Depends(EDIT)):
+    company = await COMPANIES.find_one({"id": company_id})
+    if not company:
+        raise HTTPException(404, "Company not found")
+    records = list(company.get("record_history") or [])
+    idx = next((i for i, r in enumerate(records) if r.get("id") == record_id), -1)
+    if idx < 0:
+        raise HTTPException(404, "Record history entry not found")
+    updated = payload.model_dump()
+    updated.update({"id": record_id, "created_at": records[idx].get("created_at") or _now().isoformat(), "created_by": records[idx].get("created_by") or _who(current_user), "updated_at": _now().isoformat(), "updated_by": _who(current_user)})
+    records[idx] = updated
+    clean = {"record_history": records, "updated_at": _now()}
+    # Recalculate latest master dates from the complete history.
+    ordered = sorted(records, key=lambda r: str(r.get("meeting_date") or ""), reverse=True)
+    latest_agm = next((r for r in ordered if r.get("meeting_type") == "agm"), None)
+    latest_board = next((r for r in ordered if r.get("meeting_type") == "board"), None)
+    clean["last_agm_date"] = latest_agm.get("meeting_date") if latest_agm else None
+    clean["last_board_meeting_date"] = latest_board.get("meeting_date") if latest_board else None
+    await COMPANIES.update_one({"id": company_id}, {"$set": clean})
+    await _sync_company_to_client({**company, **clean})
+    return {"record": updated, "summary": _record_history_summary({**company, **clean})}
+
+
+@router.delete("/companies/{company_id}/record-history/{record_id}")
+async def delete_record_history(company_id: str, record_id: str, current_user: User = Depends(DELETE)):
+    company = await COMPANIES.find_one({"id": company_id})
+    if not company:
+        raise HTTPException(404, "Company not found")
+    records = [r for r in (company.get("record_history") or []) if r.get("id") != record_id]
+    if len(records) == len(company.get("record_history") or []):
+        raise HTTPException(404, "Record history entry not found")
+    ordered = sorted(records, key=lambda r: str(r.get("meeting_date") or ""), reverse=True)
+    latest_agm = next((r for r in ordered if r.get("meeting_type") == "agm"), None)
+    latest_board = next((r for r in ordered if r.get("meeting_type") == "board"), None)
+    clean = {"record_history": records, "updated_at": _now(), "last_agm_date": latest_agm.get("meeting_date") if latest_agm else None, "last_board_meeting_date": latest_board.get("meeting_date") if latest_board else None}
+    await COMPANIES.update_one({"id": company_id}, {"$set": clean})
+    await _sync_company_to_client({**company, **clean})
+    return {"deleted": record_id, "summary": _record_history_summary({**company, **clean})}
 
 
 @router.post("/companies/{company_id}/share-transfers")
@@ -2103,6 +2261,219 @@ async def get_applicable_compliances(company_id: str, current_user: User = Depen
             "notifications before relying on it for filing."
         ),
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# CS PRACTICE AUTOMATION ENGINE
+# ─────────────────────────────────────────────────────────────────────────
+# Creates a practical annual compliance work-plan inside the existing
+# Taskosphere task engine. Dates are intentionally treated as planning
+# dates, not legal advice; event-based items are shown without a hard date.
+
+
+def _fy_dates(financial_year: Optional[str]) -> tuple[date, date, str]:
+    now = _now().date()
+    if financial_year:
+        m = re.match(r"^(20\d{2})[-/]?(\d{2}|20\d{2})$", str(financial_year).strip())
+        if m:
+            start_year = int(m.group(1))
+        else:
+            start_year = now.year if now.month >= 4 else now.year - 1
+    else:
+        start_year = now.year if now.month >= 4 else now.year - 1
+    end_year = start_year + 1
+    label = f"{start_year}-{str(end_year)[-2:]}"
+    return date(start_year, 4, 1), date(end_year, 3, 31), label
+
+
+def _plan_item(key: str, title: str, description: str, due: Optional[date], category: str,
+               frequency: str, priority: str = "medium", form: Optional[str] = None,
+               event_based: bool = False) -> Dict[str, Any]:
+    return {
+        "key": key, "title": title, "description": description,
+        "due_date": due.isoformat() if due else None, "category": category,
+        "frequency": frequency, "priority": priority, "form": form,
+        "event_based": event_based,
+    }
+
+
+def build_cs_practice_plan(company: Dict[str, Any], financial_year: Optional[str] = None) -> Dict[str, Any]:
+    fy_start, fy_end, fy_label = _fy_dates(financial_year)
+    category = company.get("category") or "private"
+    items: List[Dict[str, Any]] = []
+    company_name = company.get("company_name") or "Company"
+    lead_note = "Planning date — verify applicability and current MCA due date before filing."
+
+    if category == "llp":
+        audit_applicable = _num(company.get("last_year_turnover")) > LLP_AUDIT_TURNOVER_LIMIT or _num(company.get("paid_up_capital")) > LLP_AUDIT_CONTRIBUTION_LIMIT
+        items.extend([
+            _plan_item("llp_form11", "Prepare & file Form 11 — Annual Return", f"{company_name}: collect partner/designated-partner and contribution data. {lead_note}", date(fy_end.year, 5, 30), "LLP Annual", "Annual", "high", "Form 11"),
+            _plan_item("llp_form8", "Prepare & file Form 8 — Statement of Account & Solvency", f"{company_name}: finalise accounts, solvency statement and auditor report where applicable. {lead_note}", date(fy_end.year, 10, 30), "LLP Annual", "Annual", "high", "Form 8"),
+            _plan_item("dir3_kyc", "DIR-3 KYC / DP KYC review", f"Review DIN/DPIN KYC status for every designated partner. {lead_note}", date(fy_end.year, 9, 30), "Annual ROC", "Annual", "high", "DIR-3 KYC"),
+            _plan_item("itr", "LLP Income-tax return readiness", f"Prepare books, audit report and tax return working. Planned date only. {lead_note}", date(fy_end.year, 10 if audit_applicable else 7, 31), "Tax coordination", "Annual", "high", "Income Tax Return"),
+            _plan_item("llp_agreement_review", "LLP Agreement & partner-change review", "Review agreement, contribution, partner/DP changes and event-based Form 3/Form 4/Form 15 requirements.", None, "LLP Event", "Event-based", "medium", "Form 3 / Form 4 / Form 15", True),
+        ])
+    else:
+        is_opc = category == "opc"
+        is_small = _is_small_company(company)
+        is_section8 = category == "section_8"
+        mgt_form = "MGT-7A" if is_small or is_opc else "MGT-7"
+        agm_due = date(fy_end.year, 9, 30)
+        items.extend([
+            _plan_item("dpt3", "DPT-3 readiness & filing", "Collect deposit / loan / outstanding transaction data and verify applicability.", date(fy_end.year, 6, 30), "Annual ROC", "Annual", "high", "DPT-3"),
+            _plan_item("dir3_kyc", "DIR-3 KYC review", "Verify DIN status, KYC declarations and supporting records for every director.", date(fy_end.year, 9, 30), "Annual ROC", "Annual", "high", "DIR-3 KYC"),
+            _plan_item("agm", "AGM planning & notice pack", "Confirm AGM date, notice, agenda, attendance, auditor and annual-document readiness. Verify first-AGM and extension rules where applicable.", agm_due, "Meeting", "Annual", "high", "AGM"),
+            _plan_item("board_annual_review", "Annual Board compliance review", "Review Board meeting count, MBP-1, DIR-8, registers, minutes and pending event-based filings.", date(fy_end.year, 4, 30), "Board Compliance", "Annual", "medium", "Board compliance"),
+            _plan_item("aoc4", "AOC-4 filing pack", "Finalise financial statements, auditor report, Board report and AGM-linked filing data.", agm_due + timedelta(days=30), "Annual ROC", "Annual", "high", "AOC-4"),
+            _plan_item("mgt7", f"{mgt_form} filing pack", "Finalise annual return data, directors/shareholders and AGM details.", agm_due + timedelta(days=60), "Annual ROC", "Annual", "high", mgt_form),
+            _plan_item("adt1", "ADT-1 appointment / reappointment review", "Verify auditor appointment/reappointment and prepare ADT-1 where filing is triggered.", agm_due + timedelta(days=15), "Annual ROC", "As applicable", "medium", "ADT-1"),
+            _plan_item("msme_apr", "MSME-1 half-yearly review — April cycle", "Obtain creditor ageing and outstanding dues data from client; file if applicable.", date(fy_end.year, 4, 29), "Half-Yearly ROC", "Half-Yearly", "medium", "MSME-1"),
+            _plan_item("msme_oct", "MSME-1 half-yearly review — October cycle", "Obtain creditor ageing and outstanding dues data from client; file if applicable.", date(fy_end.year, 10, 31), "Half-Yearly ROC", "Half-Yearly", "medium", "MSME-1"),
+            _plan_item("event_filings", "Event-based filing review", "Check changes in directors, registered office, charges, share capital, resolutions and other events requiring ROC filing.", None, "Event-based ROC", "Event-based", "high", "Event-based", True),
+            _plan_item("statutory_registers", "Statutory registers & minutes review", "Reconcile registers, minutes, share transfers/certificates and supporting board/general meeting records.", None, "Secretarial Records", "Quarterly", "medium", "Registers", True),
+        ])
+        if not is_opc:
+            for q, q_year, q_month in (("Q1", fy_start.year, 4), ("Q2", fy_start.year, 7), ("Q3", fy_start.year, 10), ("Q4", fy_end.year, 1)):
+                items.append(_plan_item(
+                    f"board_{q.lower()}", f"{q} Board meeting readiness", "Prepare agenda, MBP-1/DIR-8 checks, notices, attendance, minutes and follow-up actions. Exact meeting date to be fixed by the company.", date(q_year, q_month, 15), "Board Compliance", "Quarterly", "medium", "Board Meeting"
+                ))
+        if category == "public" or company.get("listed"):
+            items.append(_plan_item("pas6_h1", "PAS-6 half-yearly reconciliation review", "Obtain reconciliation data and verify applicability for an unlisted public company with dematerialised securities.", date(fy_end.year, 5, 30), "Capital / Securities", "Half-Yearly", "medium", "PAS-6"))
+            items.append(_plan_item("pas6_h2", "PAS-6 second half-year review", "Obtain reconciliation data and verify applicability.", date(fy_end.year, 11, 29), "Capital / Securities", "Half-Yearly", "medium", "PAS-6"))
+        if is_section8:
+            items.append(_plan_item("section8_csr", "Section 8 / CSR compliance review", "Review Section 8 objects, CSR applicability and annual disclosures before preparing filings.", None, "Section 8", "Annual", "medium", "CSR", True))
+
+    if True:
+        # Always add a client-information follow-up task so CS practice is not
+        # reduced to filing dates: it creates a repeatable information chase.
+        items.insert(0, _plan_item(
+            "client_data_request", "Annual client data request & document chase",
+            "Send the standard annual ROC/secretarial information request: financial statements, auditor report, Board report, registers, director/shareholder changes and pending events.",
+            date(fy_end.year, 4, 15), "Client Coordination", "Annual", "high", "Client Information"
+        ))
+
+    return {
+        "company_id": company.get("id"),
+        "company_name": company_name,
+        "category": category,
+        "financial_year": fy_label,
+        "fy_start": fy_start.isoformat(),
+        "fy_end": fy_end.isoformat(),
+        "items": items,
+        "disclaimer": "Automation creates an internal practice work-plan. It does not determine legal applicability or replace review of the current MCA/Companies Act/LLP rules and actual event dates.",
+    }
+
+
+@router.get("/companies/{company_id}/cs-practice-plan")
+async def get_cs_practice_plan(company_id: str, financial_year: Optional[str] = Query(None), current_user: User = Depends(VIEW)):
+    company = await COMPANIES.find_one({"id": company_id})
+    if not company:
+        raise HTTPException(404, "Company not found")
+    plan = build_cs_practice_plan(company, financial_year)
+    task_keys = {t.get("roc_automation_key") for t in await db.tasks.find({"roc_company_id": company_id, "roc_financial_year": plan["financial_year"]}, {"_id": 0, "roc_automation_key": 1, "status": 1}).to_list(1000)}
+    for item in plan["items"]:
+        item["task_created"] = item["key"] in task_keys
+    plan["created_task_count"] = len(task_keys)
+    return plan
+
+
+@router.post("/companies/{company_id}/cs-practice-plan/run")
+async def run_cs_practice_plan(company_id: str, payload: CSPracticeRunRequest, current_user: User = Depends(CREATE)):
+    company = await COMPANIES.find_one({"id": company_id})
+    if not company:
+        raise HTTPException(404, "Company not found")
+    plan = build_cs_practice_plan(company, payload.financial_year)
+    assignee_id = payload.assignee_id or current_user.id
+    if assignee_id != current_user.id and getattr(current_user, "role", "") != "admin":
+        raise HTTPException(403, "Only an administrator can run CS automation for another assignee")
+    assignee = await db.users.find_one({"id": assignee_id}, {"_id": 0, "id": 1, "full_name": 1, "username": 1})
+    if not assignee:
+        raise HTTPException(404, "Assignee not found")
+
+    created = []
+    skipped = []
+    for item in plan["items"]:
+        if item.get("event_based") and not payload.include_review_tasks:
+            continue
+        key = item["key"]
+        existing = await db.tasks.find_one({"roc_company_id": company_id, "roc_financial_year": plan["financial_year"], "roc_automation_key": key}, {"_id": 0, "id": 1, "status": 1})
+        if existing and not payload.replace_existing:
+            skipped.append(key)
+            continue
+        due = None
+        if item.get("due_date"):
+            due_date = date.fromisoformat(item["due_date"])
+            due = datetime.combine(due_date, datetime.min.time(), tzinfo=timezone.utc) - timedelta(days=payload.lead_days)
+        task_doc = {
+            "id": existing.get("id") if existing else _uid(),
+            "title": f"[ROC] {item['title']} — {company.get('company_name')}",
+            "description": item.get("description"),
+            "assigned_to": assignee_id,
+            "assigned_to_name": assignee.get("full_name") or assignee.get("username"),
+            "sub_assignees": [],
+            "due_date": due.isoformat() if due else None,
+            "priority": item.get("priority", "medium"),
+            "status": existing.get("status", "pending") if existing else "pending",
+            "category": "compliance",
+            "categories": ["ROC", "CS Practice", item.get("category") or "Compliance"],
+            "client_id": company.get("client_id"),
+            "is_recurring": False,
+            "recurrence_pattern": "monthly",
+            "recurrence_interval": 1,
+            "recurrence_end_date": None,
+            "type": "roc_compliance",
+            "popup_interval_minutes": None,
+            "created_by": current_user.id,
+            "created_at": existing.get("created_at") if existing else _now().isoformat(),
+            "updated_at": _now().isoformat(),
+            "roc_company_id": company_id,
+            "roc_company_name": company.get("company_name"),
+            "roc_financial_year": plan["financial_year"],
+            "roc_automation_key": key,
+            "roc_form": item.get("form"),
+            "roc_planned_due_date": item.get("due_date"),
+            "roc_event_based": item.get("event_based", False),
+        }
+        if existing:
+            await db.tasks.replace_one({"id": existing["id"]}, task_doc)
+        else:
+            await db.tasks.insert_one(task_doc)
+        created.append(task_doc)
+
+    return {
+        "financial_year": plan["financial_year"],
+        "created": len(created),
+        "skipped": len(skipped),
+        "tasks": created,
+        "assignee": assignee.get("full_name") or assignee.get("username"),
+        "message": f"CS practice plan prepared: {len(created)} task(s) created/updated, {len(skipped)} already present.",
+    }
+
+
+@router.get("/companies/{company_id}/cs-practice-tasks")
+async def get_cs_practice_tasks(company_id: str, financial_year: Optional[str] = Query(None), current_user: User = Depends(VIEW)):
+    company = await COMPANIES.find_one({"id": company_id})
+    if not company:
+        raise HTTPException(404, "Company not found")
+    _, _, fy_label = _fy_dates(financial_year)
+    tasks = await db.tasks.find({"roc_company_id": company_id, "roc_financial_year": fy_label}, {"_id": 0}).sort("due_date", 1).to_list(1000)
+    today = _now().date()
+    summary = {"total": len(tasks), "completed": 0, "pending": 0, "overdue": 0, "due_30_days": 0}
+    for task in tasks:
+        if task.get("status") == "completed":
+            summary["completed"] += 1
+        else:
+            summary["pending"] += 1
+            if task.get("due_date"):
+                try:
+                    d = datetime.fromisoformat(str(task["due_date"]).replace("Z", "+00:00")).date()
+                    if d < today:
+                        summary["overdue"] += 1
+                    elif (d - today).days <= 30:
+                        summary["due_30_days"] += 1
+                except Exception:
+                    pass
+    return {"financial_year": fy_label, "summary": summary, "tasks": tasks}
 
 
 # ─────────────────────────────────────────────────────────────────────────
