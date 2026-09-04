@@ -296,6 +296,23 @@ async def _do_lan_scan(
 
 # ─── ADMS COMMAND QUEUE HELPERS ──────────────────────────────────────────────
 
+# SECURITY / CLOCK-SAFETY GUARD
+# Only these command families are currently allowed to be delivered to an
+# Identix/ZKTeco machine by Taskosphere.  In particular, NEVER deliver
+# historical SET TIME / SET OPTIONS / configuration commands that may still
+# exist in MongoDB from an older application version.  Those commands can
+# change the physical machine clock when the device polls /iclock/getrequest.
+_ALLOWED_ADMS_COMMAND_PREFIXES = (
+    "DATA UPDATE USERINFO",
+    "DATA QUERY FINGERTMP",
+)
+
+
+def _is_safe_adms_command(cmd_str: Any) -> bool:
+    text = str(cmd_str or "").strip().upper()
+    return any(text.startswith(prefix) for prefix in _ALLOWED_ADMS_COMMAND_PREFIXES)
+
+
 async def _next_seq_id(sn: str) -> int:
     """Monotonically increasing sequence ID per device for ADMS command IDs."""
     counter = await db.counters.find_one_and_update(
@@ -1684,6 +1701,26 @@ async def iclock_getrequest(request: Request):
         for cmd in pending_cmds:
             seq = cmd.get("seq_id", 1)
             cmd_str = cmd.get("cmd_str", "")
+
+            # HARD CLOCK-SAFETY BOUNDARY: never send an unknown/historical
+            # command to the physical terminal.  Older versions of the app
+            # could leave SET TIME / SET OPTIONS commands in MongoDB; if those
+            # were returned here, the machine would execute them as soon as it
+            # polled this endpoint.
+            if not _is_safe_adms_command(cmd_str):
+                await db.identix_cmd_queue.update_one(
+                    {"device_serial": sn, "seq_id": seq, "status": "pending"},
+                    {"$set": {
+                        "status": "blocked",
+                        "blocked_reason": "Command type is not allowed; clock/configuration writes are disabled",
+                        "blocked_at": datetime.now(timezone.utc).isoformat(),
+                    }},
+                )
+                logger.warning(
+                    f"🛑 BLOCKED unsafe ADMS command for SN={sn} seq={seq}: {cmd_str[:120]!r}"
+                )
+                continue
+
             cmd_lines.append(f"C:{seq}:{cmd_str}")
 
         # IMPORTANT: GETREQUEST only delivers/signals commands.  Keep them
@@ -2206,10 +2243,29 @@ async def iclock_devicecmd(request: Request):
     if not device:
         return "OK\n"
 
-    pending = await db.identix_cmd_queue.find_one(
+    pending_candidates = await db.identix_cmd_queue.find(
         {"device_serial": sn, "status": "pending"},
-        sort=[("created_at", 1)],
-    )
+        {"_id": 1, "seq_id": 1, "cmd_str": 1},
+    ).sort("created_at", 1).to_list(50)
+
+    pending = None
+    for candidate in pending_candidates:
+        candidate_cmd = candidate.get("cmd_str", "")
+        if _is_safe_adms_command(candidate_cmd):
+            pending = candidate
+            break
+        await db.identix_cmd_queue.update_one(
+            {"_id": candidate["_id"], "status": "pending"},
+            {"$set": {
+                "status": "blocked",
+                "blocked_reason": "Command type is not allowed; clock/configuration writes are disabled",
+                "blocked_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+        logger.warning(
+            f"🛑 BLOCKED unsafe legacy ADMS command for SN={sn} seq={candidate.get('seq_id')}: {candidate_cmd[:120]!r}"
+        )
+
     if not pending:
         return "OK\n"
 
