@@ -9,7 +9,7 @@ import {
   Download, FileText, Search, RefreshCw, Save, CheckCircle2, Upload,
   ClipboardList, Gavel, NotebookPen, ChevronRight, AlertTriangle, Info,
   ScrollText, Pencil, DatabaseZap, ListChecks, FileSpreadsheet, FileUp,
-  BookOpen, ArrowLeftRight, BadgeCheck,
+  BookOpen, ArrowLeftRight, BadgeCheck, CalendarDays, Zap, UsersRound, Clock3, History,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '@/lib/api';
@@ -112,10 +112,12 @@ const TABS = [
   { key: 'resolution', label: 'Board Resolution', icon: Gavel },
   { key: 'notice', label: 'Notice of Meeting', icon: ScrollText },
   { key: 'minutes', label: 'Minutes of Meeting', icon: NotebookPen },
+  { key: 'history', label: 'Record History', icon: History },
   { key: 'checklist', label: 'Compliance Checklist', icon: ClipboardList },
   { key: 'applicable', label: 'Applicable Compliances', icon: ListChecks },
   { key: 'filing', label: 'Filing Desk', icon: FileSpreadsheet },
   { key: 'documents', label: 'Document Vault', icon: ScrollText },
+  { key: 'cspractice', label: 'CS Practice Automation', icon: Zap },
 ];
 
 export default function ROCSpherePage() {
@@ -133,6 +135,10 @@ export default function ROCSpherePage() {
   const [filingPrep, setFilingPrep] = useState(null);
   const [generatedDocs, setGeneratedDocs] = useState([]);
   const [filingLoading, setFilingLoading] = useState(false);
+  const [csPlan, setCsPlan] = useState(null);
+  const [csTasks, setCsTasks] = useState(null);
+  const [csLoading, setCsLoading] = useState(false);
+  const [csUsers, setCsUsers] = useState([]);
 
   const card = isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-white border-slate-200';
   const text = isDark ? 'text-slate-100' : 'text-slate-900';
@@ -168,6 +174,27 @@ export default function ROCSpherePage() {
     }
   }, []);
 
+  const loadCSPractice = useCallback(async (companyId, financialYear) => {
+    if (!companyId) return;
+    setCsLoading(true);
+    try {
+      const qs = financialYear ? `?financial_year=${encodeURIComponent(financialYear)}` : '';
+      const [planRes, tasksRes, usersRes] = await Promise.all([
+        api.get(`/roc-sphere/companies/${companyId}/cs-practice-plan${qs}`),
+        api.get(`/roc-sphere/companies/${companyId}/cs-practice-tasks${qs}`),
+        api.get('/users'),
+      ]);
+      setCsPlan(planRes.data || null);
+      setCsTasks(tasksRes.data || null);
+      setCsUsers((usersRes.data || []).filter((u) => u?.is_active !== false && u?.status !== 'inactive'));
+    } catch (e) {
+      console.error('CS practice automation load failed', e);
+      toast.error('Unable to load CS practice automation');
+    } finally {
+      setCsLoading(false);
+    }
+  }, []);
+
   const loadEligibleClients = useCallback(async () => {
     try {
       const { data } = await api.get('/roc-sphere/clients-eligible');
@@ -186,11 +213,12 @@ export default function ROCSpherePage() {
   }, [loadCompanies, loadEligibleClients]);
 
   const loadOne = useCallback(async (id) => {
-    if (!id) { setCompany(null); setFilingPrep(null); setGeneratedDocs([]); return; }
+    if (!id) { setCompany(null); setFilingPrep(null); setGeneratedDocs([]); setCsPlan(null); setCsTasks(null); return; }
     try {
       const { data } = await api.get(`/roc-sphere/companies/${id}`);
       setCompany(data);
       void loadFilingDesk(id);
+      void loadCSPractice(id);
     } catch (e) {
       toast.error('Failed to load company');
     }
@@ -350,18 +378,24 @@ export default function ROCSpherePage() {
 
               {/* Tabs */}
               <div className={`rounded-xl border ${card} overflow-hidden`}>
-                <div className={`flex overflow-x-auto border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                  {TABS.map((t) => {
-                    const Icon = t.icon;
-                    const active = tab === t.key;
-                    return (
-                      <button key={t.key} onClick={() => setTab(t.key)}
-                        className={`shrink-0 flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium border-b-2 transition
-                          ${active ? 'border-blue-600 text-blue-600' : `border-transparent ${muted} hover:text-blue-500`}`}>
-                        <Icon size={13} /> {t.label}
-                      </button>
-                    );
-                  })}
+                {/* Two fixed tab rows: no horizontal scroll. Seven equal slots per row keeps the desktop layout balanced. */}
+                <div className={`border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                  {[TABS.slice(0, 7), TABS.slice(7)].map((row, rowIndex) => (
+                    <div key={rowIndex} className={`grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 ${rowIndex === 0 ? (isDark ? 'border-b border-slate-700' : 'border-b border-slate-200') : ''}`}>
+                      {row.map((t) => {
+                        const Icon = t.icon;
+                        const active = tab === t.key;
+                        return (
+                          <button key={t.key} onClick={() => setTab(t.key)} title={t.label}
+                            className={`min-w-0 flex items-center justify-center gap-1 px-2 py-2.5 text-[11px] font-medium border-b-2 transition text-center
+                              ${active ? 'border-blue-600 text-blue-600 bg-blue-50/40 dark:bg-blue-950/20' : `border-transparent ${muted} hover:text-blue-500 hover:bg-slate-50 dark:hover:bg-slate-800/50`}`}>
+                            <Icon size={13} className="shrink-0" /> <span className="truncate">{t.label}</span>
+                          </button>
+                        );
+                      })}
+                      {row.length < 7 && <div aria-hidden="true" className="hidden lg:block" />}
+                    </div>
+                  ))}
                 </div>
                 <div className="p-4">
                   {tab === 'master' && <MasterTab company={company} isDark={isDark} onSave={saveCompany} input={input} text={text} muted={muted} />}
@@ -371,10 +405,12 @@ export default function ROCSpherePage() {
                   {tab === 'resolution' && <ResolutionTab company={company} isDark={isDark} input={input} text={text} muted={muted} />}
                   {tab === 'notice' && <NoticeTab company={company} isDark={isDark} input={input} text={text} muted={muted} />}
                   {tab === 'minutes' && <MinutesTab company={company} isDark={isDark} input={input} text={text} muted={muted} />}
+                  {tab === 'history' && <RecordHistoryTab company={company} isDark={isDark} input={input} text={text} muted={muted} onApplied={() => loadOne(company.id)} />}
                   {tab === 'checklist' && <ChecklistTab company={company} isDark={isDark} text={text} muted={muted} />}
                   {tab === 'applicable' && <ApplicableCompliancesTab company={company} isDark={isDark} text={text} muted={muted} />}
                   {tab === 'filing' && <FilingDeskTab company={company} prep={filingPrep} docs={generatedDocs} loading={filingLoading} isDark={isDark} text={text} muted={muted} onRefresh={() => loadFilingDesk(company.id)} />}
                   {tab === 'documents' && <FilingDeskTab company={company} prep={filingPrep} docs={generatedDocs} loading={filingLoading} isDark={isDark} text={text} muted={muted} onRefresh={() => loadFilingDesk(company.id)} />}
+                  {tab === 'cspractice' && <CSPracticeAutomationTab company={company} plan={csPlan} tasks={csTasks} users={csUsers} loading={csLoading} isDark={isDark} input={input} text={text} muted={muted} onRefresh={(fy) => loadCSPractice(company.id, fy)} />}
                   {tab === 'upload' && <UploadTab company={company} isDark={isDark} input={input} text={text} muted={muted} onApplied={() => loadOne(company.id)} />}
                 </div>
               </div>
@@ -405,6 +441,133 @@ export default function ROCSpherePage() {
 /* ═══════════════════════════════════════════════════════════════════════
  * Filing Desk / Document Vault
  * ═══════════════════════════════════════════════════════════════════════ */
+function RecordHistoryTab({ company, isDark, input, text, muted, onApplied }) {
+  const blank = {
+    meeting_type: 'board', meeting_number: '', meeting_date: '', meeting_time: '11:00 AM', notice_date: '', venue: company.registered_office_address || 'Registered Office',
+    mode: 'Physical', chairman: '', quorum_present: true, attendance: [], members_present_count: '', members_entitled_count: '', leave_of_absence: [],
+    agenda_items: [], resolutions_passed: [], special_business: [], minutes_date: '', minutes_signed_date: '', adjourned: false, adjourned_to: '',
+    auditor_attended: false, secretarial_notes: '', attachments: [], status: 'Completed', remarks: '',
+  };
+  const [records, setRecords] = useState([]);
+  const [summary, setSummary] = useState({ total: 0, board_meetings: 0, agms: 0, egms: 0 });
+  const [form, setForm] = useState(blank);
+  const [editingId, setEditingId] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+
+  const card = isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-white border-slate-200';
+  const setField = (key, value) => setForm((p) => ({ ...p, [key]: value }));
+  const linesToArray = (v) => String(v || '').split(/\n|,/).map(x => x.trim()).filter(Boolean);
+  const arrayToLines = (v) => Array.isArray(v) ? v.join('\n') : '';
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await api.get(`/roc-sphere/companies/${company.id}/record-history`);
+      setRecords(data.records || []);
+      setSummary(data.summary || {});
+    } catch (e) {
+      toast.error(await parseBlobError(e) || 'Failed to load Record History');
+    } finally { setLoading(false); }
+  }, [company.id]);
+  useEffect(() => { load(); }, [load]);
+
+  const openNew = () => { setEditingId(null); setForm({ ...blank, venue: company.registered_office_address || 'Registered Office' }); setShowForm(true); };
+  const openEdit = (r) => {
+    setEditingId(r.id);
+    setForm({ ...blank, ...r, attendance: r.attendance || [], leave_of_absence: r.leave_of_absence || [], agenda_items: r.agenda_items || [], resolutions_passed: r.resolutions_passed || [], special_business: r.special_business || [], attachments: r.attachments || [] });
+    setShowForm(true);
+  };
+  const save = async () => {
+    if (!form.meeting_date) { toast.error('Meeting date is required'); return; }
+    setSaving(true);
+    try {
+      const payload = {
+        ...form,
+        meeting_number: form.meeting_number || null,
+        members_present_count: form.members_present_count === '' ? null : Number(form.members_present_count),
+        members_entitled_count: form.members_entitled_count === '' ? null : Number(form.members_entitled_count),
+        leave_of_absence: Array.isArray(form.leave_of_absence) ? form.leave_of_absence : linesToArray(form.leave_of_absence),
+        agenda_items: Array.isArray(form.agenda_items) ? form.agenda_items : linesToArray(form.agenda_items),
+        resolutions_passed: Array.isArray(form.resolutions_passed) ? form.resolutions_passed : linesToArray(form.resolutions_passed),
+        special_business: Array.isArray(form.special_business) ? form.special_business : linesToArray(form.special_business),
+        attachments: Array.isArray(form.attachments) ? form.attachments : linesToArray(form.attachments),
+      };
+      const url = editingId ? `/roc-sphere/companies/${company.id}/record-history/${editingId}` : `/roc-sphere/companies/${company.id}/record-history`;
+      const method = editingId ? 'put' : 'post';
+      await api[method](url, payload);
+      toast.success(editingId ? 'Record updated' : 'Meeting record saved');
+      setShowForm(false); setEditingId(null); await load(); onApplied?.();
+    } catch (e) { toast.error(await parseBlobError(e) || 'Could not save meeting record'); }
+    finally { setSaving(false); }
+  };
+  const remove = async (id) => {
+    if (!window.confirm('Delete this meeting record? It will also be removed from MGT-7 preparation data.')) return;
+    try { await api.delete(`/roc-sphere/companies/${company.id}/record-history/${id}`); toast.success('Record deleted'); await load(); onApplied?.(); }
+    catch (e) { toast.error(await parseBlobError(e) || 'Delete failed'); }
+  };
+
+  const addAllDirectors = () => {
+    const people = (company.directors || company.designated_partners || []).map(d => ({ name: d.name, din: d.din || '', designation: d.designation || 'Director', status: 'Present', mode: form.mode || 'Physical', remarks: '' }));
+    setField('attendance', people);
+  };
+  const updateAttendance = (i, key, value) => setField('attendance', (form.attendance || []).map((a, x) => x === i ? { ...a, [key]: value } : a));
+
+  return <div className="space-y-4">
+    <div className={`rounded-xl border p-4 ${card}`}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div><h3 className={`font-semibold ${text}`}>Record History</h3><p className={`text-xs mt-1 ${muted}`}>Permanent meeting register for Board Meetings, AGMs, EGMs and other secretarial records. Entries remain available for future MGT-7 / MGT-7A preparation.</p></div>
+        <button onClick={openNew} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold"><Plus size={13}/> Add Meeting Record</button>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-4">
+        {[['Total', summary.total || 0], ['Board Meetings', summary.board_meetings || 0], ['AGM', summary.agms || 0], ['EGM', summary.egms || 0]].map(([k,v]) => <div key={k} className={`rounded-lg border p-3 ${isDark ? 'border-slate-700 bg-slate-900/40' : 'border-slate-200 bg-slate-50'}`}><div className={`text-[10px] uppercase font-bold ${muted}`}>{k}</div><div className={`text-xl font-bold mt-1 ${text}`}>{v}</div></div>)}
+      </div>
+    </div>
+
+    {showForm && <div className={`rounded-xl border p-4 ${card}`}>
+      <div className="flex items-center justify-between mb-3"><h4 className={`font-semibold text-sm ${text}`}>{editingId ? 'Edit Meeting Record' : 'Add Meeting / General Meeting Record'}</h4><button onClick={() => setShowForm(false)}><X size={16} className={muted}/></button></div>
+      <div className="grid md:grid-cols-4 gap-3">
+        <label><span className={`text-[10px] font-bold ${muted}`}>Meeting Type</span><select className={input} value={form.meeting_type} onChange={e=>setField('meeting_type',e.target.value)}><option value="board">Board Meeting</option><option value="agm">AGM</option><option value="egm">EGM</option><option value="committee">Committee Meeting</option><option value="partner">Partner Meeting</option><option value="other">Other</option></select></label>
+        <label><span className={`text-[10px] font-bold ${muted}`}>Meeting No.</span><input className={input} value={form.meeting_number || ''} onChange={e=>setField('meeting_number',e.target.value)} placeholder="BM-04 / AGM-01"/></label>
+        <label><span className={`text-[10px] font-bold ${muted}`}>Meeting Date *</span><input type="date" className={input} value={form.meeting_date || ''} onChange={e=>setField('meeting_date',e.target.value)}/></label>
+        <label><span className={`text-[10px] font-bold ${muted}`}>Meeting Time</span><input className={input} value={form.meeting_time || ''} onChange={e=>setField('meeting_time',e.target.value)}/></label>
+        <label><span className={`text-[10px] font-bold ${muted}`}>Notice Date</span><input type="date" className={input} value={form.notice_date || ''} onChange={e=>setField('notice_date',e.target.value)}/></label>
+        <label><span className={`text-[10px] font-bold ${muted}`}>Mode</span><select className={input} value={form.mode || ''} onChange={e=>setField('mode',e.target.value)}><option>Physical</option><option>VC</option><option>OAVM</option><option>Hybrid</option><option>Other</option></select></label>
+        <label className="md:col-span-2"><span className={`text-[10px] font-bold ${muted}`}>Venue</span><input className={input} value={form.venue || ''} onChange={e=>setField('venue',e.target.value)}/></label>
+        <label><span className={`text-[10px] font-bold ${muted}`}>Chairman</span><input className={input} value={form.chairman || ''} onChange={e=>setField('chairman',e.target.value)}/></label>
+        <label><span className={`text-[10px] font-bold ${muted}`}>Members Present</span><input type="number" className={input} value={form.members_present_count ?? ''} onChange={e=>setField('members_present_count',e.target.value)}/></label>
+        <label><span className={`text-[10px] font-bold ${muted}`}>Members Entitled</span><input type="number" className={input} value={form.members_entitled_count ?? ''} onChange={e=>setField('members_entitled_count',e.target.value)}/></label>
+        <label className="flex items-end gap-2 text-xs"><input type="checkbox" checked={!!form.quorum_present} onChange={e=>setField('quorum_present',e.target.checked)}/> Quorum present</label>
+      </div>
+
+      <div className="mt-4">
+        <div className="flex items-center justify-between mb-2"><label className={`text-xs font-semibold ${text}`}>Attendance</label><button onClick={addAllDirectors} type="button" className={`text-[10px] px-2 py-1 rounded border ${isDark?'border-slate-700 text-slate-300':'border-slate-300 text-slate-600'}`}><UsersRound size={11} className="inline mr-1"/>Load Directors / Partners</button></div>
+        <div className={`rounded-lg border p-2 space-y-2 ${isDark?'border-slate-700 bg-slate-900/30':'border-slate-200 bg-slate-50'}`}>
+          {(form.attendance || []).map((a,i)=><div key={i} className="grid grid-cols-12 gap-2 items-center"><input className={`${input} col-span-4`} value={a.name || ''} onChange={e=>updateAttendance(i,'name',e.target.value)} placeholder="Name"/><input className={`${input} col-span-2`} value={a.din || ''} onChange={e=>updateAttendance(i,'din',e.target.value)} placeholder="DIN / DPIN"/><select className={`${input} col-span-3`} value={a.status || 'Present'} onChange={e=>updateAttendance(i,'status',e.target.value)}><option>Present</option><option>Absent</option><option>Leave of Absence</option></select><select className={`${input} col-span-2`} value={a.mode || form.mode || 'Physical'} onChange={e=>updateAttendance(i,'mode',e.target.value)}><option>Physical</option><option>VC</option><option>OAVM</option><option>Hybrid</option></select><button type="button" onClick={()=>setField('attendance',(form.attendance||[]).filter((_,x)=>x!==i))} className="text-red-500"><Trash2 size={14}/></button></div>)}
+          <button type="button" onClick={()=>setField('attendance',[...(form.attendance||[]),{name:'',din:'',designation:'',status:'Present',mode:form.mode||'Physical',remarks:''}])} className="text-xs text-blue-600"><Plus size={12} className="inline"/> Add attendee</button>
+        </div>
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-3 mt-4">
+        <label><span className={`text-[10px] font-bold ${muted}`}>Agenda Items (one per line)</span><textarea className={input} rows={4} value={arrayToLines(form.agenda_items)} onChange={e=>setField('agenda_items',linesToArray(e.target.value))}/></label>
+        <label><span className={`text-[10px] font-bold ${muted}`}>Resolutions Passed (one per line)</span><textarea className={input} rows={4} value={arrayToLines(form.resolutions_passed)} onChange={e=>setField('resolutions_passed',linesToArray(e.target.value))}/></label>
+        <label><span className={`text-[10px] font-bold ${muted}`}>Special Business (one per line)</span><textarea className={input} rows={3} value={arrayToLines(form.special_business)} onChange={e=>setField('special_business',linesToArray(e.target.value))}/></label>
+        <label><span className={`text-[10px] font-bold ${muted}`}>Leave of Absence (one per line)</span><textarea className={input} rows={3} value={arrayToLines(form.leave_of_absence)} onChange={e=>setField('leave_of_absence',linesToArray(e.target.value))}/></label>
+        <label><span className={`text-[10px] font-bold ${muted}`}>Minutes Date</span><input type="date" className={input} value={form.minutes_date || ''} onChange={e=>setField('minutes_date',e.target.value)}/></label>
+        <label><span className={`text-[10px] font-bold ${muted}`}>Minutes Signed Date</span><input type="date" className={input} value={form.minutes_signed_date || ''} onChange={e=>setField('minutes_signed_date',e.target.value)}/></label>
+        <label className="md:col-span-2"><span className={`text-[10px] font-bold ${muted}`}>Secretarial Notes / Other Details</span><textarea className={input} rows={3} value={form.secretarial_notes || ''} onChange={e=>setField('secretarial_notes',e.target.value)} placeholder="Adjournment, voting, special resolutions, registers updated, forms triggered, attachments, follow-up actions…"/></label>
+      </div>
+      <div className="flex justify-end gap-2 mt-4"><button onClick={()=>setShowForm(false)} className={`px-3 py-2 rounded-lg text-xs ${isDark?'bg-slate-800 text-slate-300':'bg-slate-100 text-slate-600'}`}>Cancel</button><button onClick={save} disabled={saving} className="px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold disabled:opacity-60">{saving?<Loader2 size={13} className="inline animate-spin mr-1"/>:<Save size={13} className="inline mr-1"/>}{editingId?'Update Record':'Save Record'}</button></div>
+    </div>}
+
+    <div className={`rounded-xl border overflow-hidden ${card}`}>
+      {loading ? <div className={`p-8 text-center ${muted}`}><Loader2 className="animate-spin inline" size={18}/></div> : records.length === 0 ? <div className={`p-10 text-center ${muted}`}><History size={28} className="mx-auto mb-2 opacity-50"/><p className="text-sm font-medium">No meeting history yet</p><p className="text-xs mt-1">Add your first Board Meeting / AGM / EGM record. It will be retained and exposed automatically to the MGT-7 / MGT-7A filing-preparation data.</p></div> : <div className="divide-y divide-slate-200 dark:divide-slate-700">{records.map(r => { const present=(r.attendance||[]).filter(a=>a.status==='Present').length; return <div key={r.id} className="px-4 py-3"><div className="flex items-start gap-3"><div className="h-9 w-9 rounded-lg bg-blue-50 dark:bg-blue-950/30 text-blue-600 flex items-center justify-center shrink-0"><CalendarDays size={15}/></div><div className="min-w-0 flex-1"><div className={`flex flex-wrap items-center gap-2 text-xs font-semibold ${text}`}><span>{r.meeting_type==='agm'?'AGM':r.meeting_type==='egm'?'EGM':r.meeting_type==='board'?'Board Meeting':(r.meeting_type||'Meeting')}</span>{r.meeting_number&&<span className={`font-normal ${muted}`}>#{r.meeting_number}</span>}<span className={`font-normal ${muted}`}>{r.meeting_date}</span></div><div className={`text-[10px] mt-1 ${muted}`}>{r.venue||'—'} · {r.mode||'—'} · Chairman: {r.chairman||'—'} · Attendance: {present}/{(r.attendance||[]).length}</div>{(r.resolutions_passed||[]).length>0&&<div className={`text-[10px] mt-1 ${muted}`}>Resolutions: {(r.resolutions_passed||[]).length} · Minutes: {r.minutes_date||'Not recorded'}</div>}</div><div className="flex items-center gap-1"><button onClick={()=>openEdit(r)} className="p-1.5 rounded text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30" title="Edit"><Pencil size={13}/></button><button onClick={()=>remove(r.id)} className="p-1.5 rounded text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30" title="Delete"><Trash2 size={13}/></button></div></div></div>; })}</div>}
+    </div>
+    <p className={`text-[10px] ${muted}`}>Record History is the application's persistent secretarial register. It is not a legal certification: verify minutes, attendance, quorum, resolutions and current MCA requirements before filing.</p>
+  </div>;
+}
+
 function FilingDeskTab({ company, prep, docs, loading, isDark, text, muted, onRefresh }) {
   const missing = prep?.missing_working_fields || [];
   const ready = prep && missing.length === 0;
@@ -448,6 +611,21 @@ function FilingDeskTab({ company, prep, docs, loading, isDark, text, muted, onRe
                 </div>
               ))}
             </div>
+            <div className={`mt-3 rounded-lg border p-3 ${isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-200 bg-white'}`}>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className={`text-xs font-semibold ${text}`}>Record History → MGT-7 / MGT-7A</div>
+                  <div className={`text-[10px] mt-0.5 ${muted}`}>Meeting records stored in ROC Sphere are available to the filing-preparation layer.</div>
+                </div>
+                <div className="flex items-center gap-2 text-[10px] font-semibold">
+                  <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">{prep?.record_history_summary?.total || 0} records</span>
+                  <span className="px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">{prep?.record_history_summary?.agms || 0} AGM</span>
+                </div>
+              </div>
+              {prep?.record_history_summary?.latest_agm && (
+                <div className={`mt-2 text-[10px] ${muted}`}>Latest AGM: <strong className={text}>{prep.record_history_summary.latest_agm.meeting_date}</strong> · Attendance {prep.record_history_summary.latest_agm.attendance?.filter(a => a.status === 'Present').length || 0}</div>
+              )}
+            </div>
           </>
         )}
       </div>
@@ -470,6 +648,112 @@ function FilingDeskTab({ company, prep, docs, loading, isDark, text, muted, onRe
       <p className={`text-[10px] ${muted}`}>This desk is a preparation and documentation layer; final MCA submission, signing, DSC use and statutory verification remain subject to the applicable filing requirements.</p>
     </div>
   );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * CS Practice Automation
+ * ═══════════════════════════════════════════════════════════════════════ */
+function CSPracticeAutomationTab({ company, plan, tasks, users, loading, isDark, input, text, muted, onRefresh }) {
+  const currentYear = new Date().getFullYear();
+  const defaultFY = new Date().getMonth() >= 3 ? `${currentYear}-${String(currentYear + 1).slice(-2)}` : `${currentYear - 1}-${String(currentYear).slice(-2)}`;
+  const [fy, setFy] = useState(plan?.financial_year || defaultFY);
+  const [assignee, setAssignee] = useState('');
+  const [leadDays, setLeadDays] = useState(15);
+  const [includeReview, setIncludeReview] = useState(true);
+  const [running, setRunning] = useState(false);
+
+  useEffect(() => {
+    if (plan?.financial_year) setFy(plan.financial_year);
+  }, [plan?.financial_year]);
+
+  useEffect(() => {
+    if (!assignee && users?.length) setAssignee(users[0].id);
+  }, [users, assignee]);
+
+  const refresh = () => onRefresh(fy);
+
+  const runAutomation = async () => {
+    if (!company?.id) return;
+    setRunning(true);
+    try {
+      const { data } = await api.post(`/roc-sphere/companies/${company.id}/cs-practice-plan/run`, {
+        financial_year: fy,
+        assignee_id: assignee || null,
+        lead_days: Number(leadDays),
+        include_review_tasks: includeReview,
+        replace_existing: false,
+      });
+      toast.success(data?.message || 'CS practice tasks created');
+      await onRefresh(fy);
+    } catch (e) {
+      toast.error(await parseBlobError(e) || 'Unable to run CS automation');
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const summary = tasks?.summary || { total: 0, completed: 0, pending: 0, overdue: 0, due_30_days: 0 };
+  const statusClass = (status) => status === 'completed' ? 'text-emerald-600 bg-emerald-50 border-emerald-200' : 'text-amber-700 bg-amber-50 border-amber-200';
+
+  return (
+    <div className="space-y-4">
+      <div className={`rounded-2xl border p-4 ${isDark ? 'bg-gradient-to-br from-slate-900 to-slate-800 border-slate-700' : 'bg-gradient-to-br from-blue-50 to-white border-blue-100'}`}>
+        <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+          <div className="flex gap-3">
+            <div className="h-10 w-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0"><Zap size={19}/></div>
+            <div>
+              <h3 className={`font-bold ${text}`}>CS Practice Automation</h3>
+              <p className={`text-xs mt-1 ${muted}`}>Turn the company's annual ROC obligations into a structured CS work-plan and push the work directly into Taskosphere.</p>
+            </div>
+          </div>
+          <button onClick={refresh} disabled={loading} className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold bg-white/70 dark:bg-slate-900/50 border-slate-300 dark:border-slate-700">
+            <RefreshCw size={13} className={loading ? 'animate-spin' : ''}/> Refresh plan
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-4">
+          <label className="block"><span className={`text-[10px] uppercase font-bold ${muted}`}>Financial Year</span><select value={fy} onChange={e => setFy(e.target.value)} className={input}><option>{defaultFY}</option><option>{currentYear + 1}-{String(currentYear + 2).slice(-2)}</option><option>{currentYear - 1}-{String(currentYear).slice(-2)}</option></select></label>
+          <label className="block"><span className={`text-[10px] uppercase font-bold ${muted}`}>Assign Tasks To</span><select value={assignee} onChange={e => setAssignee(e.target.value)} className={input}><option value="">Myself</option>{users.map(u => <option key={u.id} value={u.id}>{u.full_name || u.username}</option>)}</select></label>
+          <label className="block"><span className={`text-[10px] uppercase font-bold ${muted}`}>Lead Time</span><select value={leadDays} onChange={e => setLeadDays(e.target.value)} className={input}><option value="30">30 days before due</option><option value="15">15 days before due</option><option value="7">7 days before due</option><option value="0">On due date</option></select></label>
+          <div className="flex items-end"><button onClick={runAutomation} disabled={running || !plan} className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold disabled:opacity-60"><Zap size={14}/>{running ? 'Creating practice tasks…' : 'Automate CS Practice'}</button></div>
+        </div>
+        <label className="inline-flex items-center gap-2 mt-3 text-xs cursor-pointer"><input type="checkbox" checked={includeReview} onChange={e => setIncludeReview(e.target.checked)} /> Include event-based / review tasks</label>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+        {[
+          ['Total', summary.total, FileText], ['Completed', summary.completed, CheckCircle2], ['Pending', summary.pending, Clock3], ['Due ≤ 30 days', summary.due_30_days, CalendarDays], ['Overdue', summary.overdue, AlertTriangle],
+        ].map(([label, value, Icon]) => <div key={label} className={`rounded-xl border p-3 ${cardStyle(isDark)}`}><div className={`text-[10px] uppercase font-bold ${muted}`}>{label}</div><div className={`text-xl font-bold mt-1 ${text}`}>{value}</div><Icon size={14} className={`mt-1 ${label === 'Overdue' && value ? 'text-red-500' : 'text-blue-500'}`}/></div>)}
+      </div>
+
+      <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+        <div className={`px-4 py-3 border-b flex items-center justify-between ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+          <div><h3 className={`font-semibold text-sm ${text}`}>Automated Secretarial Work-Plan</h3><p className={`text-[11px] ${muted}`}>{plan?.financial_year || fy} · {plan?.items?.length || 0} workflow items</p></div>
+          <div className="flex items-center gap-2 text-[10px] font-semibold"><UsersRound size={13}/>{tasks?.tasks?.length || 0} tasks pushed to Taskosphere</div>
+        </div>
+        {loading && !plan ? <div className={`p-8 text-center text-sm ${muted}`}>Building compliance work-plan…</div> : (
+          <div className="divide-y divide-slate-200 dark:divide-slate-700">
+            {(plan?.items || []).map(item => {
+              const task = (tasks?.tasks || []).find(t => t.roc_automation_key === item.key);
+              return <div key={item.key} className={`px-4 py-3 flex items-center gap-3 ${isDark ? 'bg-slate-900/20' : 'bg-white'}`}>
+                <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${item.event_based ? 'bg-amber-100 text-amber-700' : 'bg-blue-50 text-blue-600'}`}><CalendarDays size={14}/></div>
+                <div className="min-w-0 flex-1"><div className={`text-xs font-semibold ${text}`}>{item.title}</div><div className={`text-[10px] mt-0.5 ${muted}`}>{item.form || item.category} · {item.frequency}{item.due_date ? ` · Planned due ${new Date(item.due_date).toLocaleDateString('en-IN')}` : ' · Event-based review'}</div></div>
+                <span className={`hidden sm:inline-flex px-2 py-1 rounded-full border text-[9px] font-bold ${task ? statusClass(task.status) : item.task_created ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-slate-500 bg-slate-50 border-slate-200'}`}>{task ? (task.status || 'pending') : item.task_created ? 'Created' : 'Plan only'}</span>
+              </div>;
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className={`rounded-xl border p-3 text-[10px] ${isDark ? 'border-amber-900/50 bg-amber-950/20 text-amber-200' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+        <b>CS practice safeguard:</b> this engine creates internal work-planning tasks and document/data chases. It does not certify legal applicability or submit forms to MCA automatically. Verify current MCA rules, actual event dates, client facts and filing prerequisites before submission.
+      </div>
+    </div>
+  );
+}
+
+function cardStyle(isDark) {
+  return isDark ? 'bg-slate-800/60 border-slate-700' : 'bg-white border-slate-200';
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
