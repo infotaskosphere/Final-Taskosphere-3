@@ -296,23 +296,6 @@ async def _do_lan_scan(
 
 # ─── ADMS COMMAND QUEUE HELPERS ──────────────────────────────────────────────
 
-# SECURITY / CLOCK-SAFETY GUARD
-# Only these command families are currently allowed to be delivered to an
-# Identix/ZKTeco machine by Taskosphere.  In particular, NEVER deliver
-# historical SET TIME / SET OPTIONS / configuration commands that may still
-# exist in MongoDB from an older application version.  Those commands can
-# change the physical machine clock when the device polls /iclock/getrequest.
-_ALLOWED_ADMS_COMMAND_PREFIXES = (
-    "DATA UPDATE USERINFO",
-    "DATA QUERY FINGERTMP",
-)
-
-
-def _is_safe_adms_command(cmd_str: Any) -> bool:
-    text = str(cmd_str or "").strip().upper()
-    return any(text.startswith(prefix) for prefix in _ALLOWED_ADMS_COMMAND_PREFIXES)
-
-
 async def _next_seq_id(sn: str) -> int:
     """Monotonically increasing sequence ID per device for ADMS command IDs."""
     counter = await db.counters.find_one_and_update(
@@ -354,80 +337,6 @@ async def _queue_user_cmd(sn: str, identix_uid: int, name: str, user_id: str):
         "sent_at":       None,
     })
     logger.info(f"📥 Queued user cmd for SN={sn} uid={identix_uid} name={safe_name}")
-
-
-async def _queue_fingerprint_query(sn: str, identix_uid: int, user_id: Optional[str] = None):
-    """Ask the ADMS device to upload all fingerprints for one employee.
-
-    The device returns the templates through /iclock/cdata.  We never persist
-    the biometric template itself; _process_fingerprint_uploads() stores only
-    fingerprint slot/status metadata.
-    """
-    if not sn or identix_uid is None:
-        return None
-    seq = await _next_seq_id(sn)
-    cmd_str = f"DATA QUERY FINGERTMP PIN={identix_uid}"
-    await db.identix_cmd_queue.insert_one({
-        "cmd_id":        str(uuid.uuid4()),
-        "seq_id":        seq,
-        "device_serial": sn,
-        "cmd_str":        cmd_str,
-        "status":        "pending",
-        "created_at":    datetime.now(timezone.utc).isoformat(),
-        "sent_at":       None,
-        "user_id":       user_id,
-        "identix_uid":   identix_uid,
-        "purpose":       "fingerprint_reconcile",
-    })
-    logger.info(f"🖐️ Queued fingerprint query for SN={sn} PIN={identix_uid}")
-    return seq
-
-
-async def _prepare_fingerprint_reconciliation(sn: str):
-    """Queue a one-time fingerprint reconciliation for existing employees.
-
-    Existing employees may have been enrolled on the physical machine before
-    Taskosphere started tracking fingerprint events. Querying FINGERTMP asks
-    the device to send those existing templates through ADMS so the enrollment
-    tab can be brought up to date without re-pushing or re-enrolling users.
-    """
-    if not sn:
-        return 0
-
-    users = await db.users.find(
-        {
-            "is_active": {"$ne": False},
-            "identix_uid": {"$exists": True, "$ne": None},
-        },
-        {"_id": 0, "id": 1, "identix_uid": 1},
-    ).to_list(5000)
-
-    queued = 0
-    for user in users:
-        try:
-            identix_uid = int(user.get("identix_uid"))
-        except (TypeError, ValueError):
-            continue
-
-        # Reset only the local machine-derived fingerprint state before the
-        # query. If the machine has no fingerprint, the employee correctly
-        # remains "Not Added" after reconciliation.
-        await db.users.update_one(
-            {"id": user["id"]},
-            {"$set": {
-                "identix_fingerprint_fids": [],
-                "identix_fingerprint_count": 0,
-                "fingerprint_source": "machine_reconcile",
-                "fingerprint_reconcile_requested_at": datetime.now(timezone.utc).isoformat(),
-            }},
-        )
-        await _queue_fingerprint_query(sn, identix_uid, user.get("id"))
-        queued += 1
-
-    logger.info(
-        f"🔄 Existing fingerprint reconciliation queued | SN={sn} | employees={queued}"
-    )
-    return queued
 
 
 async def _queue_user_to_all_devices(user_doc: dict) -> int:
@@ -478,13 +387,11 @@ async def sync_user_to_identix_devices(user_doc: dict):
 
         queued = await _queue_user_to_all_devices(user_doc)
         if queued:
-            # Do not mark the user as synced merely because a command was queued.
-            # The real device state is confirmed by /iclock/devicecmd Return=0.
             await db.users.update_one(
                 {"id": user_doc["id"]},
-                {"$set": {"identix_enrolled": False}},
+                {"$set": {"identix_enrolled": True}},
             )
-            logger.info(f"📤 User {user_doc.get('full_name')} queued for {queued} device(s); waiting for device ACK")
+            logger.info(f"✅ User {user_doc.get('full_name')} queued for {queued} device(s)")
         else:
             logger.warning(f"No devices with serial numbers found to queue user {user_doc.get('full_name')}")
 
@@ -874,16 +781,9 @@ async def _mirror_machine_punch(
             existing_att.get("punch_out") if existing_att else None
         )
 
-        # STRICT SINGLE PUNCH-OUT RULE:
-        # Once any punch-out has been recorded for the day, the biometric
-        # device must never overwrite it with another OUT event. A second
-        # punch-out is allowed only after an administrator explicitly edits
-        # or resets the previous punch-out through the admin attendance flow.
-        if current_out is not None:
-            logger.warning(
-                "Ignoring duplicate machine OUT | user=%s date=%s existing=%s incoming=%s serial=%s",
-                user_id, date_str, current_out, punch_dt_utc, device_serial,
-            )
+        # Keep the latest OUT punch of the day. This handles a user pressing
+        # OUT more than once while preserving the real end-of-day punch.
+        if current_out is not None and punch_dt_utc <= current_out:
             return False
 
         punch_in_dt = _read_attendance_datetime(
@@ -893,8 +793,6 @@ async def _mirror_machine_punch(
         update_fields = {
             "status": "present",
             "punch_out": punch_dt_utc,
-            "punch_out_source": "machine",
-            "punch_out_device_serial": device_serial,
             "source": source,
             "device_name": device_name,
             "device_serial": device_serial,
@@ -1063,7 +961,6 @@ async def test_device(
     }
 
 
-
 @identix_router.post("/devices/{device_id}/sync-users")
 async def sync_users_to_device(
     device_id: str,
@@ -1091,10 +988,8 @@ async def sync_users_to_device(
     if not sn:
         raise HTTPException(status_code=400, detail="Device has no serial number configured")
 
-    batch_id = str(uuid.uuid4())
     queued = 0
     failed = 0
-    command_ids = []
     for u in all_users:
         try:
             identix_uid = u.get("identix_uid")
@@ -1115,45 +1010,8 @@ async def sync_users_to_device(
                         "thumb_enrolled":   False,
                     }},
                 )
-            # Do not create duplicate pending/sent commands for the same user
-            # when the operator double-clicks Sync Users.
-            existing = await db.identix_cmd_queue.find_one({
-                "device_serial": sn,
-                "identix_uid": int(identix_uid),
-                "status": {"$in": ["pending", "sent"]},
-            }, {"_id": 0, "cmd_id": 1})
-            if existing:
-                command_ids.append(existing.get("cmd_id"))
-                queued += 1
-                continue
-
-            safe_name = (u.get("full_name") or "")[:24].replace("\t", " ").replace("\n", " ")
-            seq = await _next_seq_id(sn)
-            cmd_id = str(uuid.uuid4())
-            cmd_str = (
-                f"DATA UPDATE USERINFO PIN={int(identix_uid)}\t"
-                f"Name={safe_name}\t"
-                f"Privilege=0\tPassword=\tCard=0\tGroup=1"
-            )
-            await db.identix_cmd_queue.insert_one({
-                "cmd_id": cmd_id,
-                "seq_id": seq,
-                "device_serial": sn,
-                "identix_uid": int(identix_uid),
-                "user_id": u.get("id"),
-                "user_name": u.get("full_name", ""),
-                "batch_id": batch_id,
-                "cmd_str": cmd_str,
-                "status": "pending",
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "sent_at": None,
-                "acknowledged_at": None,
-                "return_code": None,
-            })
-            logger.info(f"📥 Queued user cmd batch={batch_id} SN={sn} uid={identix_uid} name={safe_name}")
-            command_ids.append(cmd_id)
-            # The device must ACK Return=0 before this is shown as Synced.
-            await db.users.update_one({"id": u["id"]}, {"$set": {"identix_enrolled": False}})
+            await _queue_user_cmd(sn, identix_uid, u.get("full_name", ""), u.get("id", ""))
+            await db.users.update_one({"id": u["id"]}, {"$set": {"identix_enrolled": True}})
             queued += 1
         except Exception as eq:
             logger.warning(f"Failed to queue user {u.get('full_name')}: {eq}")
@@ -1163,9 +1021,7 @@ async def sync_users_to_device(
         "success": True,
         "synced":  queued,
         "failed":  failed,
-        "batch_id": batch_id,
-        "command_ids": command_ids,
-        "message": f"Queued {queued} user(s) for ADMS push to {device.get('name')}. Waiting for the machine's ADMS polling cycle.",
+        "message": f"Queued {queued} user(s) for ADMS push to {device.get('name')}. Machine will receive commands on next poll (up to 1 min).",
     }
 
 
@@ -1500,33 +1356,10 @@ async def get_identix_users(current_user: User = Depends(require_admin())):
             "identix_uid": 1,
             "identix_enrolled": 1,
             "thumb_enrolled": 1,
-            "identix_fingerprint_fids": 1,
-            "identix_fingerprint_count": 1,
-            "fingerprint_last_enrolled_at": 1,
-            "fingerprint_last_seen_at": 1,
-            "fingerprint_source": 1,
-            "fingerprint_reconcile_requested_at": 1,
             "created_at": 1,
         },
     ).to_list(500)
     return {"users": users}
-
-
-@identix_router.post("/users/reconcile-fingerprints")
-async def reconcile_existing_fingerprints(
-    current_user: User = Depends(require_admin()),
-):
-    """Manually re-fetch fingerprints for all existing employees from devices."""
-    devices = await db.identix_devices.find({"is_active": True}, {"_id": 0, "serial_number": 1}).to_list(50)
-    total = 0
-    for device in devices:
-        sn = _normalize_serial_number(device.get("serial_number", ""))
-        if sn:
-            total += await _prepare_fingerprint_reconciliation(sn)
-    return {
-        "queued": total,
-        "message": f"Queued fingerprint reconciliation for {total} employee/device pair(s).",
-    }
 
 
 @identix_router.patch("/users/{user_id}/thumb-enrolled")
@@ -1536,11 +1369,7 @@ async def mark_thumb_enrolled(
 ):
     result = await db.users.find_one_and_update(
         {"id": user_id},
-        {"$set": {
-            "thumb_enrolled": True,
-            "fingerprint_source": "manual",
-            "fingerprint_last_enrolled_at": datetime.now(timezone.utc).isoformat(),
-        }},
+        {"$set": {"thumb_enrolled": True}},
         return_document=True,
     )
     if not result:
@@ -1579,7 +1408,7 @@ async def sync_single_user_to_devices(
     queued = await _queue_user_to_all_devices(user)
     await db.users.update_one(
         {"id": user_id},
-        {"$set": {"identix_enrolled": False}},
+        {"$set": {"identix_enrolled": True}},
     )
     return {
         "message": f"{user.get('full_name')} queued for push to {queued} device(s). Machine will receive the command on next poll.",
@@ -1624,6 +1453,26 @@ async def _find_device_by_serial(sn: Optional[str], projection: Optional[dict] =
     )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# HARD CLOCK-SAFETY BOUNDARY
+# ─────────────────────────────────────────────────────────────────────────────
+# Taskosphere must never change the physical X2008 clock.  The ADMS protocol
+# has explicit clock-setting commands (for example SET OPTIONS DateTime=...
+# and ServerTZ=...).  Older application versions may also have left such
+# commands in MongoDB.  Only known attendance-management commands are allowed
+# through to the terminal.
+_CLOCK_MUTATION_RE = re.compile(
+    r"(?i)\b(?:SET\s+OPTIONS\s+(?:DATETIME|SERVERTZ)|SET\s+(?:TIME|DATETIME|CLOCK)|"
+    r"SYNC(?:TIME|HRONIZE)?|NTP|TIMEZONE)\b"
+)
+
+
+def _is_safe_adms_command(cmd: Any) -> bool:
+    text = str(cmd or "").strip()
+    if not text:
+        return False
+    return _CLOCK_MUTATION_RE.search(text) is None
+
 
 # 🔹 Device handshake (VERY IMPORTANT)
 async def _mark_device_online(sn: str):
@@ -1639,9 +1488,8 @@ async def _mark_device_online(sn: str):
         return
 
     # Also repair the stored serial once we have a valid registration.
-    device_filter = {"id": device.get("id")} if device.get("id") else {"serial_number": device.get("serial_number")}
     await db.identix_devices.update_one(
-        device_filter,
+        {"id": device.get("id")} if device.get("id") else {"serial_number": device.get("serial_number")},
         {"$set": {
             "serial_number": canonical,
             "last_heartbeat_at": now,
@@ -1649,23 +1497,6 @@ async def _mark_device_online(sn: str):
         }},
     )
     logger.info(f"✅ Device {canonical} marked online (received SN={sn!r})")
-
-    # Existing employees may already have fingerprints on the machine from
-    # before Taskosphere started listening for EnrollFP/ChgFP events. Trigger
-    # one automatic reconciliation per device registration. The atomic update
-    # prevents every heartbeat/cdata request from queuing the same queries.
-    reconcile_claim = await db.identix_devices.find_one_and_update(
-        {
-            **device_filter,
-            "fingerprint_reconcile_queued_at": {"$exists": False},
-        },
-        {"$set": {"fingerprint_reconcile_queued_at": now}},
-        projection={"_id": 0, "id": 1, "serial_number": 1},
-        return_document=True,
-    )
-    if reconcile_claim:
-        asyncio.create_task(_prepare_fingerprint_reconciliation(canonical))
-
 
 
 @identix_router.api_route("/iclock/getrequest", methods=["GET", "POST"])
@@ -1702,22 +1533,19 @@ async def iclock_getrequest(request: Request):
             seq = cmd.get("seq_id", 1)
             cmd_str = cmd.get("cmd_str", "")
 
-            # HARD CLOCK-SAFETY BOUNDARY: never send an unknown/historical
-            # command to the physical terminal.  Older versions of the app
-            # could leave SET TIME / SET OPTIONS commands in MongoDB; if those
-            # were returned here, the machine would execute them as soon as it
-            # polled this endpoint.
+            # Never allow a queued clock/timezone mutation to reach the X2008.
             if not _is_safe_adms_command(cmd_str):
                 await db.identix_cmd_queue.update_one(
-                    {"device_serial": sn, "seq_id": seq, "status": "pending"},
+                    {"cmd_id": cmd.get("cmd_id"), "status": "pending"},
                     {"$set": {
                         "status": "blocked",
-                        "blocked_reason": "Command type is not allowed; clock/configuration writes are disabled",
+                        "blocked_reason": "Clock/timezone mutation blocked by X2008 clock-safety policy",
                         "blocked_at": datetime.now(timezone.utc).isoformat(),
                     }},
                 )
                 logger.warning(
-                    f"🛑 BLOCKED unsafe ADMS command for SN={sn} seq={seq}: {cmd_str[:120]!r}"
+                    f"🛑 BLOCKED clock-changing ADMS command for SN={sn} "
+                    f"seq={seq}: {cmd_str[:160]!r}"
                 )
                 continue
 
@@ -1744,116 +1572,6 @@ async def iclock_getrequest(request: Request):
         "X-Push-Content":       "attlog",
     })
 
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# BIOMETRIC ENROLLMENT PUSH PARSER
-# ZKTeco/Identix ADMS sends fingerprint templates through /iclock/cdata with
-# table=OPERLOG.  Records have the form:
-#   FP PIN=2\tFID=0\tSize=1124\tValid=1\tTMP=<base64>
-# We deliberately do NOT persist the biometric template itself.  We only keep
-# the enrolled fingerprint slot(s) and timestamps needed by the UI.
-# ─────────────────────────────────────────────────────────────────────────────
-async def _mark_fingerprint_seen_from_verify_mode(user: Optional[dict], verify_mode: Any) -> bool:
-    """Infer fingerprint presence from a successful attendance verification.
-
-    ADMS verify mode 1 is fingerprint; several firmware variants also report
-    combined modes containing fingerprint (5, 6, 8, 9, 10, 12, 13, 14).
-    This does not claim which finger was used; it only confirms that the device
-    has a usable fingerprint template for this employee.
-    """
-    if not user:
-        return False
-    try:
-        mode = int(str(verify_mode).strip())
-    except (TypeError, ValueError):
-        return False
-    if mode not in {1, 5, 6, 8, 9, 10, 12, 13, 14}:
-        return False
-    now = datetime.now(timezone.utc).isoformat()
-    await db.users.update_one(
-        {"id": user["id"]},
-        {"$set": {
-            "thumb_enrolled": True,
-            "fingerprint_source": "attendance_verify",
-            "fingerprint_last_seen_at": now,
-        }},
-    )
-    return True
-
-async def _process_fingerprint_uploads(sn: str, raw: str, params: dict) -> int:
-    table = str(params.get("table") or "").strip().upper()
-    if table not in {"OPERLOG", "FP", "FINGERTMP"} and not re.search(r"(?m)^(?:FP|FINGERTMP)\s+PIN=", raw):
-        return 0
-
-    # TMP may be very large, so only parse the header.  The template is never
-    # stored in MongoDB.  The lookahead stops at the next FP record or EOF.
-    pattern = re.compile(
-        r"(?m)^(?:FP|FINGERTMP)\s+PIN=(?P<pin>[^\t\s]+)\s*\t"
-        r"(?:FID|FingerID)=(?P<fid>\d+)\s*\t"
-        r"Size=(?P<size>\d+)\s*\t"
-        r"Valid=(?P<valid>[01])\s*\t(?:TMP|Template)=",
-        re.IGNORECASE,
-    )
-    matches = list(pattern.finditer(raw))
-    if not matches:
-        # A few firmware versions use spaces instead of tabs between fields.
-        pattern = re.compile(
-            r"(?m)^(?:FP|FINGERTMP)\s+PIN=(?P<pin>[^\t\s]+)\s+"
-            r"(?:FID|FingerID)=(?P<fid>\d+)\s+"
-            r"Size=(?P<size>\d+)\s+"
-            r"Valid=(?P<valid>[01])\s+(?:TMP|Template)=",
-            re.IGNORECASE,
-        )
-        matches = list(pattern.finditer(raw))
-
-    processed = 0
-    now = datetime.now(timezone.utc).isoformat()
-    for match in matches:
-        pin = match.group("pin").strip()
-        fid = int(match.group("fid"))
-        size = int(match.group("size"))
-        valid = match.group("valid") == "1"
-        if not pin or size <= 0:
-            continue
-
-        user = await _find_identix_user(pin)
-        if not user:
-            logger.warning(
-                f"⚠️ Fingerprint upload from SN={sn} for unknown Identix PIN={pin}"
-            )
-            continue
-
-        current = await db.users.find_one(
-            {"id": user["id"]},
-            {"_id": 0, "identix_fingerprint_fids": 1},
-        )
-        fids = {int(x) for x in (current or {}).get("identix_fingerprint_fids", []) if str(x).isdigit()}
-        if valid:
-            fids.add(fid)
-        else:
-            fids.discard(fid)
-
-        update = {
-            "identix_fingerprint_fids": sorted(fids),
-            "identix_fingerprint_count": len(fids),
-            # Keep the existing UI field for backward compatibility.
-            "thumb_enrolled": bool(fids),
-            "fingerprint_source": "machine_push",
-            "fingerprint_last_seen_at": now,
-        }
-        if valid:
-            update["fingerprint_last_enrolled_at"] = now
-            update["fingerprint_last_fid"] = fid
-
-        await db.users.update_one({"id": user["id"]}, {"$set": update})
-        processed += 1
-        logger.info(
-            f"🖐️ Fingerprint {'enrolled' if valid else 'removed'} | "
-            f"SN={sn} PIN={pin} FID={fid} total={len(fids)}"
-        )
-
-    return processed
 
 
 # 🔹 Main attendance data endpoint — ADMS cloud push (machine → Render)
@@ -1919,25 +1637,16 @@ async def iclock_cdata(request: Request):
                 "TransTimes=00:00;23:59",
                 "TransInterval=1",
                 "TransFlag=TransData AttLog\tOpLog\tEnrollUser\tChgUser\tEnrollFP\tChgFP\tFPImag",
-                # NOTE: Do NOT send "TimeZone=5.5" here. The ZKTeco/Identix ADMS
-                # PUSH SDK spec defines TimeZone as a whole-number GMT offset —
-                # it has no field for the half-hour component of India's
-                # +5:30 (IST) offset. Embedded firmware parses this value with
-                # an integer-only parser, which silently truncates "5.5" to
-                # "5" on every options=all handshake (device restart/reconnect/
-                # periodic re-registration). That truncation re-applies a
-                # 30-minute-short offset each time, which is exactly why
-                # punches were logging ~30 minutes earlier than the real
-                # punch time (e.g. 10:28 actual showing as ~9:58). Omitting
-                # this line stops the server from repeatedly pushing that bad
-                # value; the device's own Date/Time (set once on the machine
-                # itself to GMT+5:30, India) is what should govern its clock.
+                # X2008 clock-safety: DO NOT send TimeZone=5.5 here.
+                # Some X2008/ADMS firmware interprets the options block as a
+                # device configuration write and can coerce +05:30 to +05:00,
+                # producing the exact 30-minute clock regression seen in India.
+                # Leaving TimeZone absent preserves the manually configured
+                # machine timezone.  SyncTime=0 disables periodic server-time
+                # synchronization while retaining normal ADMS attendance push.
+                "SyncTime=0",
                 "Realtime=1",
                 "Encrypt=None",
-                # ADMS firmware expects the response terminator used by the
-                # PUSH protocol. Without this final 0 some terminals keep
-                # repeating /iclock/cdata?options=all and never enter the
-                # /iclock/getrequest polling cycle.
                 "0",
             ]
             return PlainTextResponse(
@@ -1949,11 +1658,6 @@ async def iclock_cdata(request: Request):
             logger.info(f"📡 Identix handshake from SN={sn}")
             return "OK\n"
 
-        # Fingerprint enrollment/change events are pushed through the same
-        # cdata endpoint as attendance logs. Process them first so they are
-        # not mistaken for attendance rows.
-        fingerprint_events = await _process_fingerprint_uploads(sn, raw, params)
-
         lines = [line.strip() for line in raw.splitlines() if line.strip()]
         logger.info(
             f"✅ Identix push received | SN={sn} | lines={len(lines)} | params={params}"
@@ -1963,13 +1667,6 @@ async def iclock_cdata(request: Request):
         mirrored = 0
         skipped = 0
         invalid = 0
-
-        # A pure biometric upload contains no attendance rows. ACK it after
-        # updating enrollment state; do not try to parse the base64 template as
-        # an attendance timestamp.
-        if fingerprint_events and str(params.get("table") or "").strip().upper() in {"OPERLOG", "FP", "FINGERTMP"} and not re.search(r"(?m)^\s*\d+\t\d{4}-\d{2}-\d{2} ", raw):
-            logger.info(f"Identix fingerprint push complete | SN={sn} | events={fingerprint_events}")
-            return f"OK: {fingerprint_events}\n"
 
         for line in lines:
             parts = line.split("\t")
@@ -2002,8 +1699,6 @@ async def iclock_cdata(request: Request):
                 continue
 
             user = await _find_identix_user(device_user_id)
-            verify_mode_raw = parts[3].strip() if len(parts) > 3 else ""
-            await _mark_fingerprint_seen_from_verify_mode(user, verify_mode_raw)
             event_id = _machine_event_id(
                 sn, device_user_id, punch_time_raw, punch_type, punch_code
             )
@@ -2041,7 +1736,7 @@ async def iclock_cdata(request: Request):
                 punch_time_raw=punch_time_raw,
                 punch_type=punch_type,
                 punch_code=punch_code,
-                verify_mode=verify_mode_raw or 0,
+                verify_mode=parts[3].strip() if len(parts) > 3 else 0,
                 source="machine_push",
                 user=user,
             )
@@ -2092,24 +1787,14 @@ async def iclock_cdata(request: Request):
 @identix_router.get("/cmd-queue")
 async def get_cmd_queue(
     status: Optional[str] = None,
-    device_serial: Optional[str] = None,
-    batch_id: Optional[str] = None,
     current_user: User = Depends(require_admin()),
 ):
-    """View ADMS commands with optional real-time sync filters."""
+    """View pending/sent ADMS commands queued for devices."""
     query = {}
     if status:
         query["status"] = status
-    if device_serial:
-        query["device_serial"] = _normalize_serial_number(device_serial)
-    if batch_id:
-        query["batch_id"] = batch_id
-    cmds = await db.identix_cmd_queue.find(query, {"_id": 0}).sort("created_at", -1).limit(1000).to_list(1000)
-    counts = {}
-    for c in cmds:
-        key = c.get("status", "unknown")
-        counts[key] = counts.get(key, 0) + 1
-    return {"commands": cmds, "total": len(cmds), "counts": counts}
+    cmds = await db.identix_cmd_queue.find(query, {"_id": 0}).sort("created_at", -1).limit(100).to_list(100)
+    return {"commands": cmds, "total": len(cmds)}
 
 
 @identix_router.delete("/cmd-queue")
@@ -2183,8 +1868,7 @@ async def iclock_devicecmd(request: Request):
 
         if seq_id is not None and sn:
             matching = await db.identix_cmd_queue.find_one(
-                {"device_serial": sn, "seq_id": seq_id},
-                {"_id": 0, "cmd_id": 1, "cmd_str": 1, "user_id": 1, "identix_uid": 1},
+                {"device_serial": sn, "seq_id": seq_id}, {"_id": 0, "cmd_id": 1}
             )
             if matching:
                 success = str(return_code).strip() == "0"
@@ -2196,35 +1880,6 @@ async def iclock_devicecmd(request: Request):
                         "acknowledged_at": datetime.now(timezone.utc).isoformat(),
                     }},
                 )
-
-
-                # USERINFO command success is the authoritative proof that the
-                # employee record was accepted by the physical device.
-                if str(matching.get("cmd_str", "")).upper().startswith("DATA UPDATE USERINFO"):
-                    pin_match = re.search(r"\bPIN=(\d+)\b", matching.get("cmd_str", ""), re.IGNORECASE)
-                    if pin_match:
-                        try:
-                            pin_value = int(pin_match.group(1))
-                            sync_now = datetime.now(timezone.utc).isoformat()
-                            user_result = await db.users.find_one_and_update(
-                                {"identix_uid": pin_value},
-                                {"$set": {
-                                    "identix_enrolled": bool(success),
-                                    "identix_last_sync_at": sync_now,
-                                }},
-                                projection={"_id": 0, "id": 1, "identix_uid": 1},
-                                return_document=True,
-                            )
-                            if success and user_result:
-                                # The user record is now confirmed on the
-                                # device. Ask the device for any fingerprints
-                                # that were already enrolled before this push.
-                                await _queue_fingerprint_query(
-                                    sn, pin_value, user_result.get("id")
-                                )
-                        except Exception:
-                            pass
-
                 logger.info(
                     f"{'✅' if success else '❌'} Command seq={seq_id} SN={sn} "
                     f"marked {'acknowledged' if success else 'failed'} (Return={return_code})"
@@ -2243,33 +1898,30 @@ async def iclock_devicecmd(request: Request):
     if not device:
         return "OK\n"
 
-    pending_candidates = await db.identix_cmd_queue.find(
+    pending = await db.identix_cmd_queue.find_one(
         {"device_serial": sn, "status": "pending"},
-        {"_id": 1, "seq_id": 1, "cmd_str": 1},
-    ).sort("created_at", 1).to_list(50)
-
-    pending = None
-    for candidate in pending_candidates:
-        candidate_cmd = candidate.get("cmd_str", "")
-        if _is_safe_adms_command(candidate_cmd):
-            pending = candidate
-            break
-        await db.identix_cmd_queue.update_one(
-            {"_id": candidate["_id"], "status": "pending"},
-            {"$set": {
-                "status": "blocked",
-                "blocked_reason": "Command type is not allowed; clock/configuration writes are disabled",
-                "blocked_at": datetime.now(timezone.utc).isoformat(),
-            }},
-        )
-        logger.warning(
-            f"🛑 BLOCKED unsafe legacy ADMS command for SN={sn} seq={candidate.get('seq_id')}: {candidate_cmd[:120]!r}"
-        )
-
+        sort=[("created_at", 1)],
+    )
     if not pending:
         return "OK\n"
 
     cmd_str = pending.get("cmd_str", "")
+
+    # Final safety boundary: even if an unsafe command bypassed GETREQUEST,
+    # never return it from DEVICECMD to the physical X2008.
+    if not _is_safe_adms_command(cmd_str):
+        await db.identix_cmd_queue.update_one(
+            {"_id": pending["_id"]},
+            {"$set": {
+                "status": "blocked",
+                "blocked_reason": "Clock/timezone mutation blocked by X2008 clock-safety policy",
+                "blocked_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+        logger.warning(
+            f"🛑 BLOCKED clock-changing DEVICECMD for SN={sn}: {cmd_str[:160]!r}"
+        )
+        return "OK\n"
 
     # Mark as sent
     await db.identix_cmd_queue.update_one(
