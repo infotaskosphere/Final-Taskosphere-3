@@ -1957,19 +1957,13 @@ async def iclock_cdata(request: Request):
                 "TransTimes=00:00;23:59",
                 "TransInterval=1",
                 "TransFlag=TransData AttLog\tOpLog\tEnrollUser\tChgUser\tEnrollFP\tChgFP\tFPImag",
-                # NOTE: Do NOT send "TimeZone=5.5" here. The ZKTeco/Identix ADMS
-                # PUSH SDK spec defines TimeZone as a whole-number GMT offset —
-                # it has no field for the half-hour component of India's
-                # +5:30 (IST) offset. Embedded firmware parses this value with
-                # an integer-only parser, which silently truncates "5.5" to
-                # "5" on every options=all handshake (device restart/reconnect/
-                # periodic re-registration). That truncation re-applies a
-                # 30-minute-short offset each time, which is exactly why
-                # punches were logging ~30 minutes earlier than the real
-                # punch time (e.g. 10:28 actual showing as ~9:58). Omitting
-                # this line stops the server from repeatedly pushing that bad
-                # value; the device's own Date/Time (set once on the machine
-                # itself to GMT+5:30, India) is what should govern its clock.
+                # IMPORTANT: TimeZone is expressed in minutes on this ADMS
+                # firmware, not decimal hours. 330 = UTC+05:30 (IST).
+                # Sending 5.5 is parsed as 5 and makes every punch 30 minutes
+                # early. Omitting the option leaves the old incorrect timezone
+                # stored in the terminal, so it must be explicitly corrected
+                # during the handshake.
+                "TimeZone=330",
                 # Ask the terminal to synchronize its clock.  The type=time
                 # branch above returns an explicit IST wall-clock value, so the
                 # device never has to parse India's half-hour offset from the
