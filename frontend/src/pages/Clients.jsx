@@ -5053,6 +5053,22 @@ export default function Clients() {
     if (params.get("openAddClient") === "true") setDialogOpen(true);
   }, [location]);
 
+  // Open the client referenced by a notification deep-link. The client list
+  // loads in pages, so this effect also runs as background pages arrive.
+  useEffect(() => {
+    const clientId = new URLSearchParams(location.search).get("clientId");
+    if (!clientId || clients.length === 0) return;
+
+    const client = clients.find((item) => String(item.id) === String(clientId));
+    if (!client) return;
+
+    setSelectedClient(client);
+    setDetailDialogOpen(true);
+    // Consume the one-shot deep-link so closing the detail popup does not
+    // reopen it and the URL stays clean for refresh/bookmarking.
+    navigate(location.pathname, { replace: true });
+  }, [location, clients, navigate]);
+
   // ── Referrer sync ────────────────────────────────────────────────────────
   useEffect(() => {
     const val = formData.referred_by;
