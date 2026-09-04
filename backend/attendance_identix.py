@@ -526,6 +526,19 @@ _INDEX_READY = False
 _INDEX_LOCK = asyncio.Lock()
 
 
+def _machine_now_text() -> str:
+    """Return the current time in the terminal's local timezone.
+
+    Render runs on UTC.  Never format ``datetime.now()`` directly for an
+    Identix terminal: doing so makes the terminal receive UTC (or a partially
+    parsed timezone offset) and can shift punch times.  The ADMS time response
+    is deliberately a wall-clock value with no timezone suffix.
+    """
+    return datetime.now(timezone.utc).astimezone(MACHINE_TZ).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+
+
 async def _ensure_identix_indexes():
     """Create safe indexes used by the ADMS ingestion path once per process."""
     global _INDEX_READY
@@ -1887,13 +1900,17 @@ async def iclock_cdata(request: Request):
         sn = _normalize_serial_number(params.get("SN") or params.get("sn", ""))
         await _mark_device_online(sn)
 
-        # Manual-clock policy: if a firmware version explicitly asks the server
-        # for the current time, do not provide a server time value. Combined
-        # with SyncTime=0 above, this prevents Render/server time from replacing
-        # the time manually configured on the terminal.
+        # ADMS asks for the current time using type=time.  Render runs in UTC,
+        # so the response must be explicitly formatted in Asia/Kolkata.  A
+        # previous implementation returned only OK here and set SyncTime=0;
+        # that left the terminal's stale clock in place, which caused the
+        # reported 30-minute-late punches.
         if str(params.get("type") or "").strip().lower() == "time":
-            logger.info(f"⏱️ Ignoring device time-sync request from SN={sn}; manual clock policy is enabled")
-            return PlainTextResponse("OK\n", headers={
+            server_time = _machine_now_text()
+            logger.info(
+                f"⏱️ Sending IST device time to SN={sn}: {server_time}"
+            )
+            return PlainTextResponse(f"{server_time}\n", headers={
                 "Pragma": "no-cache",
                 "Cache-Control": "no-store",
             })
@@ -1953,10 +1970,11 @@ async def iclock_cdata(request: Request):
                 # this line stops the server from repeatedly pushing that bad
                 # value; the device's own Date/Time (set once on the machine
                 # itself to GMT+5:30, India) is what should govern its clock.
-                # CRITICAL: Keep the physical terminal clock under manual control.
-                # ZKTeco PUSH firmware uses SyncTime to periodically ask the server
-                # for the current clock time. 0 explicitly disables that process.
-                "SyncTime=0",
+                # Ask the terminal to synchronize its clock.  The type=time
+                # branch above returns an explicit IST wall-clock value, so the
+                # device never has to parse India's half-hour offset from the
+                # integer-only TimeZone option.
+                "SyncTime=1",
                 "Realtime=1",
                 "Encrypt=None",
                 # ADMS firmware expects the response terminator used by the
