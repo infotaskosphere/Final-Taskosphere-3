@@ -65,7 +65,10 @@ const TYPE_ROUTE_MAP = {
 
   // Client Proposals
   lead: "/leads",
-  follow_up_reminder: "/leads",
+  // Follow-up reminders are generated from the `clients` collection by the
+  // automation job, not from Leads. Keep the client reference from the
+  // notification message so the Clients page can open the exact record.
+  follow_up_reminder: "/clients",
   quotation: "/quotations",
   client_discussion: "/client-discussion",
 
@@ -109,6 +112,15 @@ const TYPE_ROUTE_MAP = {
 // Build the destination path for a notification click.
 const resolveNotificationPath = (n) => {
   const base = TYPE_ROUTE_MAP[n.type] || "/dashboard";
+
+  if (n.type === "follow_up_reminder") {
+    // Current reminders carry the client id as "(ref:<id>)". Older
+    // notifications without a reference still land on the Clients page.
+    const clientId = String(n.message || "").match(/\(ref:([^)]+)\)/)?.[1];
+    return clientId
+      ? `${base}?clientId=${encodeURIComponent(clientId)}`
+      : base;
+  }
 
   // Task-type notifications: deep-link straight into the task detail when we
   // have a task_id — Tasks.jsx already knows how to open `?taskId=`.
