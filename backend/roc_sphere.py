@@ -66,35 +66,6 @@ CLIENTS = db.clients
 
 COMPANY_CLIENT_TYPES = {"pvt_ltd", "PVT_LTD", "public_ltd", "section_8", "llp", "LLP", "opc"}
 
-CANONICAL_CATEGORIES = {"private", "public", "opc", "section_8", "llp"}
-
-
-def _normalize_client_type(raw: Any) -> Optional[str]:
-    """Best-effort normalization of a Client's client_type/constitution string
-    into one of the canonical ROC Sphere categories (private/public/opc/
-    section_8/llp).
-
-    The previous version matched client_type against a fixed, exact-case set
-    ({"llp", "LLP", ...}), so any client saved with a slightly different
-    casing or spacing -- "Llp", " llp", "LLP " from a CSV/MDS import, an
-    older client record, or manual entry -- was silently invisible to the
-    Clients -> ROC Sphere sync. That's what made LLP (and potentially other
-    registered-entity) clients show up as 0 in ROC Sphere even though they
-    were plainly visible and correctly typed on the Clients page. Every
-    match against a client's entity type should go through this function
-    instead of comparing raw strings.
-    """
-    if not raw:
-        return None
-    s = str(raw).strip().lower().replace("-", "_").replace(" ", "_")
-    return {
-        "pvt_ltd": "private", "private_limited": "private", "pvtltd": "private", "private": "private",
-        "public_ltd": "public", "public_limited": "public", "publicltd": "public", "public": "public",
-        "opc": "opc", "one_person_company": "opc",
-        "section_8": "section_8", "section8": "section_8", "sec_8": "section_8",
-        "llp": "llp", "limited_liability_partnership": "llp",
-    }.get(s)
-
 
 def _uid() -> str:
     return str(uuid.uuid4())
@@ -245,7 +216,6 @@ class RocCompanyIn(BaseModel):
     share_transfers: List[Dict[str, Any]] = Field(default_factory=list)
     share_certificates: List[Dict[str, Any]] = Field(default_factory=list)
     roc_form_uploads: List[Dict[str, Any]] = Field(default_factory=list)
-    filing_status: Dict[str, Dict[str, Any]] = Field(default_factory=dict)  # keyed by form name, see /filing-calendar
     auditor: Optional[Auditor] = None
     notes: Optional[str] = None
 
@@ -310,9 +280,8 @@ async def list_eligible_clients(current_user: User = Depends(VIEW)):
     """Clients that are registered entities (not proprietors) and don't yet
     have a ROC Sphere company master — used to populate the 'create from
     client' picker."""
-    cursor = CLIENTS.find({"client_type": {"$exists": True, "$nin": [None, ""]}})
-    all_clients = [c async for c in cursor]
-    clients = [c for c in all_clients if _normalize_client_type(c.get("client_type"))]
+    cursor = CLIENTS.find({"client_type": {"$in": list(COMPANY_CLIENT_TYPES)}})
+    clients = [c async for c in cursor]
     existing = {c["client_id"] async for c in COMPANIES.find({"client_id": {"$ne": None}}, {"client_id": 1}) if c.get("client_id")}
     out = []
     for c in clients:
@@ -329,63 +298,74 @@ async def list_eligible_clients(current_user: User = Depends(VIEW)):
     return out
 
 
-async def _sync_companies_from_clients() -> Dict[str, int]:
+CLIENT_CATEGORY_MAP = {
+    "pvt_ltd": "private", "PVT_LTD": "private",
+    "private_limited": "private", "private_limited_company": "private",
+    "public_ltd": "public", "public_limited": "public", "public_limited_company": "public",
+    "section_8": "section_8", "section8": "section_8", "section_8_company": "section_8",
+    "llp": "llp", "LLP": "llp", "limited_liability_partnership": "llp",
+    "opc": "opc", "one_person_company": "opc",
+}
+
+
+def _normalize_roc_category(company: dict, client: Optional[dict] = None) -> str:
+    """Return the reliable ROC entity category for legacy and imported records.
+
+    Older ROC records can have category='private' even when the underlying
+    client was imported as LLP.  LLPIN/master-data/name are stronger signals
+    than that stale category, so they are checked first.
+    """
+    name = str(company.get("company_name") or "").strip().lower()
+    llpin = str(company.get("llpin") or "").strip()
+    master = company.get("master_data") or {}
+    if not llpin:
+        llpin = str(master.get("llpin") or master.get("llpin_number") or "").strip()
+
+    raw_client_type = str((client or {}).get("client_type") or "").strip().lower().replace("-", "_").replace(" ", "_")
+    mapped_client_type = CLIENT_CATEGORY_MAP.get(raw_client_type)
+
+    # An LLP suffix / LLPIN is definitive for this filter. This deliberately
+    # overrides a stale 'private' category on old records.
+    if llpin or name.endswith(" llp") or name.endswith("llp") or " limited liability partnership" in name:
+        return "llp"
+    if mapped_client_type:
+        return mapped_client_type
+
+    raw = str(company.get("category") or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return CLIENT_CATEGORY_MAP.get(raw, raw or "private")
+
+
+async def _sync_companies_from_clients() -> int:
     """Auto-provision a ROC Sphere company master for every Client record
     that is a registered entity (Pvt/Public Ltd, LLP, OPC, Section 8) and
     doesn't have one yet, prefilled from that client's CIN/PAN/address/
-    incorporation date. Existing ROC Sphere records are never touched on
-    fields the user has since edited -- this only fills the gap for clients
-    that have no linked record at all.
-
-    It also runs a lightweight repair pass over already-linked companies
-    whose `category` is missing or isn't one of the five canonical values
-    (private/public/opc/section_8/llp) -- e.g. records created before the
-    client_type matching was made case/format-tolerant -- and re-derives it
-    from the linked client. That repair is what fixes accounts where LLP (or
-    another type) was stuck at 0 even after re-syncing, because the company
-    record already existed with a stale/blank category and a plain "create
-    if missing" sync could never touch it again.
-
-    Returns {"created": n, "repaired": m}.
+    incorporation date. Existing ROC Sphere records (and anything a user
+    has since edited on them) are never touched -- this only fills the gap
+    for clients that have no linked record at all. Returns count created.
     """
-    cursor = CLIENTS.find({"client_type": {"$exists": True, "$nin": [None, ""]}})
-    all_clients = [c async for c in cursor]
-    clients = [c for c in all_clients if _normalize_client_type(c.get("client_type"))]
+    cursor = CLIENTS.find({"client_type": {"$in": list(COMPANY_CLIENT_TYPES)}})
+    clients = [c async for c in cursor]
+    if not clients:
+        return 0
     existing_client_ids = {
         c["client_id"]
         async for c in COMPANIES.find({"client_id": {"$ne": None}}, {"client_id": 1})
         if c.get("client_id")
     }
     now = _now()
-
-    # ── Repair pass: fix category on already-linked companies that never
-    # got a valid canonical category ──────────────────────────────────────
-    repaired = 0
-    client_type_by_id = {c.get("id"): c.get("client_type") for c in all_clients if c.get("id")}
-    async for comp in COMPANIES.find({"client_id": {"$ne": None}}, {"id": 1, "client_id": 1, "category": 1}):
-        if comp.get("category") in CANONICAL_CATEGORIES:
-            continue
-        raw_type = client_type_by_id.get(comp.get("client_id"))
-        fixed = _normalize_client_type(raw_type)
-        if fixed:
-            await COMPANIES.update_one({"id": comp["id"]}, {"$set": {"category": fixed, "updated_at": now}})
-            repaired += 1
-
-    if not clients:
-        return {"created": 0, "repaired": repaired}
     new_docs = []
     for c in clients:
         cid = c.get("id")
         if not cid or cid in existing_client_ids:
             continue
         contact_people = c.get("contact_persons") or []
-        is_llp = _normalize_client_type(c.get("client_type")) == "llp"
+        is_llp = c.get("client_type") in ("llp", "LLP")
         new_docs.append({
             "id": _uid(),
             "client_id": cid,
             "company_name": c.get("company_name") or "Unnamed Company",
             "cin": c.get("cin"),
-            "category": _normalize_client_type(c.get("client_type")) or "private",
+            "category": CLIENT_CATEGORY_MAP.get(c.get("client_type"), "private"),
             "is_small_company": None,
             "listed": False,
             "roc_office": None,
@@ -418,7 +398,7 @@ async def _sync_companies_from_clients() -> Dict[str, int]:
         })
     if new_docs:
         await COMPANIES.insert_many(new_docs)
-    return {"created": len(new_docs), "repaired": repaired}
+    return len(new_docs)
 
 
 @router.get("/companies")
@@ -432,7 +412,26 @@ async def list_companies(
         query["company_name"] = {"$regex": re.escape(q), "$options": "i"}
     cursor = COMPANIES.find(query).sort("company_name", 1)
     items = [c async for c in cursor]
+
+    # Repair legacy ROC masters in-place. In particular, old records may have
+    # category='private' although their linked Client/name is an LLP. Doing
+    # this here makes the API response and the stored value agree, so the UI
+    # filter/count cannot show LLP (0) while LLP records are visible.
+    client_ids = [c.get("client_id") for c in items if c.get("client_id")]
+    clients_by_id = {}
+    if client_ids:
+        client_cursor = CLIENTS.find({"id": {"$in": client_ids}}, {"_id": 0})
+        clients_by_id = {c.get("id"): c async for c in client_cursor if c.get("id")}
+
     for c in items:
+        client = clients_by_id.get(c.get("client_id"))
+        normalized = _normalize_roc_category(c, client)
+        if c.get("category") != normalized:
+            await COMPANIES.update_one(
+                {"id": c.get("id")},
+                {"$set": {"category": normalized, "updated_at": _now()}},
+            )
+            c["category"] = normalized
         c.pop("_id", None)
     return items
 
@@ -442,8 +441,8 @@ async def sync_from_clients_endpoint(current_user: User = Depends(CREATE)):
     """Manual re-sync trigger (e.g. a 'Sync from Clients' button) -- same
     logic as the automatic sync on GET /companies, exposed separately so
     the UI can show how many were newly added after a bulk client import."""
-    result = await _sync_companies_from_clients()
-    return result
+    created = await _sync_companies_from_clients()
+    return {"created": created}
 
 
 @router.get("/companies/{company_id}")
@@ -2103,77 +2102,6 @@ async def get_applicable_compliances(company_id: str, current_user: User = Depen
             "fetched from uploaded Master Data or ROC Forms. Verify against the latest MCA "
             "notifications before relying on it for filing."
         ),
-    }
-
-
-# ─────────────────────────────────────────────────────────────────────────
-# FILING CALENDAR — aggregated, trackable filing status across every
-# company (Companies Act + LLP Act obligations, one master list)
-# ─────────────────────────────────────────────────────────────────────────
-
-class FilingStatusUpdate(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    status: str = "pending"       # pending | filed | not_applicable
-    filed_date: Optional[str] = None
-    remarks: Optional[str] = None
-
-
-@router.put("/companies/{company_id}/filing-status/{form_key}")
-async def set_filing_status(company_id: str, form_key: str, payload: FilingStatusUpdate,
-                             current_user: User = Depends(EDIT)):
-    """Mark a single compliance form (e.g. 'AOC-4', 'Form 8') filed/pending
-    for one company. Backs the Filing Calendar's mark-as-filed action."""
-    company = await COMPANIES.find_one({"id": company_id})
-    if not company:
-        raise HTTPException(404, "Company not found")
-    fs = company.get("filing_status") or {}
-    fs[form_key] = {
-        "status": payload.status,
-        "filed_date": payload.filed_date,
-        "remarks": payload.remarks,
-        "updated_by": _who(current_user),
-        "updated_at": _now().isoformat(),
-    }
-    await COMPANIES.update_one({"id": company_id}, {"$set": {"filing_status": fs, "updated_at": _now()}})
-    return fs[form_key]
-
-
-@router.get("/filing-calendar")
-async def get_filing_calendar(current_user: User = Depends(VIEW)):
-    """One master filing tracker across every company in ROC Sphere: every
-    currently-applicable Companies Act / LLP Act form, its due-date rule,
-    and whether it's been marked filed for this cycle -- so nothing has to
-    be opened company-by-company to see what's outstanding."""
-    await _sync_companies_from_clients()
-    items: List[Dict[str, Any]] = []
-    async for company in COMPANIES.find({}):
-        checklist = build_compliance_checklist(company)
-        fs = company.get("filing_status") or {}
-        for item in checklist:
-            if not item.get("applicable", True):
-                continue
-            status_entry = fs.get(item["form"]) or {}
-            items.append({
-                "company_id": company["id"],
-                "company_name": company.get("company_name"),
-                "category": company.get("category"),
-                "form": item["form"],
-                "particulars": item["particulars"],
-                "due_date_rule": item["due_date_rule"],
-                "frequency": item["frequency"],
-                "status": status_entry.get("status", "pending"),
-                "filed_date": status_entry.get("filed_date"),
-                "remarks": status_entry.get("remarks"),
-            })
-    freq_rank = {f: i for i, f in enumerate(FREQUENCY_GROUP_ORDER)}
-    items.sort(key=lambda x: (x["status"] == "filed", freq_rank.get(x["frequency"], 99), x["company_name"] or ""))
-    pending = sum(1 for i in items if i["status"] != "filed")
-    return {
-        "items": items,
-        "total": len(items),
-        "pending": pending,
-        "filed": len(items) - pending,
-        "generated_at": _now().isoformat(),
     }
 
 
