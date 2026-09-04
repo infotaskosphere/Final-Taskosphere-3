@@ -45,6 +45,24 @@ const CATEGORY_LABELS = {
   private: 'Private Limited', public: 'Public Limited', opc: 'One Person Company', section_8: 'Section 8 Company', llp: 'LLP',
 };
 
+// Legacy ROC records were sometimes stored as `private` even when the
+// company is an LLP. Keep the UI resilient to those records while the
+// backend repairs the persisted category.
+function getCompanyCategory(c) {
+  const raw = String(c?.category || '').trim().toLowerCase().replace(/[- ]+/g, '_');
+  const name = String(c?.company_name || '').trim().toLowerCase();
+  const llpin = String(c?.llpin || c?.master_data?.llpin || c?.master_data?.llpin_number || '').trim();
+  if (llpin || /(?:^|\s)llp$/.test(name) || name.includes(' limited liability partnership')) return 'llp';
+  const aliases = {
+    llp: 'llp', limited_liability_partnership: 'llp',
+    pvt_ltd: 'private', private_limited: 'private', private_limited_company: 'private',
+    public_ltd: 'public', public_limited: 'public', public_limited_company: 'public',
+    section_8: 'section_8', section8: 'section_8', section_8_company: 'section_8',
+    opc: 'opc', one_person_company: 'opc',
+  };
+  return aliases[raw] || raw || 'private';
+}
+
 // financial_data is filled only from AOC-4 uploads (see backend/roc_sphere.py
 // FINANCIAL_DATA_FIELDS) — kept read-only here since it's a filing extract,
 // not something the user hand-edits on this tab.
@@ -183,7 +201,7 @@ export default function ROCSpherePage() {
   const filteredCompanies = useMemo(() => {
     const q = search.toLowerCase();
     return companies.filter((c) => {
-      const matchesType = companyTypeFilter === 'all' || c.category === companyTypeFilter;
+      const matchesType = companyTypeFilter === 'all' || getCompanyCategory(c) === companyTypeFilter;
       const matchesSearch = !q || (c.company_name || '').toLowerCase().includes(q) || (c.cin || '').toLowerCase().includes(q);
       return matchesType && matchesSearch;
     });
@@ -243,9 +261,9 @@ export default function ROCSpherePage() {
           isDark={isDark}
           stats={[
             { label: 'Companies', value: companies.length },
-            { label: 'Private Ltd', value: companies.filter((c) => c.category === 'private').length },
-            { label: 'Public Ltd', value: companies.filter((c) => c.category === 'public').length },
-            { label: 'LLP', value: companies.filter((c) => c.category === 'llp').length },
+            { label: 'Private Ltd', value: companies.filter((c) => getCompanyCategory(c) === 'private').length },
+            { label: 'Public Ltd', value: companies.filter((c) => getCompanyCategory(c) === 'public').length },
+            { label: 'LLP', value: companies.filter((c) => getCompanyCategory(c) === 'llp').length },
           ]}
         />
       </div>
@@ -273,10 +291,10 @@ export default function ROCSpherePage() {
              className={`${input} mb-2 py-1.5 text-xs`}
            >
              <option value="all">All entity types ({companies.length})</option>
-             <option value="private">Pvt Ltd ({companies.filter((c) => c.category === 'private').length})</option>
-             <option value="llp">LLP ({companies.filter((c) => c.category === 'llp').length})</option>
-             <option value="section_8">Section 8 ({companies.filter((c) => c.category === 'section_8').length})</option>
-             <option value="public">Public Ltd ({companies.filter((c) => c.category === 'public').length})</option>
+             <option value="private">Pvt Ltd ({companies.filter((c) => getCompanyCategory(c) === 'private').length})</option>
+             <option value="llp">LLP ({companies.filter((c) => getCompanyCategory(c) === 'llp').length})</option>
+             <option value="section_8">Section 8 ({companies.filter((c) => getCompanyCategory(c) === 'section_8').length})</option>
+             <option value="public">Public Ltd ({companies.filter((c) => getCompanyCategory(c) === 'public').length})</option>
            </select>
           <div className="relative mb-3">
             <Search size={14} className={`absolute left-2.5 top-2.5 ${muted}`} />
@@ -298,7 +316,7 @@ export default function ROCSpherePage() {
                     ${selectedId === c.id ? 'bg-blue-600 text-white' : isDark ? 'hover:bg-slate-700/60 text-slate-200' : 'hover:bg-slate-100 text-slate-700'}`}>
                   <span className="truncate">
                     <span className="font-medium block truncate">{c.company_name}</span>
-                    <span className={`text-[10px] ${selectedId === c.id ? 'text-blue-100' : muted}`}>{CATEGORY_LABELS[c.category] || c.category}</span>
+                    <span className={`text-[10px] ${selectedId === c.id ? 'text-blue-100' : muted}`}>{CATEGORY_LABELS[getCompanyCategory(c)] || getCompanyCategory(c)}</span>
                   </span>
                   <ChevronRight size={12} className="shrink-0" />
                 </button>
@@ -466,7 +484,7 @@ function NewCompanyModal({ isDark, input, text, muted, eligibleClients, onClose,
     if (!clientId) { setForm(emptyCompanyForm()); return; }
     const c = eligibleClients.find((x) => x.client_id === clientId);
     if (!c) return;
-    const catMap = { pvt_ltd: 'private', PVT_LTD: 'private', public_ltd: 'public', section_8: 'section_8', llp: 'llp', LLP: 'llp', opc: 'opc' };
+    const catMap = { pvt_ltd: 'private', PVT_LTD: 'private', public_ltd: 'public', section_8: 'section_8', llp: 'llp', LLP: 'llp', limited_liability_partnership: 'llp', opc: 'opc' };
     setForm((f) => ({
       ...f,
       client_id: c.client_id,
