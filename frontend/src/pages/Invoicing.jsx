@@ -132,6 +132,15 @@ const emptyItem = () => ({
 
 // Maps compliance category codes → invoice item description prefix
 // Used when auto-populating invoice items from compliance govt fees
+// Line items created from a compliance govt fee are tagged (invisibly, via
+// product_id) so we can tell them apart later — to offer "bill next cycle"
+// and to mark the fee as billed once the invoice is generated.
+const GOVT_FEE_TAG = 'compliance_govt_fee:';
+const govtFeeTag = (assignmentId) => `${GOVT_FEE_TAG}${assignmentId}`;
+const govtFeeAssignmentId = (item) =>
+  (item?.product_id || '').startsWith(GOVT_FEE_TAG)
+    ? item.product_id.slice(GOVT_FEE_TAG.length)
+    : null;
 const COMPLIANCE_CATEGORY_LABELS = {
   ROC:     'ROC',
   GST:     'GST',
@@ -4056,6 +4065,9 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
   const [focusedItemIdx, setFocusedItemIdx] = useState(-1); // which item description is focused
   const [dragIdx, setDragIdx] = useState(null);             // which item is being dragged
   const [dragOverIdx, setDragOverIdx] = useState(null);     // which item is the drop target
+  // Compliance govt fees auto-pulled onto this invoice (for the Govt Fees card)
+  const [govtFeeCards, setGovtFeeCards] = useState([]);
+  const [govtFeeBusyId, setGovtFeeBusyId] = useState(null);
   // Clients created inline via the Quick-Add dialog (augments the parent `clients` prop)
   const [localClients, setLocalClients] = useState([]);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
@@ -4222,11 +4234,25 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
 
     // ── Auto-populate compliance govt fees into invoice items ──────────────────
     // Fetch all compliance assignments for this client that have a govt fee amount + SRN
+    setGovtFeeCards([]);
     try {
-      const res = await api.get(`/compliance/by-client/${client.id}`, { params: { govt_fees: true } });
+      const res = await api.get(`/compliance/by-client/${client.id}`, {
+        params: { govt_fees: true, billable_only: true },
+      });
+      // Skip fees already invoiced once, and fees the user parked for the
+      // next billing cycle — they must never land on another bill.
       const complianceItems = (res.data?.items || []).filter(
         item => item.govt_fees_amount > 0 && item.govt_fees_srn
+             && !item.billed && !item.defer_to_next_cycle
       );
+      setGovtFeeCards(complianceItems.map(item => ({
+        assignment_id: item.assignment_id,
+        compliance_id: item.compliance_id,
+        name: item.name || 'Compliance Filing',
+        category: COMPLIANCE_CATEGORY_LABELS[item.category] || item.category || 'Compliance',
+        srn: item.govt_fees_srn || '',
+        amount: parseFloat(item.govt_fees_amount) || 0,
+      })));
 
       if (complianceItems.length > 0) {
         // Build invoice line items from compliance data — one line per compliance entry
@@ -4244,6 +4270,7 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
 
           return {
             ...emptyItem(),
+            product_id: govtFeeTag(item.assignment_id),
             description,
             unit_price: amount,
             gst_rate: 0,      // Govt fees are typically not subject to GST
@@ -4284,6 +4311,27 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
       toast.success(`Auto-filled from "${client.company_name}"`, { duration: 1500 });
     }
   }, [clients]);
+
+  // ── Govt fee: carry to the next billing cycle ──────────────────────────────
+  // Removes the fee from this invoice and flags it so it is skipped until the
+  // user brings it back. It stays available for the next bill.
+  const deferGovtFee = useCallback(async (card) => {
+    setGovtFeeBusyId(card.assignment_id);
+    try {
+      await api.post('/compliance/govt-fees/defer', {
+        assignment_ids: [card.assignment_id], defer: true,
+      });
+      const tag = govtFeeTag(card.assignment_id);
+      setForm(p => ({ ...p, items: p.items.filter(it => it.product_id !== tag) }));
+      setGovtFeeCards(list => list.filter(c => c.assignment_id !== card.assignment_id));
+      window.dispatchEvent(new CustomEvent('compliance:govt-fee-updated', { detail: { assignment_id: card.assignment_id } }));
+      toast.success(`"${card.name}" moved to the next billing cycle`);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Could not move this fee to the next cycle');
+    } finally {
+      setGovtFeeBusyId(null);
+    }
+  }, []);
 
   const fillFromProduct = useCallback((idx, productId) => {
     if (productId === '__none__') return;
@@ -4359,6 +4407,23 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
         await api.post('/invoices', payload);
         try { localStorage.removeItem(INV_DRAFT_KEY); } catch {}
       }
+      // ── Lock the govt fees that went out on this bill ────────────────────
+      // Once invoiced (that fee, that amount), it must never auto-populate
+      // onto another invoice for the same company.
+      const billedAssignmentIds = form.items
+        .map(govtFeeAssignmentId)
+        .filter(Boolean);
+      if (billedAssignmentIds.length > 0) {
+        try {
+          await api.post('/compliance/govt-fees/mark-billed', {
+            assignment_ids: billedAssignmentIds,
+            client_id: form.client_id || null,
+            invoice_no: form.invoice_no || null,
+          });
+          window.dispatchEvent(new CustomEvent('compliance:govt-fee-updated', { detail: { billed: billedAssignmentIds } }));
+        } catch { /* non-fatal — invoice is already saved */ }
+      }
+
       toast.success(editingInv?.id ? 'Invoice updated successfully' : 'Invoice created successfully');
       saveItemMemory(form.items);
       // Auto-sync client details back to the client record AND all invoices (non-fatal)
@@ -4672,6 +4737,56 @@ const InvoiceForm = ({ open, onClose, editingInv, companies, clients, leads, onS
                   </div>
                   <Button type="button" size="sm" onClick={addItem} className="h-8 px-3 text-xs rounded-xl text-white gap-1.5" style={{ background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.mediumBlue})` }}><Plus className="h-3.5 w-3.5" /> Add Item</Button>
                 </div>
+
+                {/* ── Government fees pulled in from Compliance ──────────────
+                    Each fee can be kept on this bill or pushed to the next
+                    billing cycle. Once a bill is generated the fee is locked
+                    and will not appear on any future invoice for this company. */}
+                {govtFeeCards.length > 0 && (
+                  <div className={`rounded-2xl border p-4 ${isDark ? 'bg-amber-900/10 border-amber-700/40' : 'bg-amber-50/70 border-amber-200'}`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-lg flex items-center justify-center bg-amber-500/15">
+                          <IndianRupee className="h-3.5 w-3.5 text-amber-600" />
+                        </div>
+                        <h4 className={`text-sm font-semibold ${isDark ? 'text-amber-200' : 'text-amber-900'}`}>Government Fees</h4>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700">{govtFeeCards.length}</span>
+                      </div>
+                      <span className={`text-[10px] ${isDark ? 'text-amber-300/70' : 'text-amber-700/80'}`}>Billed only once per fee</span>
+                    </div>
+                    <div className="space-y-2">
+                      {govtFeeCards.map(card => {
+                        const onBill = form.items.some(it => it.product_id === govtFeeTag(card.assignment_id));
+                        return (
+                          <div key={card.assignment_id}
+                            className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5 ${isDark ? 'bg-slate-800/70 border-slate-700' : 'bg-white border-amber-100'}`}>
+                            <div className="min-w-0">
+                              <p className={`text-xs font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{card.name}</p>
+                              <p className="text-[10px] text-slate-400 truncate">
+                                {card.category}{card.srn ? ` · SRN: ${card.srn}` : ''}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <span className={`text-xs font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                                ₹{card.amount.toLocaleString('en-IN')}
+                              </span>
+                              {onBill ? (
+                                <Button type="button" size="sm" variant="outline"
+                                  disabled={govtFeeBusyId === card.assignment_id}
+                                  onClick={() => deferGovtFee(card)}
+                                  className="h-7 px-2.5 text-[10px] rounded-lg">
+                                  {govtFeeBusyId === card.assignment_id ? 'Saving…' : 'Bill in next cycle'}
+                                </Button>
+                              ) : (
+                                <span className="text-[10px] font-semibold text-slate-400">Removed from this bill</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
                 {form.items.map((item, idx) => (
                   <ItemRow
                     key={idx}
