@@ -3556,6 +3556,9 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                 reimbursed_amount: item.reimbursed_amount ?? Number(item.govt_fees_amount || 0),
                 assignment_id: item.assignment_id,
                 compliance_id: item.compliance_id,
+                billed: !!item.billed,
+                billed_invoice_no: item.billed_invoice_no || '',
+                deferred: !!item.defer_to_next_cycle,
               })),
               ...(adhocFees || []).map(fee => ({
                 id: `adhoc-${fee.id}`,
@@ -3764,6 +3767,34 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                         <div>
                           <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{row.title}</p>
                           <p className="text-[11px] text-slate-500">{row.category}{row.notes ? ` · ${row.notes}` : ''}</p>
+                          {/* Billing state: a fee already invoiced never comes
+                              back on another bill; a deferred fee waits for the
+                              next billing cycle. */}
+                          {row.type === 'linked' && (row.billed || row.deferred) && (
+                            <div className="flex items-center gap-1.5 mt-1">
+                              {row.billed ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                                  Invoiced{row.billed_invoice_no ? ` · ${row.billed_invoice_no}` : ''}
+                                </span>
+                              ) : (
+                                <>
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                                    Next billing cycle
+                                  </span>
+                                  <button
+                                    onClick={async () => {
+                                      setGovtFees(prev => prev.map(x => x.assignment_id === row.assignment_id ? { ...x, defer_to_next_cycle: false } : x));
+                                      try {
+                                        await api.post('/compliance/govt-fees/defer', { assignment_ids: [row.assignment_id], defer: false });
+                                        toast.success('Fee will be billed on the current invoice');
+                                        window.dispatchEvent(new CustomEvent('compliance:govt-fee-updated', { detail: { assignment_id: row.assignment_id } }));
+                                      } catch { toast.error('Update failed'); }
+                                    }}
+                                    className="text-[10px] font-bold text-slate-500 underline">Bill now</button>
+                                </>
+                              )}
+                            </div>
+                          )}
                         </div>
                         <div className="text-xs text-slate-600">{row.fy_year || '—'}</div>
                         <div className="text-xs text-slate-600">{dateText(row.due_date)}</div>
