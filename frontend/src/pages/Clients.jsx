@@ -2932,6 +2932,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
             amount: it.govt_fees_amount ?? 0,
             notes:  it.govt_fees_notes  ?? '',
             srn:    it.govt_fees_srn    ?? '',
+            bill_in_next_cycle: !!it.bill_in_next_cycle,
           };
         });
         setGovtFeesDraft(d);
@@ -2971,11 +2972,22 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
     try {
       await api.patch(
         `/compliance/${item.compliance_id}/assignments/${item.assignment_id}/govt-fee`,
-        { govt_fees_amount: parseFloat(draft.amount) || 0, govt_fees_notes: draft.notes || '', govt_fees_srn: draft.srn || '' }
+        {
+          govt_fees_amount: parseFloat(draft.amount) || 0,
+          govt_fees_notes: draft.notes || '',
+          govt_fees_srn: draft.srn || '',
+          bill_in_next_cycle: !!draft.bill_in_next_cycle,
+        }
       );
       setGovtFees(prev => prev.map(x =>
         x.assignment_id === item.assignment_id
-          ? { ...x, govt_fees_amount: parseFloat(draft.amount) || 0, govt_fees_notes: draft.notes || '', govt_fees_srn: draft.srn || '' }
+          ? {
+              ...x,
+              govt_fees_amount: parseFloat(draft.amount) || 0,
+              govt_fees_notes: draft.notes || '',
+              govt_fees_srn: draft.srn || '',
+              bill_in_next_cycle: !!draft.bill_in_next_cycle,
+            }
           : x
       ));
       toast.success('Government fee saved');
@@ -3554,11 +3566,11 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                 payment_date: item.payment_date || item.paid_on || item.paid_at || '',
                 reimbursed: !!item.reimbursed,
                 reimbursed_amount: item.reimbursed_amount ?? Number(item.govt_fees_amount || 0),
+                bill_in_next_cycle: !!item.bill_in_next_cycle,
+                govt_fee_invoice_id: item.govt_fee_invoice_id,
+                govt_fee_invoice_no: item.govt_fee_invoice_no,
                 assignment_id: item.assignment_id,
                 compliance_id: item.compliance_id,
-                billed: !!item.billed,
-                billed_invoice_no: item.billed_invoice_no || '',
-                deferred: !!item.defer_to_next_cycle,
               })),
               ...(adhocFees || []).map(fee => ({
                 id: `adhoc-${fee.id}`,
@@ -3576,6 +3588,9 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                 payment_date: fee.payment_date || fee.paid_on || fee.paid_at || '',
                 reimbursed: !!fee.reimbursed,
                 reimbursed_amount: fee.reimbursed_amount ?? Number(fee.amount || 0),
+                bill_in_next_cycle: !!fee.bill_in_next_cycle,
+                govt_fee_invoice_id: fee.govt_fee_invoice_id,
+                govt_fee_invoice_no: fee.govt_fee_invoice_no,
               })),
             ];
             const money = (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -3682,7 +3697,8 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                     const draft = govtFeesDraft[item.assignment_id] || { amount: 0, notes: '', srn: '' };
                     const dirty = (parseFloat(draft.amount) || 0) !== (item.govt_fees_amount || 0)
                                || (draft.notes || '') !== (item.govt_fees_notes || '')
-                               || (draft.srn   || '') !== (item.govt_fees_srn   || '');
+                               || (draft.srn   || '') !== (item.govt_fees_srn   || '')
+                               || !!draft.bill_in_next_cycle !== !!item.bill_in_next_cycle;
                     return (
                       <div key={item.assignment_id}
                         className={`grid gap-2 items-center px-3 py-2.5 rounded-xl border ${isDark ? 'bg-slate-700/40 border-slate-600' : 'bg-white border-slate-200'}`}
@@ -3690,6 +3706,23 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                         <div>
                           <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{item.name}</p>
                           <p className="text-[11px] text-slate-500">{item.category} · {item.frequency}{item.period_label ? ` · ${item.period_label}` : ''}</p>
+                          <button
+                            type="button"
+                            onClick={() => setGovtFeesDraft(prev => ({
+                              ...prev,
+                              [item.assignment_id]: {
+                                ...prev[item.assignment_id],
+                                bill_in_next_cycle: !prev[item.assignment_id]?.bill_in_next_cycle,
+                              },
+                            }))}
+                            className={`mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                              draft.bill_in_next_cycle
+                                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                : 'bg-blue-50 text-blue-700 border-blue-200'
+                            }`}>
+                            <Calendar className="h-3 w-3" />
+                            {draft.bill_in_next_cycle ? 'Take in next billing cycle' : 'Take in next invoice'}
+                          </button>
                         </div>
                         <div className="text-xs text-slate-600">{item.fy_year || '—'}</div>
                         <div className="text-xs text-slate-600">
@@ -3767,33 +3800,34 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                         <div>
                           <p className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{row.title}</p>
                           <p className="text-[11px] text-slate-500">{row.category}{row.notes ? ` · ${row.notes}` : ''}</p>
-                          {/* Billing state: a fee already invoiced never comes
-                              back on another bill; a deferred fee waits for the
-                              next billing cycle. */}
-                          {row.type === 'linked' && (row.billed || row.deferred) && (
-                            <div className="flex items-center gap-1.5 mt-1">
-                              {row.billed ? (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                                  Invoiced{row.billed_invoice_no ? ` · ${row.billed_invoice_no}` : ''}
-                                </span>
-                              ) : (
-                                <>
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
-                                    Next billing cycle
-                                  </span>
-                                  <button
-                                    onClick={async () => {
-                                      setGovtFees(prev => prev.map(x => x.assignment_id === row.assignment_id ? { ...x, defer_to_next_cycle: false } : x));
-                                      try {
-                                        await api.post('/compliance/govt-fees/defer', { assignment_ids: [row.assignment_id], defer: false });
-                                        toast.success('Fee will be billed on the current invoice');
-                                        window.dispatchEvent(new CustomEvent('compliance:govt-fee-updated', { detail: { assignment_id: row.assignment_id } }));
-                                      } catch { toast.error('Update failed'); }
-                                    }}
-                                    className="text-[10px] font-bold text-slate-500 underline">Bill now</button>
-                                </>
-                              )}
-                            </div>
+                          {row.govt_fee_invoice_id ? (
+                            <p className="mt-1 text-[10px] font-bold text-emerald-600">
+                              Invoiced{row.govt_fee_invoice_no ? ` · ${row.govt_fee_invoice_no}` : ''}
+                            </p>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const patch = { bill_in_next_cycle: !row.bill_in_next_cycle };
+                                try {
+                                  if (row.type === 'linked') {
+                                    await api.patch(`/compliance/${row.compliance_id}/assignments/${row.assignment_id}/govt-fee`, patch);
+                                    setGovtFees(prev => prev.map(x => x.assignment_id === row.assignment_id ? { ...x, ...patch } : x));
+                                  } else {
+                                    await api.patch(`/compliance/standalone-govt-fees/${row.raw.id}`, patch);
+                                    setAdhocFees(prev => prev.map(x => x.id === row.raw.id ? { ...x, ...patch } : x));
+                                  }
+                                  toast.success(patch.bill_in_next_cycle ? 'Fee deferred to next billing cycle' : 'Fee will be included in the next invoice');
+                                } catch {
+                                  toast.error('Could not update billing cycle');
+                                }
+                              }}
+                              className={`mt-1 inline-flex items-center gap-1 text-[10px] font-bold ${
+                                row.bill_in_next_cycle ? 'text-amber-600' : 'text-blue-600'
+                              }`}>
+                              <Calendar className="h-3 w-3" />
+                              {row.bill_in_next_cycle ? 'Take in next billing cycle' : 'Take in next invoice'}
+                            </button>
                           )}
                         </div>
                         <div className="text-xs text-slate-600">{row.fy_year || '—'}</div>
