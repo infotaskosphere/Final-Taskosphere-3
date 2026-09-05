@@ -462,6 +462,7 @@ export default function StandaloneGovtFeeDialog({
     status:            'pending',
     reimbursed:        false,
     reimbursed_amount: '',
+    bill_in_next_cycle: false,
   };
   const [form,        setForm]        = useState(empty);
   const [saving,      setSaving]      = useState(false);
@@ -493,6 +494,7 @@ export default function StandaloneGovtFeeDialog({
         status:       editing.status       || 'pending',
         reimbursed:   !!editing.reimbursed,
         reimbursed_amount: editing.reimbursed_amount ?? '',
+        bill_in_next_cycle: !!editing.bill_in_next_cycle,
       });
     } else {
       setForm({ ...empty, client_id: clientId || '' });
@@ -515,7 +517,8 @@ export default function StandaloneGovtFeeDialog({
   const blankPayment = (overrides = {}) => ({
     title: '', category: 'OTHER', period_label: '', fy_year: '',
     due_date: '', payment_date: '', amount: '', srn: '', notes: '',
-    status: 'pending', reimbursed: false, reimbursed_amount: '', ...overrides,
+    status: 'pending', reimbursed: false, reimbursed_amount: '',
+    bill_in_next_cycle: false, ...overrides,
   });
 
   const enableMultiMode = () => {
@@ -526,6 +529,7 @@ export default function StandaloneGovtFeeDialog({
       fy_year: form.fy_year, due_date: form.due_date, payment_date: form.payment_date,
       amount: form.amount, srn: form.srn, notes: form.notes, status: form.status,
       reimbursed: form.reimbursed, reimbursed_amount: form.reimbursed_amount,
+      bill_in_next_cycle: form.bill_in_next_cycle,
     })]);
   };
   const addPaymentRow = () => setMultiPayments(prev => [...prev, blankPayment()]);
@@ -538,6 +542,7 @@ export default function StandaloneGovtFeeDialog({
     amount: parseFloat(row.amount) || 0, srn: row.srn?.trim() || null, notes: row.notes?.trim() || null,
     status: row.status || 'pending', reimbursed: !!row.reimbursed,
     reimbursed_amount: row.reimbursed && row.reimbursed_amount !== '' ? parseFloat(row.reimbursed_amount) || 0 : null,
+    bill_in_next_cycle: !!row.bill_in_next_cycle,
   });
 
   const handleSave = async () => {
@@ -575,6 +580,7 @@ export default function StandaloneGovtFeeDialog({
         period_label: form.period_label || null, fy_year: form.fy_year || null,
         srn: form.srn || null, notes: form.notes || null, reimbursed: !!form.reimbursed,
         reimbursed_amount: form.reimbursed && form.reimbursed_amount !== '' ? parseFloat(form.reimbursed_amount) || 0 : null,
+        bill_in_next_cycle: !!form.bill_in_next_cycle,
       };
       let res;
       if (editing?.id) {
@@ -873,6 +879,23 @@ export default function StandaloneGovtFeeDialog({
                     </div>
                   )}
                 </div>
+              </div>
+
+              <div className="col-span-4 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2.5">
+                <button
+                  type="button"
+                  onClick={() => set('bill_in_next_cycle', !form.bill_in_next_cycle)}
+                  className="flex items-center gap-2 text-left">
+                  <span className={`w-4 h-4 rounded border flex items-center justify-center ${
+                    form.bill_in_next_cycle ? 'bg-amber-500 border-amber-500' : 'bg-white border-amber-300'
+                  }`}>
+                    {form.bill_in_next_cycle && <CheckCircle2 className="h-3 w-3 text-white" />}
+                  </span>
+                  <span>
+                    <span className="block text-xs font-bold text-amber-800">Take this fee in the next billing cycle</span>
+                    <span className="block text-[11px] text-amber-700/80">It will stay out of the current invoice until the next month.</span>
+                  </span>
+                </button>
               </div>
 
               {/* Notes — full width */}
