@@ -11,18 +11,29 @@ chrome.storage.local.get("token", (data) => {
 });
 
 // ── Receive messages from content.js ──
-chrome.runtime.onMessage.addListener((msg) => {
+// Always answer synchronously and return false. Returning true (or never
+// calling sendResponse) leaves the message port open and produces:
+// "A listener indicated an asynchronous response by returning true, but the
+//  message channel closed before a response was received".
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
-  if (msg.type === "SET_TOKEN") {
-    authToken = msg.token;
-    chrome.storage.local.set({ token: authToken });
+  try {
+    if (msg && msg.type === "SET_TOKEN") {
+      authToken = msg.token;
+      chrome.storage.local.set({ token: authToken });
+    }
+
+    if (msg && msg.type === "CLEAR_TOKEN") {
+      authToken = "";
+      chrome.storage.local.remove("token");
+    }
+
+    sendResponse({ ok: true });
+  } catch (err) {
+    sendResponse({ ok: false, error: String(err) });
   }
 
-  if (msg.type === "CLEAR_TOKEN") {
-    authToken = "";
-    chrome.storage.local.remove("token");
-  }
-
+  return false;
 });
 
 // ── Track website visits when tab URL changes ──
