@@ -3279,6 +3279,73 @@ async def delete_purchase_payment(payment_id: str, current_user: User = Depends(
 # INVOICE CRUD
 # ═══════════════════════════════════════════════════════════
 
+async def _mark_government_fee_items_billed(invoice: dict) -> None:
+    """Persist the invoice that consumed each government-fee line.
+
+    The product_id marker is internal and is not printed on the invoice. The
+    amount check prevents a manually copied marker with a changed value from
+    consuming the tracker fee incorrectly. The empty-marker filter makes this
+    safe if an invoice request is retried.
+    """
+    client_id = invoice.get("client_id")
+    invoice_id = invoice.get("id")
+    if not client_id or not invoice_id:
+        return
+
+    billed_at = invoice.get("invoice_date") or date.today().isoformat()
+    for item in invoice.get("items") or []:
+        marker = item.get("product_id") or ""
+        if ":" not in marker:
+            continue
+        kind, record_id = marker.split(":", 1)
+        if kind not in ("compliance_govt_fee", "standalone_govt_fee") or not record_id:
+            continue
+
+        item_amount = round(float(item.get("unit_price") or 0) * float(item.get("quantity") or 1), 2)
+        if kind == "compliance_govt_fee":
+            collection = db.compliance_assignments
+            query = {"id": record_id, "client_id": client_id}
+            amount_field = "govt_fees_amount"
+        else:
+            collection = db.standalone_govt_fees
+            query = {"id": record_id, "client_id": client_id}
+            amount_field = "amount"
+
+        fee = await collection.find_one(query, {"_id": 0, amount_field: 1, "govt_fee_invoice_id": 1})
+        if not fee or fee.get("govt_fee_invoice_id"):
+            continue
+        expected_amount = round(float(fee.get(amount_field) or 0), 2)
+        if expected_amount <= 0 or abs(expected_amount - item_amount) > 0.01:
+            logger.warning(
+                "Government fee marker %s was not billed: invoice amount %.2f != tracker amount %.2f",
+                marker, item_amount, expected_amount,
+            )
+            continue
+
+        # The second condition makes the operation idempotent and prevents two
+        # concurrent invoice requests from claiming the same fee.
+        result = await collection.update_one(
+            {
+                **query,
+                "$or": [
+                    {"govt_fee_invoice_id": {"$exists": False}},
+                    {"govt_fee_invoice_id": None},
+                    {"govt_fee_invoice_id": ""},
+                ],
+            },
+            {"$set": {
+                "govt_fee_invoice_id": invoice_id,
+                "govt_fee_invoice_no": invoice.get("invoice_no"),
+                "govt_fee_billed_at": billed_at,
+                "govt_fee_billed_amount": expected_amount,
+                "bill_in_next_cycle": False,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+        if result.modified_count:
+            logger.info("Government fee %s consumed by invoice %s", marker, invoice.get("invoice_no"))
+
+
 @router.post("/invoices", response_model=Invoice)
 async def create_invoice(data: InvoiceCreate, current_user: User = Depends(check_module_permission("invoicing", "create"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
@@ -3319,6 +3386,7 @@ async def create_invoice(data: InvoiceCreate, current_user: User = Depends(check
            "created_by": current_user.id, "created_at": now, "updated_at": now}
     raw = _compute_invoice_totals(raw, await _company_has_gst(data.company_id))
     await db.invoices.insert_one({**raw})
+    await _mark_government_fee_items_billed(raw)
     await sync_invoice_journal_entry(raw["id"])
     # Record advance as a payment entry so history is tracked
     if advance > 0:
@@ -4053,6 +4121,8 @@ async def update_invoice(inv_id: str, data: dict, background_tasks: BackgroundTa
         f"company_id = {data.get('company_id', 'NOT PRESENT')!r}"
     )
     await db.invoices.update_one({"id": inv_id}, {"$set": data})
+    updated_invoice = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
+    await _mark_government_fee_items_billed(updated_invoice or {})
     await sync_invoice_journal_entry(inv_id)
     # Recalculate after Edit: Outstanding depends on the (possibly changed)
     # Grand Total, so re-derive it from Payments + Credit/Debit Notes rather
@@ -4505,12 +4575,18 @@ async def generate_recurring(inv_id: str, current_user: User = Depends(check_mod
     now = datetime.now(timezone.utc).isoformat()
     _rec_type = template.get("invoice_type", "tax_invoice")
     _rec_prefix = {"proforma": "PRO", "estimate": "EST", "credit_note": "CN", "debit_note": "DN"}.get(_rec_type, "INV")
-    new_inv = {**template, "id": str(uuid.uuid4()), "invoice_no": await _next_invoice_no(_rec_prefix, template.get("company_id"), invoice_type=_rec_type),
+    recurring_items = [
+        item for item in (template.get("items") or [])
+        if not str(item.get("product_id") or "").startswith(("compliance_govt_fee:", "standalone_govt_fee:"))
+    ]
+    new_inv = {**template, "id": str(uuid.uuid4()), "items": recurring_items,
+               "invoice_no": await _next_invoice_no(_rec_prefix, template.get("company_id"), invoice_type=_rec_type),
                "invoice_date": date.today().isoformat(),
                "due_date": (date.today() + timedelta(days=30)).isoformat(),
                "status": "draft", "amount_paid": 0.0, "amount_due": template.get("grand_total", 0),
                "is_recurring": False, "created_at": now, "updated_at": now, "pdf_drive_link": ""}
     new_inv.pop("_id", None)
+    new_inv = _compute_invoice_totals(new_inv, await _company_has_gst(template.get("company_id") or ""))
     await db.invoices.insert_one({**new_inv})
     new_inv.pop("_id", None)
     return {"status": "success", "invoice_no": new_inv["invoice_no"], "id": new_inv["id"]}
