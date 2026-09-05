@@ -2696,7 +2696,7 @@ async def extract_events(
 
         # Date-bounded scans and keyword-scoped scans are already narrowed by
         # IMAP criteria, so do not cap them before parsing.
-        fetch_cap  = 0 if (effective_since or kw_list) else 100
+        fetch_cap  = 300 if (effective_since or kw_list) else 100
         raw_emails = await loop.run_in_executor(
             None, _scan_mailbox_sync,
             conn["imap_host"], conn["imap_port"], email_addr,
