@@ -1227,12 +1227,14 @@ class GovtFeeUpdate(BaseModel):
     govt_fees_srn:     Optional[str]   = None
     reimbursed:        Optional[bool]  = None   # True = received from client
     reimbursed_amount: Optional[float] = None   # editable; defaults to govt_fees_amount
+    defer_to_next_cycle: Optional[bool] = None  # True = skip this fee on the current bill
 
 
 @router.get("/by-client/{client_id}")
 async def list_compliance_for_client(
     client_id:  str,
     govt_fees:  bool = Query(True, description="Only compliance entries marked as Govt Fees"),
+    billable_only: bool = Query(False, description="Exclude fees already invoiced or deferred to the next billing cycle"),
     current_user: User = Depends(check_module_permission("compliance", "view")),
 ):
     """
@@ -1273,7 +1275,18 @@ async def list_compliance_for_client(
             "govt_fees_srn":    a.get("govt_fees_srn", "") or "",
             "reimbursed":       a.get("reimbursed", False) or False,
             "reimbursed_amount": a.get("reimbursed_amount"),   # None = use govt_fees_amount
+            # ── Billing lifecycle ────────────────────────────────────────
+            # billed            → already charged on a generated invoice;
+            #                     never auto-populates onto another bill.
+            # defer_to_next_cycle → user chose to carry it to the next bill.
+            "billed":            bool(a.get("govt_fee_billed", False)),
+            "billed_invoice_id": a.get("govt_fee_billed_invoice_id"),
+            "billed_invoice_no": a.get("govt_fee_billed_invoice_no"),
+            "billed_at":         a.get("govt_fee_billed_at"),
+            "defer_to_next_cycle": bool(a.get("defer_to_next_cycle", False)),
         })
+    if billable_only:
+        items = [i for i in items if not i["billed"] and not i["defer_to_next_cycle"]]
     items.sort(key=lambda x: (x.get("fy_year") or "", x.get("name") or ""))
     return {"items": items}
 
@@ -1306,6 +1319,9 @@ async def _sync_govt_fee_to_invoice(
     amount = float(assignment.get("govt_fees_amount") or 0)
     srn    = (assignment.get("govt_fees_srn") or "").strip()
     if amount <= 0 or not srn:
+        return
+    # Already invoiced, or parked for the next billing cycle → never re-add it.
+    if assignment.get("govt_fee_billed") or assignment.get("defer_to_next_cycle"):
         return
 
     client = await db.clients.find_one({"id": client_id}, {"_id": 0})
@@ -1447,6 +1463,9 @@ async def update_assignment_govt_fee(
         set_doc["govt_fees_srn"] = (payload["govt_fees_srn"] or "").strip()
     if "reimbursed" in payload:
         set_doc["reimbursed"] = bool(payload["reimbursed"])
+    if "defer_to_next_cycle" in payload:
+        set_doc["defer_to_next_cycle"] = bool(payload["defer_to_next_cycle"])
+        set_doc["defer_to_next_cycle_at"] = _now() if payload["defer_to_next_cycle"] else None
     if "reimbursed_amount" in payload:
         set_doc["reimbursed_amount"] = (
             float(payload["reimbursed_amount"])
@@ -1538,6 +1557,106 @@ async def update_assignment_govt_fee(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# GOVT FEES — billing lifecycle (billed once / defer to next cycle)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class GovtFeeBillingMark(BaseModel):
+    assignment_ids: list[str] = []
+    standalone_ids: list[str] = []
+    invoice_id:     Optional[str] = None
+    invoice_no:     Optional[str] = None
+    client_id:      Optional[str] = None
+
+
+class GovtFeeDeferIn(BaseModel):
+    assignment_ids: list[str] = []
+    standalone_ids: list[str] = []
+    defer:          bool = True
+
+
+@router.post("/govt-fees/mark-billed")
+async def mark_govt_fees_billed(
+    data: GovtFeeBillingMark,
+    current_user: User = Depends(check_module_permission("compliance", "create")),
+):
+    """Flag government fees as invoiced.
+
+    Called right after an invoice is generated so the same fee (same amount,
+    same SRN) can never be auto-populated onto another bill for that company.
+    Deferral is cleared at the same time — a billed fee is simply done.
+    """
+    stamp = {
+        "govt_fee_billed":            True,
+        "govt_fee_billed_invoice_id": data.invoice_id,
+        "govt_fee_billed_invoice_no": data.invoice_no,
+        "govt_fee_billed_at":         _now(),
+        "defer_to_next_cycle":        False,
+        "updated_at":                 _now(),
+        "updated_by":                 current_user.id,
+    }
+    billed = 0
+    if data.assignment_ids:
+        res = await db.compliance_assignments.update_many(
+            {"id": {"$in": data.assignment_ids}}, {"$set": stamp}
+        )
+        billed += res.modified_count
+    if data.standalone_ids:
+        res = await db.standalone_govt_fees.update_many(
+            {"id": {"$in": data.standalone_ids}}, {"$set": stamp}
+        )
+        billed += res.modified_count
+    return {"ok": True, "marked": billed}
+
+
+@router.post("/govt-fees/mark-unbilled")
+async def mark_govt_fees_unbilled(
+    data: GovtFeeBillingMark,
+    current_user: User = Depends(check_module_permission("compliance", "create")),
+):
+    """Undo an accidental billed flag so the fee can be invoiced again."""
+    stamp = {
+        "govt_fee_billed":            False,
+        "govt_fee_billed_invoice_id": None,
+        "govt_fee_billed_invoice_no": None,
+        "govt_fee_billed_at":         None,
+        "updated_at":                 _now(),
+        "updated_by":                 current_user.id,
+    }
+    if data.assignment_ids:
+        await db.compliance_assignments.update_many(
+            {"id": {"$in": data.assignment_ids}}, {"$set": stamp}
+        )
+    if data.standalone_ids:
+        await db.standalone_govt_fees.update_many(
+            {"id": {"$in": data.standalone_ids}}, {"$set": stamp}
+        )
+    return {"ok": True}
+
+
+@router.post("/govt-fees/defer")
+async def defer_govt_fees(
+    data: GovtFeeDeferIn,
+    current_user: User = Depends(check_module_permission("compliance", "create")),
+):
+    """Carry a government fee to the next billing cycle (or bring it back)."""
+    stamp = {
+        "defer_to_next_cycle":    bool(data.defer),
+        "defer_to_next_cycle_at": _now() if data.defer else None,
+        "updated_at":             _now(),
+        "updated_by":             current_user.id,
+    }
+    if data.assignment_ids:
+        await db.compliance_assignments.update_many(
+            {"id": {"$in": data.assignment_ids}}, {"$set": stamp}
+        )
+    if data.standalone_ids:
+        await db.standalone_govt_fees.update_many(
+            {"id": {"$in": data.standalone_ids}}, {"$set": stamp}
+        )
+    return {"ok": True, "deferred": bool(data.defer)}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # STANDALONE GOVT FEES — ad-hoc government fees NOT tied to a compliance master
 # Useful for one-off filings that aren't part of a client's annual compliance
 # (e.g. company-specific name change, increase in authorised capital, etc.)
@@ -1592,6 +1711,7 @@ class StandaloneGovtFeeUpdate(BaseModel):
     status:            Optional[str]   = None
     reimbursed:        Optional[bool]  = None
     reimbursed_amount: Optional[float] = None
+    defer_to_next_cycle: Optional[bool] = None
 
 
 @router.get("/standalone-govt-fees")
