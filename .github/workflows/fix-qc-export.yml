@@ -1,0 +1,40 @@
+name: Repair QC Bulk Export
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.sha == '4a08a33ea798fff26d14848f23c58c4dc1f6f229'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore file and apply header fix
+        shell: bash
+        run: |
+          git show f5eaf961bbf3b2c58bab4e850131c94c2d72b994:backend/quickcompany_trademark_router.py > backend/quickcompany_trademark_router.py
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('backend/quickcompany_trademark_router.py')
+          s = p.read_text(encoding='utf-8')
+          old = 'headers={"Content-Disposition": f\'attachment; filename="{filename}"\'}'
+          new = 'headers={"Content-Disposition": _content_disposition(filename)}'
+          if old not in s:
+              raise SystemExit('Expected bulk export header line was not found')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
+          rm .github/workflows/fix-qc-export.yml
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/quickcompany_trademark_router.py .github/workflows/fix-qc-export.yml
+          git commit -m "Fix Unicode Content-Disposition in QC bulk export"
+          git push
