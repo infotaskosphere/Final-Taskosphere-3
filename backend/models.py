@@ -42,6 +42,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_download_reports": True,
           "can_manage_users": True,
           "can_manage_settings": True,
+          "can_view_backup_restore": True,
           "can_assign_tasks": True,
           "can_assign_clients": True,
           "can_view_staff_activity": True,
@@ -143,6 +144,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_download_reports": True,      # Reports → VIEW includes export (Own + Team)
           "can_manage_users": False,         # ADMIN_GRANTED_ONLY
           "can_manage_settings": True,       # General Settings → VIEW, UPDATE (Own + Team)
+          "can_view_backup_restore": False,  # Backup & Restore → ADMIN_GRANTED_ONLY
           "can_assign_tasks": False,         # ADMIN_GRANTED_ONLY
           "can_assign_clients": False,       # ADMIN_GRANTED_ONLY
           "can_view_staff_activity": False,  # Admin-only — not grantable to manager/staff
@@ -233,6 +235,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_download_reports": True,      # Reports → VIEW includes export (Own)
           "can_manage_users": False,         # ADMIN_GRANTED_ONLY
           "can_manage_settings": True,       # General Settings → VIEW, UPDATE (Own)
+          "can_view_backup_restore": False,  # Backup & Restore → ADMIN_GRANTED_ONLY
           "can_assign_tasks": False,         # ADMIN_GRANTED_ONLY
           "can_assign_clients": False,       # ADMIN_GRANTED_ONLY
           "can_view_staff_activity": False,  # Admin-only — not grantable to manager/staff
@@ -478,6 +481,7 @@ class UserPermissions(BaseModel):
     can_download_reports: bool = False
     can_manage_users: bool = False
     can_manage_settings: bool = False
+    can_view_backup_restore: bool = False
     can_assign_tasks: bool = False
     can_assign_clients: bool = False
     can_view_staff_activity: bool = False
