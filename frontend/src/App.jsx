@@ -66,6 +66,7 @@ const ROUTE_PREFETCHERS = {
   "/people-matrix": () => import("./pages/PeopleMatrixDashboard.jsx"),
   "/reports": () => import("./pages/Reports.jsx"),
   "/users": () => import("./pages/Users.jsx"),
+  "/settings/backup": () => import("./pages/BackupRestore.jsx"),
 };
 
 const prefetchedRoutes = new Set();
