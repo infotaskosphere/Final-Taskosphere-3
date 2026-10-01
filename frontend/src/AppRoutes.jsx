@@ -224,6 +224,7 @@ export default function AppRoutes() {
 
         <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
         <Route path="/settings/general" element={<GeneralSettings />} />
+        <Route path="/settings/backup" element={<BackupPermission><BackupRestore /></BackupPermission>} />
         <Route path="/settings/email" element={<EmailSettings />} />
         <Route path="/settings/whatsapp" element={<WhatsAppSettings />} />
         <Route path="/settings/automation" element={<Navigate to="/settings/whatsapp" replace />} />
