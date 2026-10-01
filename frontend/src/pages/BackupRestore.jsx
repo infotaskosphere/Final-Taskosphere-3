@@ -365,12 +365,56 @@ export default function BackupRestore() {
     if (!window.confirm('Restore will replace the application data covered by this backup. Continue?')) return;
 
     setBusy(true);
+    setTransfer({
+      active: true,
+      phase: 'Uploading backup…',
+      percent: 0,
+      etaSeconds: null,
+      processed: 0,
+      total: restoreFile.size || 0,
+      detail: 'Transferring encrypted backup to the server…',
+    });
+
     try {
       const form = new FormData();
       form.append('backup', restoreFile);
       form.append('password', restorePassword);
       form.append('confirmation', restoreConfirm);
-      const { data } = await api.post('/app-backup/restore', form);
+      const uploadStarted = performance.now();
+
+      const { data } = await api.post('/app-backup/restore', form, {
+        onUploadProgress: (event) => {
+          const loaded = Number(event.loaded || 0);
+          const total = Number(event.total || restoreFile.size || 0);
+          const elapsed = Math.max(0.001, (performance.now() - uploadStarted) / 1000);
+          const speed = loaded / elapsed;
+          const percent = total > 0 ? Math.min(100, (loaded / total) * 100) : 0;
+          const remaining = total > 0 ? Math.max(0, total - loaded) : 0;
+
+          setTransfer({
+            active: true,
+            phase: percent >= 100 ? 'Restoring backup…' : 'Uploading backup…',
+            percent,
+            etaSeconds: speed > 0 && total > 0 ? remaining / speed : null,
+            processed: loaded,
+            total,
+            detail: percent >= 100
+              ? 'Upload complete. Server is restoring the backup…'
+              : formatBytes(loaded) + ' / ' + formatBytes(total),
+          });
+        },
+      });
+
+      setTransfer({
+        active: false,
+        phase: 'Complete',
+        percent: 100,
+        etaSeconds: 0,
+        processed: restoreFile.size || 0,
+        total: restoreFile.size || 0,
+        detail: 'Backup restored successfully.',
+      });
+
       toast.success('Restore completed: ' + (data.restored_documents || 0) + ' documents restored.');
       setRestoreFile(null);
       setRestorePassword('');
