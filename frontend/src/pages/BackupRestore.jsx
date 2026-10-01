@@ -27,6 +27,58 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
+function normalizeBackupDetail(detail) {
+  if (typeof detail === 'string' && detail.trim()) return detail;
+
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (!item || typeof item !== 'object') return String(item);
+        const field = Array.isArray(item.loc) && item.loc.length
+          ? String(item.loc[item.loc.length - 1])
+          : 'field';
+        return item.msg
+          ? field + ': ' + item.msg
+          : item.message || JSON.stringify(item);
+      })
+      .filter(Boolean);
+
+    if (messages.length) return messages.join(' · ');
+  }
+
+  if (detail && typeof detail === 'object') {
+    return detail.msg || detail.message || JSON.stringify(detail);
+  }
+
+  return '';
+}
+
+async function getBackupErrorMessage(error) {
+  const responseData = error?.response?.data;
+
+  if (typeof Blob !== 'undefined' && responseData instanceof Blob) {
+    try {
+      const raw = await responseData.text();
+      const parsed = JSON.parse(raw);
+      return (
+        normalizeBackupDetail(parsed?.detail) ||
+        normalizeBackupDetail(parsed?.message) ||
+        'Backup failed'
+      );
+    } catch {
+      return error?.message || 'Backup failed';
+    }
+  }
+
+  return (
+    normalizeBackupDetail(responseData?.detail) ||
+    normalizeBackupDetail(responseData?.message) ||
+    error?.message ||
+    'Backup failed'
+  );
+}
+
 export default function BackupRestore() {
   const isDark = useDark();
   const fileRef = useRef(null);
@@ -88,23 +140,17 @@ export default function BackupRestore() {
 
       const response = await api.post('/app-backup/create', form, {
         responseType: 'blob',
+        // Let the browser generate the multipart boundary. The global Axios
+        // instance has a JSON Content-Type default, so explicitly clear it
+        // for this FormData request.
+        headers: { 'Content-Type': undefined },
       });
 
       const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
       downloadBlob(response.data, 'taskosphere-backup-' + timestamp + '.taskosphere');
       toast.success(mode === 'full' ? 'Full application backup downloaded.' : 'Custom backup downloaded.');
     } catch (error) {
-      if (error?.response?.data instanceof Blob) {
-        try {
-          const text = await error.response.data.text();
-          const parsed = JSON.parse(text);
-          toast.error(parsed.detail || 'Backup failed');
-        } catch {
-          toast.error('Backup failed');
-        }
-      } else {
-        toast.error(error?.response?.data?.detail || 'Backup failed');
-      }
+      toast.error(await getBackupErrorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -122,7 +168,9 @@ export default function BackupRestore() {
       form.append('backup', restoreFile);
       form.append('password', restorePassword);
       form.append('confirmation', restoreConfirm);
-      const { data } = await api.post('/app-backup/restore', form);
+      const { data } = await api.post('/app-backup/restore', form, {
+        headers: { 'Content-Type': undefined },
+      });
       toast.success('Restore completed: ' + (data.restored_documents || 0) + ' documents restored.');
       setRestoreFile(null);
       setRestorePassword('');
