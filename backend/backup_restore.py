@@ -2,9 +2,8 @@
 
 The portable .taskosphere file is a single encrypted container. It stores a
 manifest, MongoDB documents in Canonical Extended JSON (BSON type preserving),
-and index definitions. Full backups cover every tenant-scoped MongoDB
-collection plus tenant-linked settings. Custom backups can select modules or
-individual collections.
+and index definitions. Full backups cover the complete application MongoDB
+collection set. Custom backups can select modules or individual collections.
 
 Authentication sessions/tokens are never exported. The current administrator's
 live authentication credentials are preserved during restore so the restore
@@ -69,7 +68,6 @@ USER_LINKED_FIELDS = {
     "assigned_to_user_id", "employee_id", "requested_by", "approved_by",
     "decided_by", "actor_user_id", "admin_id", "manager_id", "staff_id",
 }
-IDENTITY_FIELDS = {"company_id", "license_id", "commercial_customer_id"}
 
 MODULE_COLLECTION_MAP = {
     "taskosphere": {"tasks", "todos", "reminders", "notification_history", "notifications"},
@@ -185,7 +183,7 @@ async def _application_context(user: User):
     """Return application-wide backup context.
 
     Final-Taskosphere-3 is a single application/database and does not use the
-    commercial license/customer tenant model. Backup scope is therefore the
+    multi-tenant customer/license model. Backup scope is therefore the
     complete application data set (excluding security/session collections).
     """
     raw = _raw_db()
@@ -303,7 +301,7 @@ async def backup_info(current_user: User = Depends(get_current_user)):
         "notes": [
             "Full backup includes the complete application MongoDB data set and index definitions.",
             "Live sessions, reset tokens and OAuth state are never exported.",
-            "Restore is designed for this Taskosphere application/database and does not depend on license or licensee records.",
+            "Restore is designed for this standalone Taskosphere application/database and does not depend on commercial tenancy records.",
         ],
     }
 
