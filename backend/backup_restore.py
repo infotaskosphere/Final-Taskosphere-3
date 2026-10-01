@@ -183,7 +183,7 @@ async def _application_context(user: User):
     """Return application-wide backup context.
 
     Final-Taskosphere-3 is a single application/database and does not use the
-    multi-tenant customer/license model. Backup scope is therefore the
+    commercial customer/license model. Backup scope is therefore the
     complete application data set (excluding security/session collections).
     """
     raw = _raw_db()
