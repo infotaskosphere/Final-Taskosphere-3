@@ -424,6 +424,16 @@ MODULE_HIERARCHY: Dict[str, Dict[str, Any]] = {
             {"flag": "can_manage_performance","label": "Performance (manage)", "actions": ["create", "edit"]},
         ],
     },
+    # Backup & Restore is a standalone governed capability. It is not part
+    # of a business module because it operates on the tenant's entire data set.
+    "backup_restore": {
+        "flag": "can_view_backup_restore",
+        "label": "Backup & Restore",
+        "description": "Encrypted tenant backup creation and administrator-only restore.",
+        "pages": [
+            {"flag": "can_view_backup_restore", "label": "Backup & Restore", "actions": ["view", "create", "restore", "export"]},
+        ],
+    },
     # Admin is intentionally NOT gated by a stored per-user flag the way the
     # other six modules are — role == "admin" is itself the gate (see
     # section 1 of the governance spec: "Admin should NEVER require any
