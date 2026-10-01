@@ -43,6 +43,7 @@ router = APIRouter(tags=["Permission Governance"])
 # governance surface limited to the Accounts module, as requested, rather
 # than becoming a general-purpose permission editor.
 GOVERNED_MODULES = {
+    "backup_restore":      {"flag": "can_view_backup_restore", "label": "Backup & Restore"},
     "purchase":            {"flag": "can_view_purchase",           "label": "Purchase"},
     "sale":                {"flag": "can_view_sale",                "label": "Sale"},
     "bank":                {"flag": "can_view_bank",                "label": "Bank Accounts"},
