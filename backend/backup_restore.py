@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import asyncio
 import json
+import logging
 import os
 import secrets
 import tempfile
@@ -34,6 +35,8 @@ from starlette.background import BackgroundTask
 from backend.dependencies import DB_NAME, MONGO_URL, client, db, get_current_user, get_user_permissions
 from backend.models import User
 from backend.permission_governance import GOVERNED_MODULES
+
+logger = logging.getLogger(__name__)
 
 # Backup is a Permission Governance capability. Administrators retain their
 # bypass; other users must be explicitly approved for this flag before they
