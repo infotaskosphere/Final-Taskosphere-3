@@ -19,6 +19,7 @@ import logging
 import os
 import secrets
 import tempfile
+import time
 import zipfile
 from datetime import datetime, timezone
 from typing import Any
@@ -141,13 +142,41 @@ def _read_header(handle):
         raise HTTPException(status_code=400, detail=f"Invalid backup header: {exc}") from exc
 
 
-def _encrypt(zip_path: str, output_path: str, password: str) -> None:
+def _encrypt(
+    zip_path: str,
+    output_path: str,
+    password: str,
+    progress_id: str | None = None,
+    progress_start: float = 90.0,
+    progress_end: float = 100.0,
+    started_at: float | None = None,
+) -> None:
     salt, nonce = secrets.token_bytes(16), secrets.token_bytes(12)
     encryptor = Cipher(algorithms.AES(_key(password, salt)), modes.GCM(nonce)).encryptor()
+    total_bytes = max(1, os.path.getsize(zip_path))
+    encrypted_bytes = 0
     with open(output_path, "wb") as out, open(zip_path, "rb") as source:
         out.write(_header(salt, nonce))
         while chunk := source.read(CHUNK_SIZE):
+            encrypted_bytes += len(chunk)
             out.write(encryptor.update(chunk))
+            if progress_id:
+                elapsed = max(0.001, time.monotonic() - (started_at or time.monotonic()))
+                stage_percent = min(100.0, (encrypted_bytes / total_bytes) * 100.0)
+                percent = progress_start + ((progress_end - progress_start) * stage_percent / 100.0)
+                remaining = total_bytes - encrypted_bytes
+                speed = encrypted_bytes / elapsed if encrypted_bytes else 0.0
+                eta = (remaining / speed) if speed > 0 else None
+                _set_backup_progress(
+                    progress_id,
+                    phase="encrypting",
+                    percent=round(percent, 2),
+                    processed_bytes=encrypted_bytes,
+                    total_bytes=total_bytes,
+                    eta_seconds=round(eta, 1) if eta is not None else None,
+                    elapsed_seconds=round(elapsed, 1),
+                    current_collection=None,
+                )
         out.write(encryptor.finalize())
         out.write(encryptor.tag)
 
@@ -310,6 +339,70 @@ async def backup_info(current_user: User = Depends(get_current_user)):
     }
 
 
+
+
+# ---------------------------------------------------------------------------
+# Backup progress tracking
+# ---------------------------------------------------------------------------
+# Progress is intentionally kept in-process because it is only used to give
+# the browser a live status during the current backup request. The actual
+# backup file remains on the server until the response background task removes
+# it.
+_BACKUP_PROGRESS = {}
+_BACKUP_PROGRESS_TTL_SECONDS = 3600
+
+def _set_backup_progress(progress_id: str | None, **values):
+    if not progress_id:
+        return
+    now = time.time()
+    state = _BACKUP_PROGRESS.get(progress_id, {})
+    state.update(values)
+    state["updated_at"] = now
+    _BACKUP_PROGRESS[progress_id] = state
+
+    # Opportunistic cleanup; no separate scheduler is necessary.
+    cutoff = now - _BACKUP_PROGRESS_TTL_SECONDS
+    stale = [
+        key for key, item in _BACKUP_PROGRESS.items()
+        if item.get("updated_at", now) < cutoff
+    ]
+    for key in stale:
+        _BACKUP_PROGRESS.pop(key, None)
+
+
+def _get_backup_progress(progress_id: str):
+    state = _BACKUP_PROGRESS.get(progress_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Backup progress session not found.")
+    state = dict(state)
+    state.pop("updated_at", None)
+    return state
+
+
+async def _count_collection_documents(raw, name: str) -> int:
+    collection = raw[name]
+    counter = getattr(collection, "count_documents", None)
+    if callable(counter):
+        try:
+            return int(await counter({}))
+        except Exception:
+            pass
+
+    count = 0
+    cursor = collection.find({})
+    async for _doc in cursor:
+        count += 1
+    return count
+
+
+@router.get("/create/progress/{progress_id}")
+async def backup_create_progress(progress_id: str, current_user: User = Depends(get_current_user)):
+    _require_backup_access(current_user)
+    if not progress_id or len(progress_id) > 120:
+        raise HTTPException(status_code=400, detail="Invalid backup progress id.")
+    return _get_backup_progress(progress_id)
+
+
 @router.post("/create")
 async def create_backup(request: Request, current_user: User = Depends(get_current_user)):
     _require_backup_access(current_user)
@@ -347,8 +440,20 @@ async def create_backup(request: Request, current_user: User = Depends(get_curre
         raise HTTPException(status_code=400, detail="Backup password must be at least 8 characters.")
 
     requested = [item.strip() for item in collections.split(",") if item.strip()] or None
+    progress_id = (request.headers.get("x-backup-progress-id") or "").strip()[:120] or None
+    if progress_id:
+        _set_backup_progress(
+            progress_id,
+            phase="queued",
+            percent=0.0,
+            processed_documents=0,
+            total_documents=0,
+            eta_seconds=None,
+            elapsed_seconds=0.0,
+            current_collection=None,
+        )
     try:
-        output, _manifest = await _build_archive(current_user, password, requested)
+        output, _manifest = await _build_archive(current_user, password, requested, progress_id)
     except HTTPException:
         raise
     except Exception as exc:
@@ -596,3 +701,204 @@ async def _build_archive_streaming(user: User, password: str, requested: list[st
 # preserving the existing route, authentication, password validation,
 # encryption format, and response filename.
 _build_archive = _build_archive_streaming
+
+
+# ---------------------------------------------------------------------------
+# Progressive backup builder
+# ---------------------------------------------------------------------------
+async def _build_archive_with_progress(
+    user: User,
+    password: str,
+    requested: list[str] | None,
+    progress_id: str | None = None,
+):
+    selected = await _resolve_collections(user, requested)
+    raw = _raw_db()
+    started_at = time.monotonic()
+
+    _set_backup_progress(
+        progress_id,
+        phase="preparing",
+        percent=0.0,
+        processed_documents=0,
+        total_documents=0,
+        eta_seconds=None,
+        elapsed_seconds=0.0,
+        current_collection=None,
+    )
+
+    # Count first so the UI can display a real percentage rather than a
+    # collection-index approximation.
+    total_documents = 0
+    for name in selected:
+        total_documents += await _count_collection_documents(raw, name)
+
+    _set_backup_progress(
+        progress_id,
+        phase="creating",
+        percent=0.0 if total_documents else 90.0,
+        processed_documents=0,
+        total_documents=total_documents,
+        eta_seconds=None,
+        elapsed_seconds=round(time.monotonic() - started_at, 1),
+        current_collection=None,
+    )
+
+    manifest = {
+        "format": "taskosphere-backup",
+        "version": FORMAT_VERSION,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "database": DB_NAME,
+        "scope": "single_application",
+        "owner_user_id": _s(user.id),
+        "bson_encoding": "MongoDB Extended JSON v2 canonical",
+        "encryption": "AES-256-GCM + PBKDF2-HMAC-SHA256",
+        "selection": "full" if not requested else "custom",
+        "collections": {},
+        "excluded_collections": sorted(EXCLUDED_COLLECTIONS),
+    }
+
+    fd, zip_path = tempfile.mkstemp(prefix="taskosphere-backup-", suffix=".zip")
+    os.close(fd)
+    output = None
+    processed_documents = 0
+
+    try:
+        with zipfile.ZipFile(
+            zip_path,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            compresslevel=6,
+            allowZip64=True,
+        ) as archive:
+            for name in selected:
+                safe = name.replace("/", "_")
+                document_count = 0
+
+                with archive.open(
+                    f"collections/{safe}.jsonl",
+                    mode="w",
+                    force_zip64=True,
+                ) as entry:
+                    cursor = raw[name].find({})
+                    async for doc in cursor:
+                        entry.write((_dump(doc) + "\n").encode("utf-8"))
+                        document_count += 1
+                        processed_documents += 1
+
+                        elapsed = max(0.001, time.monotonic() - started_at)
+                        ratio = (
+                            processed_documents / total_documents
+                            if total_documents
+                            else 1.0
+                        )
+                        percent = min(90.0, ratio * 90.0)
+                        speed = processed_documents / elapsed if processed_documents else 0.0
+                        remaining = max(0, total_documents - processed_documents)
+                        eta = (remaining / speed) if speed > 0 else None
+
+                        _set_backup_progress(
+                            progress_id,
+                            phase="creating",
+                            percent=round(percent, 2),
+                            processed_documents=processed_documents,
+                            total_documents=total_documents,
+                            eta_seconds=round(eta, 1) if eta is not None else None,
+                            elapsed_seconds=round(elapsed, 1),
+                            current_collection=name,
+                        )
+
+                        if processed_documents % 50 == 0:
+                            await asyncio.sleep(0)
+
+                try:
+                    list_indexes = getattr(raw[name], "list_indexes", None)
+                    indexes = (
+                        await list_indexes().to_list(1000)
+                        if callable(list_indexes)
+                        else []
+                    )
+                    indexes = [idx for idx in indexes if idx.get("name") != "_id_"]
+                    if indexes:
+                        archive.writestr(f"indexes/{safe}.json", _dump(indexes))
+                except Exception:
+                    pass
+
+                if document_count:
+                    manifest["collections"][name] = {
+                        "documents": document_count,
+                        "safe_name": safe,
+                    }
+
+            archive.writestr(
+                "manifest.json",
+                json.dumps(manifest, indent=2, sort_keys=True),
+            )
+
+        fd, output = tempfile.mkstemp(
+            prefix="taskosphere-backup-",
+            suffix=".taskosphere",
+        )
+        os.close(fd)
+
+        _set_backup_progress(
+            progress_id,
+            phase="encrypting",
+            percent=90.0,
+            processed_documents=processed_documents,
+            total_documents=total_documents,
+            eta_seconds=None,
+            elapsed_seconds=round(time.monotonic() - started_at, 1),
+            current_collection=None,
+        )
+
+        _encrypt(
+            zip_path,
+            output,
+            password,
+            progress_id=progress_id,
+            progress_start=90.0,
+            progress_end=100.0,
+            started_at=started_at,
+        )
+
+        file_size = os.path.getsize(output)
+        elapsed = max(0.001, time.monotonic() - started_at)
+        _set_backup_progress(
+            progress_id,
+            phase="ready",
+            percent=100.0,
+            processed_documents=processed_documents,
+            total_documents=total_documents,
+            eta_seconds=0.0,
+            elapsed_seconds=round(elapsed, 1),
+            current_collection=None,
+            file_size=file_size,
+        )
+
+        return output, manifest
+
+    except Exception as exc:
+        _set_backup_progress(
+            progress_id,
+            phase="error",
+            percent=0.0,
+            eta_seconds=None,
+            elapsed_seconds=round(time.monotonic() - started_at, 1),
+            error="Backup creation failed on the server.",
+        )
+        logger.error("Progressive backup creation failed: %s", exc, exc_info=True)
+        if output:
+            try:
+                os.unlink(output)
+            except FileNotFoundError:
+                pass
+        raise
+    finally:
+        try:
+            os.unlink(zip_path)
+        except FileNotFoundError:
+            pass
+
+
+_build_archive = _build_archive_with_progress
