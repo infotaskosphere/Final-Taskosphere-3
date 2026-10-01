@@ -175,7 +175,7 @@ export default function BackupRestore() {
           <p className={'mt-1 text-xs ' + muted}>Password protected. Live sessions and reset tokens are never exported.</p>
         </div>
         <div className={'rounded-2xl border p-4 ' + card}>
-          <div className="flex items-center gap-2"><Users className="h-4 w-4 text-violet-500" /><span className={'text-xs font-bold uppercase tracking-wider ' + muted}>Tenant</span></div>
+          <div className="flex items-center gap-2"><Users className="h-4 w-4 text-violet-500" /><span className={'text-xs font-bold uppercase tracking-wider ' + muted} >Application</span></div>
           <p className={'mt-2 text-sm font-semibold ' + heading}>Standalone application</p>
           <p className={'mt-1 text-xs ' + muted}>{info?.user_count ?? '—'} users · restore preserves the active administrator</p>
         </div>
