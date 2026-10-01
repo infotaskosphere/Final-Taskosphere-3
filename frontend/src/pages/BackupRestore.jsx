@@ -79,6 +79,75 @@ async function getBackupErrorMessage(error) {
   );
 }
 
+
+function formatEta(seconds) {
+  if (seconds === null || seconds === undefined || !Number.isFinite(Number(seconds))) {
+    return 'Calculating…';
+  }
+  const value = Math.max(0, Math.round(Number(seconds)));
+  if (value < 60) return value + 's remaining';
+  const minutes = Math.floor(value / 60);
+  const secs = value % 60;
+  if (minutes < 60) return minutes + 'm ' + secs + 's remaining';
+  const hours = Math.floor(minutes / 60);
+  return hours + 'h ' + (minutes % 60) + 'm remaining';
+}
+
+function formatBytes(value) {
+  if (!Number.isFinite(Number(value)) || Number(value) <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let amount = Number(value);
+  let index = 0;
+  while (amount >= 1024 && index < units.length - 1) {
+    amount /= 1024;
+    index += 1;
+  }
+  return amount.toFixed(index === 0 ? 0 : amount >= 100 ? 0 : amount >= 10 ? 1 : 2) + ' ' + units[index];
+}
+
+async function readResponseWithProgress(response, onProgress) {
+  const total = Number(response.headers.get('content-length')) || 0;
+  if (!response.body || !response.body.getReader) {
+    const blob = await response.blob();
+    onProgress({ loaded: blob.size, total: total || blob.size, percent: 100, etaSeconds: 0 });
+    return blob;
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let loaded = 0;
+  const started = performance.now();
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    loaded += value.byteLength;
+
+    const elapsed = Math.max(0.001, (performance.now() - started) / 1000);
+    const speed = loaded / elapsed;
+    const percent = total > 0 ? Math.min(100, (loaded / total) * 100) : 0;
+    const remaining = total > 0 ? Math.max(0, total - loaded) : 0;
+    onProgress({
+      loaded,
+      total,
+      percent,
+      etaSeconds: speed > 0 && total > 0 ? remaining / speed : null,
+    });
+  }
+
+  const blob = new Blob(chunks, {
+    type: response.headers.get('content-type') || 'application/octet-stream',
+  });
+  onProgress({
+    loaded,
+    total: total || loaded,
+    percent: 100,
+    etaSeconds: 0,
+  });
+  return blob;
+}
+
 export default function BackupRestore() {
   const isDark = useDark();
   const fileRef = useRef(null);
@@ -92,6 +161,15 @@ export default function BackupRestore() {
   const [restoreConfirm, setRestoreConfirm] = useState('');
   const [selectedModule, setSelectedModule] = useState('taskosphere');
   const [selectedCollections, setSelectedCollections] = useState([]);
+  const [transfer, setTransfer] = useState({
+    active: false,
+    phase: '',
+    percent: 0,
+    etaSeconds: null,
+    processed: 0,
+    total: 0,
+    detail: '',
+  });
 
   const loadInfo = async () => {
     setLoadingInfo(true);
@@ -132,19 +210,78 @@ export default function BackupRestore() {
       return;
     }
 
+    const progressId =
+      (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : Date.now() + '-' + Math.random().toString(36).slice(2);
+
     setBusy(true);
+    setTransfer({
+      active: true,
+      phase: 'Preparing backup…',
+      percent: 0,
+      etaSeconds: null,
+      processed: 0,
+      total: 0,
+      detail: 'Calculating exact backup size and document count…',
+    });
+
+    let pollTimer = null;
+    let stopped = false;
+
+    const pollProgress = async () => {
+      if (stopped) return;
+      try {
+        const { data } = await api.get(
+          '/app-backup/create/progress/' + encodeURIComponent(progressId),
+          { _skipReadyGate: true, _silent: true }
+        );
+        if (data?.phase) {
+          setTransfer((current) => ({
+            ...current,
+            active: true,
+            phase: data.phase === 'creating'
+              ? 'Creating encrypted backup…'
+              : data.phase === 'encrypting'
+                ? 'Encrypting backup…'
+                : data.phase === 'preparing'
+                  ? 'Preparing backup…'
+                  : data.phase === 'ready'
+                    ? 'Backup created. Starting download…'
+                    : data.phase,
+            percent: Number.isFinite(Number(data.percent)) ? Number(data.percent) : current.percent,
+            etaSeconds: data.eta_seconds ?? current.etaSeconds,
+            processed: data.processed_documents ?? data.processed_bytes ?? current.processed,
+            total: data.total_documents ?? data.total_bytes ?? current.total,
+            detail: data.current_collection
+              ? 'Collection: ' + data.current_collection
+              : current.detail,
+          }));
+        }
+      } catch {
+        // The main request remains authoritative; polling is best-effort.
+      }
+    };
+
+    pollTimer = window.setInterval(pollProgress, 700);
+    void pollProgress();
+
     try {
       const form = new FormData();
       form.append('password', password);
       if (mode !== 'full') form.append('collections', customSelection.join(','));
 
-      // Use native fetch for this multipart download so the browser owns
-      // the multipart boundary and the global Axios JSON default cannot
-      // interfere with the request.
+      setTransfer((current) => ({
+        ...current,
+        phase: 'Creating backup…',
+        detail: 'Processing application data…',
+      }));
+
       const response = await fetch(BASE_URL + '/app-backup/create', {
         method: 'POST',
         headers: {
           Authorization: getToken() ? 'Bearer ' + getToken() : '',
+          'X-Backup-Progress-ID': progressId,
         },
         body: form,
       });
@@ -166,16 +303,60 @@ export default function BackupRestore() {
         throw requestError;
       }
 
-      const backupBlob = await response.blob();
+      setTransfer((current) => ({
+        ...current,
+        active: true,
+        phase: 'Downloading backup…',
+        percent: 0,
+        etaSeconds: null,
+        processed: 0,
+        total: Number(response.headers.get('content-length')) || 0,
+        detail: 'Transferring encrypted backup to your device…',
+      }));
+
+      const backupBlob = await readResponseWithProgress(response, ({ loaded, total, percent, etaSeconds }) => {
+        setTransfer((current) => ({
+          ...current,
+          active: true,
+          phase: 'Downloading backup…',
+          percent,
+          etaSeconds,
+          processed: loaded,
+          total,
+          detail: total
+            ? formatBytes(loaded) + ' / ' + formatBytes(total)
+            : formatBytes(loaded) + ' downloaded',
+        }));
+      });
+
       const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
       downloadBlob(backupBlob, 'taskosphere-backup-' + timestamp + '.taskosphere');
+      setTransfer({
+        active: false,
+        phase: 'Complete',
+        percent: 100,
+        etaSeconds: 0,
+        processed: backupBlob.size,
+        total: backupBlob.size,
+        detail: 'Backup downloaded successfully.',
+      });
       toast.success(mode === 'full' ? 'Full application backup downloaded.' : 'Custom backup downloaded.');
     } catch (error) {
+      setTransfer((current) => ({
+        ...current,
+        active: false,
+        phase: 'Failed',
+        etaSeconds: null,
+        detail: '',
+      }));
       toast.error(await getBackupErrorMessage(error));
     } finally {
+      stopped = true;
+      if (pollTimer) window.clearInterval(pollTimer);
       setBusy(false);
     }
   };
+
 
   const restoreBackup = async () => {
     if (!restoreFile) return toast.error('Choose a .taskosphere backup file.');
@@ -226,6 +407,34 @@ export default function BackupRestore() {
           </button>
         </div>
       </div>
+
+      {transfer.phase && (
+        <div className={'rounded-2xl border p-4 ' + card}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className={'text-sm font-bold ' + heading}>{transfer.phase}</p>
+              <p className={'text-[11px] mt-1 ' + muted}>{transfer.detail || 'Working…'}</p>
+            </div>
+            <div className="text-right shrink-0">
+              <p className="text-lg font-extrabold text-blue-600">{Math.min(100, Math.max(0, Number(transfer.percent || 0))).toFixed(2)}%</p>
+              <p className={'text-[10px] ' + muted}>
+                {transfer.percent >= 100 ? 'Complete' : formatEta(transfer.etaSeconds)}
+              </p>
+            </div>
+          </div>
+          <div className="mt-3 h-2.5 rounded-full overflow-hidden bg-slate-200 dark:bg-slate-700">
+            <div
+              className="h-full rounded-full bg-blue-600 transition-[width] duration-300"
+              style={{ width: Math.min(100, Math.max(0, Number(transfer.percent || 0))) + '%' }}
+            />
+          </div>
+          {transfer.total > 0 && (
+            <p className={'text-[10px] mt-2 ' + muted}>
+              {formatBytes(transfer.processed)} / {formatBytes(transfer.total)}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className={'rounded-2xl border p-4 ' + card}>
