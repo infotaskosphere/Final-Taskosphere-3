@@ -1,4 +1,4 @@
-"""Portable Taskosphere customer backup / restore.
+"""Portable Taskosphere application backup / restore.
 
 The portable .taskosphere file is a single encrypted container. It stores a
 manifest, MongoDB documents in Canonical Extended JSON (BSON type preserving),
@@ -6,9 +6,9 @@ and index definitions. Full backups cover every tenant-scoped MongoDB
 collection plus tenant-linked settings. Custom backups can select modules or
 individual collections.
 
-Authentication sessions/tokens are never exported. On cross-license restore,
-the target company/license and the administrator's live authentication
-credentials are preserved so a restore cannot lock the target account out.
+Authentication sessions/tokens are never exported. The current administrator's
+live authentication credentials are preserved during restore so the restore
+cannot lock the active administrator out of the application.
 """
 
 from __future__ import annotations
@@ -181,61 +181,28 @@ def _s(value: Any) -> str:
     return str(value).strip() if value is not None else ""
 
 
-def _company_query(company_id: str) -> dict:
-    values: list[Any] = [company_id]
-    if ObjectId.is_valid(company_id):
-        values.append(ObjectId(company_id))
-    return {"$or": [{"company_id": value} for value in values]}
+async def _application_context(user: User):
+    """Return application-wide backup context.
 
-
-async def _tenant_context(user: User):
-    company_id = _s(getattr(user, "company_id", None))
-    if not company_id:
-        raise HTTPException(status_code=403, detail="Your account is not attached to a customer company.")
+    Final-Taskosphere-3 is a single application/database and does not use the
+    commercial license/customer tenant model. Backup scope is therefore the
+    complete application data set (excluding security/session collections).
+    """
     raw = _raw_db()
-    company = await raw.companies.find_one({"id": company_id})
-    if not company and ObjectId.is_valid(company_id):
-        company = await raw.companies.find_one({"_id": ObjectId(company_id)})
-    users = await raw.users.find(_company_query(company_id), {"_id": 1, "id": 1}).to_list(100000)
+    users = await raw.users.find({}).to_list(100000)
     user_ids = {_s(u.get("id")) for u in users if u.get("id")}
     user_ids.update(_s(u.get("_id")) for u in users if u.get("_id") is not None)
-    identities = {field: {_s(getattr(user, field, None))} for field in IDENTITY_FIELDS}
-    for field in IDENTITY_FIELDS:
-        if company and company.get(field) is not None:
-            identities[field].add(_s(company[field]))
-        identities[field].discard("")
-    return company_id, company, user_ids, identities
+    user_ids.add(_s(user.id))
+    return user_ids
 
 
-def _linked(doc: dict, user_ids: set[str], identities: dict[str, set[str]]) -> bool:
-    for field in IDENTITY_FIELDS:
-        if _s(doc.get(field)) in identities.get(field, set()):
-            return True
-    for field in USER_LINKED_FIELDS:
-        value = doc.get(field)
-        if _s(value) in user_ids:
-            return True
-        if isinstance(value, list) and any(_s(item) in user_ids for item in value):
-            return True
-    return False
-
-
-async def _collection_docs(raw, name: str, company_id: str, user_ids: set[str], identities: dict[str, set[str]], company: dict | None):
+async def _collection_docs(raw, name: str):
     if name in EXCLUDED_COLLECTIONS:
         return []
-    if name == "companies":
-        docs = await raw[name].find({"id": company_id}).to_list(10)
-        if not docs and company and company.get("_id") is not None:
-            docs = await raw[name].find({"_id": company["_id"]}).to_list(10)
-        return docs
-    if name == "users":
-        return await raw[name].find(_company_query(company_id)).to_list(100000)
-    docs = await raw[name].find({"$or": [{"company_id": {"$exists": True}}, {"user_id": {"$exists": True}}]}).to_list(100000)
-    return [doc for doc in docs if _linked(doc, user_ids, identities)]
+    return await raw[name].find({}).to_list(100000)
 
 
 async def _resolve_collections(user: User, requested: list[str] | None):
-    company_id, company, user_ids, identities = await _tenant_context(user)
     raw = _raw_db()
     list_names = getattr(raw, "list_collection_names", None)
     available = (
@@ -250,19 +217,31 @@ async def _resolve_collections(user: User, requested: list[str] | None):
         if not requested_set:
             raise HTTPException(status_code=400, detail="No valid backup collections were selected.")
         selected = sorted(requested_set)
-    return company_id, company, user_ids, identities, selected
+    return selected
 
 
 async def _build_archive(user: User, password: str, requested: list[str] | None):
-    company_id, company, user_ids, identities, selected = await _resolve_collections(user, requested)
+    selected = await _resolve_collections(user, requested)
     raw = _raw_db()
-    manifest = {"format": "taskosphere-backup", "version": FORMAT_VERSION, "created_at": datetime.now(timezone.utc).isoformat(), "database": DB_NAME, "scope": "single_customer_tenant", "source_company_id": company_id, "source_license_id": next(iter(identities["license_id"]), None), "source_commercial_customer_id": next(iter(identities["commercial_customer_id"]), None), "owner_user_id": _s(user.id), "company_name": (company or {}).get("name"), "bson_encoding": "MongoDB Extended JSON v2 canonical", "encryption": "AES-256-GCM + PBKDF2-HMAC-SHA256", "selection": "full" if not requested else "custom", "collections": {}, "excluded_collections": sorted(EXCLUDED_COLLECTIONS)}
+    manifest = {
+        "format": "taskosphere-backup",
+        "version": FORMAT_VERSION,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "database": DB_NAME,
+        "scope": "single_application",
+        "owner_user_id": _s(user.id),
+        "bson_encoding": "MongoDB Extended JSON v2 canonical",
+        "encryption": "AES-256-GCM + PBKDF2-HMAC-SHA256",
+        "selection": "full" if not requested else "custom",
+        "collections": {},
+        "excluded_collections": sorted(EXCLUDED_COLLECTIONS),
+    }
     fd, zip_path = tempfile.mkstemp(prefix="taskosphere-backup-", suffix=".zip")
     os.close(fd)
     try:
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
             for name in selected:
-                docs = await _collection_docs(raw, name, company_id, user_ids, identities, company)
+                docs = await _collection_docs(raw, name)
                 if not docs:
                     continue
                 safe = name.replace("/", "_")
@@ -301,8 +280,8 @@ async def _build_archive(user: User, password: str, requested: list[str] | None)
 @router.get("/info")
 async def backup_info(current_user: User = Depends(get_current_user)):
     _require_backup_access(current_user)
-    company_id, company, user_ids, identities = await _tenant_context(current_user)
     raw = _raw_db()
+    users = await raw.users.find({}).to_list(100000)
     list_names = getattr(raw, "list_collection_names", None)
     available = (
         sorted(set(await list_names()) - EXCLUDED_COLLECTIONS)
@@ -310,7 +289,23 @@ async def backup_info(current_user: User = Depends(get_current_user)):
         else sorted(set(getattr(raw, "_collections", {}).keys()) - EXCLUDED_COLLECTIONS)
     )
     modules = {module: sorted(set(collections) & set(available)) for module, collections in MODULE_COLLECTION_MAP.items()}
-    return {"format": "Taskosphere Portable Backup v1", "company_id": company_id, "company_name": (company or {}).get("name"), "user_count": len(user_ids), "collections": available, "modules": modules, "encrypted": True, "requires_password": True, "mongo_database": DB_NAME, "mongo_connection_configured": bool(MONGO_URL), "excluded_security_collections": sorted(EXCLUDED_COLLECTIONS), "notes": ["Full backup includes tenant MongoDB data, tenant-linked settings and index definitions.", "Live sessions, reset tokens and OAuth state are never exported.", "Cross-license restore remaps company/license/customer identifiers to the target tenant."]}
+    return {
+        "format": "Taskosphere Portable Backup v1",
+        "scope": "single_application",
+        "user_count": len(users),
+        "collections": available,
+        "modules": modules,
+        "encrypted": True,
+        "requires_password": True,
+        "mongo_database": DB_NAME,
+        "mongo_connection_configured": bool(MONGO_URL),
+        "excluded_security_collections": sorted(EXCLUDED_COLLECTIONS),
+        "notes": [
+            "Full backup includes the complete application MongoDB data set and index definitions.",
+            "Live sessions, reset tokens and OAuth state are never exported.",
+            "Restore is designed for this Taskosphere application/database and does not depend on license or licensee records.",
+        ],
+    }
 
 
 @router.post("/create")
@@ -356,83 +351,58 @@ def _replace(value: Any, replacements: dict[str, str]) -> Any:
 
 
 async def _restore(manifest: dict, collections: list[tuple[str, list[dict]]], current_user: User):
-    target_company_id, target_company, target_user_ids, target_identities = await _tenant_context(current_user)
-    source_company = _s(manifest.get("source_company_id"))
-    source_owner = _s(manifest.get("owner_user_id"))
-    if not source_company or not source_owner:
-        raise HTTPException(status_code=400, detail="Backup is missing tenant ownership metadata.")
-    replacements = {source_company: target_company_id, source_owner: _s(current_user.id)}
-    source_license = _s(manifest.get("source_license_id"))
-    source_customer = _s(manifest.get("source_commercial_customer_id"))
-    target_license = next(iter(target_identities["license_id"]), "")
-    target_customer = next(iter(target_identities["commercial_customer_id"]), "")
-    if source_license and target_license: replacements[source_license] = target_license
-    if source_customer and target_customer: replacements[source_customer] = target_customer
     raw = _raw_db()
     restored = removed = 0
     selected_names = {name for name, _ in collections}
+
     for name in selected_names:
-        if name in EXCLUDED_COLLECTIONS or name == "companies":
+        if name in EXCLUDED_COLLECTIONS:
             continue
         if name == "users":
-            result = await raw.users.delete_many({"company_id": target_company_id, "id": {"$ne": current_user.id}})
-        else:
-            existing = await raw[name].find({}).to_list(100000)
-            result = type("DeleteResult", (), {"deleted_count": 0})()
-            for doc in existing:
-                if (
-                    _s(doc.get("company_id")) == target_company_id
-                    or _linked(doc, {_s(current_user.id)}, target_identities)
-                ) and doc.get("_id") is not None:
-                    result.deleted_count += (
-                        await raw[name].delete_one({"_id": doc["_id"]})
-                    ).deleted_count
-        removed += getattr(result, "deleted_count", 0)
+            result = await raw.users.delete_many({"id": {"$ne": current_user.id}})
+            removed += getattr(result, "deleted_count", 0)
+            continue
+
+        existing = await raw[name].find({}).to_list(100000)
+        for doc in existing:
+            if doc.get("_id") is not None:
+                await raw[name].delete_one({"_id": doc["_id"]})
+            elif doc.get("id") is not None:
+                await raw[name].delete_one({"id": doc["id"]})
+            else:
+                continue
+            removed += 1
+
     for name, docs in collections:
         if name in EXCLUDED_COLLECTIONS:
             continue
-        rewritten = [_replace(doc, replacements) for doc in docs]
-        if name == "companies":
-            if not rewritten:
-                continue
-            doc = rewritten[0]
-            doc["id"] = target_company_id
-            if target_license: doc["license_id"] = target_license
-            if target_customer: doc["commercial_customer_id"] = target_customer
-            if target_company and target_company.get("_id") is not None: doc["_id"] = target_company["_id"]
-            query = {"_id": target_company["_id"]} if target_company and target_company.get("_id") is not None else {"id": target_company_id}
-            if hasattr(raw.companies, "replace_one"):
-                await raw.companies.replace_one(query, doc, upsert=True)
-            else:
-                await raw.companies.update_one(query, {"$set": doc}, upsert=True)
-            restored += 1
-            continue
+
         if name == "users":
             live_admin = await raw.users.find_one({"id": current_user.id})
-            for doc in rewritten:
-                if _s(doc.get("id")) == _s(current_user.id):
-                    if live_admin:
-                        for field in AUTH_FIELDS_TO_PRESERVE:
-                            if field in live_admin: doc[field] = live_admin[field]
+            for doc in docs:
+                doc = dict(doc)
+                if _s(doc.get("id")) == _s(current_user.id) and live_admin:
+                    for field in AUTH_FIELDS_TO_PRESERVE:
+                        if field in live_admin:
+                            doc[field] = live_admin[field]
                     doc["id"] = current_user.id
-                    doc["company_id"] = target_company_id
-                else:
-                    doc["company_id"] = target_company_id
+                query = {"id": doc.get("id")} if doc.get("id") is not None else {"_id": doc.get("_id")}
                 if hasattr(raw.users, "replace_one"):
-                    await raw.users.replace_one({"id": doc.get("id")}, doc, upsert=True)
+                    await raw.users.replace_one(query, doc, upsert=True)
                 else:
-                    await raw.users.update_one({"id": doc.get("id")}, {"$set": doc}, upsert=True)
+                    await raw.users.update_one(query, {"$set": doc}, upsert=True)
                 restored += 1
             continue
-        for doc in rewritten:
-            if "company_id" in doc: doc["company_id"] = target_company_id
+
+        for doc in docs:
             query = {"_id": doc["_id"]} if doc.get("_id") is not None else {"id": doc.get("id")}
             if hasattr(raw[name], "replace_one"):
                 await raw[name].replace_one(query, doc, upsert=True)
             else:
                 await raw[name].update_one(query, {"$set": doc}, upsert=True)
             restored += 1
-    return {"restored_documents": restored, "removed_documents": removed, "target_company_id": target_company_id}
+
+    return {"restored_documents": restored, "removed_documents": removed}
 
 
 @router.post("/restore")
@@ -455,7 +425,7 @@ async def restore_backup(backup: UploadFile = File(...), password: str = Form(..
                 out.write(chunk)
         zip_path = _decrypt(source_path, password)
         manifest, collections = await _read_archive(zip_path)
-        if manifest.get("scope") != "single_customer_tenant":
+        if manifest.get("scope") != "single_application":
             raise HTTPException(status_code=400, detail="Unsupported backup scope.")
         result = await _restore(manifest, collections, current_user)
         return {"success": True, "message": "Application backup restored successfully.", **result}
