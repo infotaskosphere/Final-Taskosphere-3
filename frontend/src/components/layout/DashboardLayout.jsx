@@ -222,6 +222,7 @@ const NAV_GROUPS = [
       { path: '/settings/email',   icon: Mail,     label: 'Email Accounts'   },
       { path: '/settings/general', icon: Settings, label: 'General Settings' },
       { path: '/settings/whatsapp', icon: MessageCircle, label: 'Message Automation' },
+      { path: '/settings/backup', icon: Database, label: 'Backup & Restore', permission: 'can_view_backup_restore' },
     ],
   },
 ];
