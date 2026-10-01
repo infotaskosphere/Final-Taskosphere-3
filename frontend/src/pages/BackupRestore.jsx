@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Archive, AlertTriangle, Database, Download, HardDriveDownload, LockKeyhole, RefreshCw, RotateCcw, ShieldCheck, Upload, Users } from 'lucide-react';
 import { toast } from 'sonner';
-import api from '@/lib/api';
+import api, { BASE_URL, getToken } from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
 
 const MODULE_LABELS = {
@@ -138,16 +138,37 @@ export default function BackupRestore() {
       form.append('password', password);
       if (mode !== 'full') form.append('collections', customSelection.join(','));
 
-      const response = await api.post('/app-backup/create', form, {
-        responseType: 'blob',
-        // Let the browser generate the multipart boundary. The global Axios
-        // instance has a JSON Content-Type default, so explicitly clear it
-        // for this FormData request.
-        headers: { 'Content-Type': undefined },
+      // Use native fetch for this multipart download so the browser owns
+      // the multipart boundary and the global Axios JSON default cannot
+      // interfere with the request.
+      const response = await fetch(BASE_URL + '/app-backup/create', {
+        method: 'POST',
+        headers: {
+          Authorization: getToken() ? 'Bearer ' + getToken() : '',
+        },
+        body: form,
       });
 
+      if (!response.ok) {
+        const errorText = await response.text();
+        let detail = '';
+        try {
+          const parsed = JSON.parse(errorText);
+          detail = normalizeBackupDetail(parsed?.detail) || normalizeBackupDetail(parsed?.message);
+        } catch {
+          detail = errorText;
+        }
+        const requestError = new Error(detail || 'Backup failed (' + response.status + ')');
+        requestError.response = {
+          status: response.status,
+          data: { detail: detail || 'Backup failed (' + response.status + ')' },
+        };
+        throw requestError;
+      }
+
+      const backupBlob = await response.blob();
       const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-      downloadBlob(response.data, 'taskosphere-backup-' + timestamp + '.taskosphere');
+      downloadBlob(backupBlob, 'taskosphere-backup-' + timestamp + '.taskosphere');
       toast.success(mode === 'full' ? 'Full application backup downloaded.' : 'Custom backup downloaded.');
     } catch (error) {
       toast.error(await getBackupErrorMessage(error));
@@ -168,9 +189,7 @@ export default function BackupRestore() {
       form.append('backup', restoreFile);
       form.append('password', restorePassword);
       form.append('confirmation', restoreConfirm);
-      const { data } = await api.post('/app-backup/restore', form, {
-        headers: { 'Content-Type': undefined },
-      });
+      const { data } = await api.post('/app-backup/restore', form);
       toast.success('Restore completed: ' + (data.restored_documents || 0) + ' documents restored.');
       setRestoreFile(null);
       setRestorePassword('');
