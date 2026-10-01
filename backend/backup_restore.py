@@ -303,7 +303,12 @@ async def backup_info(current_user: User = Depends(get_current_user)):
     _require_backup_access(current_user)
     company_id, company, user_ids, identities = await _tenant_context(current_user)
     raw = _raw_db()
-    available = sorted(set(await raw.list_collection_names()) - EXCLUDED_COLLECTIONS)
+    list_names = getattr(raw, "list_collection_names", None)
+    available = (
+        sorted(set(await list_names()) - EXCLUDED_COLLECTIONS)
+        if callable(list_names)
+        else sorted(set(getattr(raw, "_collections", {}).keys()) - EXCLUDED_COLLECTIONS)
+    )
     modules = {module: sorted(set(collections) & set(available)) for module, collections in MODULE_COLLECTION_MAP.items()}
     return {"format": "Taskosphere Portable Backup v1", "company_id": company_id, "company_name": (company or {}).get("name"), "user_count": len(user_ids), "collections": available, "modules": modules, "encrypted": True, "requires_password": True, "mongo_database": DB_NAME, "mongo_connection_configured": bool(MONGO_URL), "excluded_security_collections": sorted(EXCLUDED_COLLECTIONS), "notes": ["Full backup includes tenant MongoDB data, tenant-linked settings and index definitions.", "Live sessions, reset tokens and OAuth state are never exported.", "Cross-license restore remaps company/license/customer identifiers to the target tenant."]}
 
@@ -371,14 +376,17 @@ async def _restore(manifest: dict, collections: list[tuple[str, list[dict]]], cu
             continue
         if name == "users":
             result = await raw.users.delete_many({"company_id": target_company_id, "id": {"$ne": current_user.id}})
-        elif name in TENANT_COLLECTIONS:
-            result = await raw[name].delete_many({"company_id": target_company_id})
         else:
             existing = await raw[name].find({}).to_list(100000)
             result = type("DeleteResult", (), {"deleted_count": 0})()
             for doc in existing:
-                if _linked(doc, {_s(current_user.id)}, target_identities) and doc.get("_id") is not None:
-                    result.deleted_count += (await raw[name].delete_one({"_id": doc["_id"]})).deleted_count
+                if (
+                    _s(doc.get("company_id")) == target_company_id
+                    or _linked(doc, {_s(current_user.id)}, target_identities)
+                ) and doc.get("_id") is not None:
+                    result.deleted_count += (
+                        await raw[name].delete_one({"_id": doc["_id"]})
+                    ).deleted_count
         removed += getattr(result, "deleted_count", 0)
     for name, docs in collections:
         if name in EXCLUDED_COLLECTIONS:
