@@ -87,6 +87,7 @@ const ContactDetails = lazy(() => import('./pages/ContactDetails.jsx'));
 
 /* ── Settings ─────────────────────────────────────────────────────────── */
 const GeneralSettings = lazy(() => import('./pages/GeneralSettings.jsx'));
+const BackupRestore = lazy(() => import('./pages/BackupRestore.jsx'));
 const WhatsAppSettings = lazy(() => import('./pages/WhatsAppSettings.jsx'));
 const EmailSettings = lazy(() => import('@/components/EmailSettings.jsx'));
 const PendingApprovals = lazy(() => import('@/components/PendingApprovalsPanel.jsx'));
@@ -121,6 +122,13 @@ function AdminOnly({ children }) {
   const { user } = useAuth();
   if (user?.role?.toLowerCase() !== 'admin') return <Navigate to="/dashboard" replace />;
   return children;
+}
+
+function BackupPermission({ children }) {
+  const { user } = useAuth();
+  const isAdmin = user?.role?.toLowerCase() === 'admin';
+  if (isAdmin || user?.permissions?.can_view_backup_restore === true) return children;
+  return <Navigate to="/dashboard" replace />;
 }
 
 /* ── Router ───────────────────────────────────────────────────────────── */
