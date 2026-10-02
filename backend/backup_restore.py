@@ -622,6 +622,7 @@ async def _run_backup_job(
             file_size=os.path.getsize(output),
             download_ready=True,
             filename=filename,
+            history_id=str(history_id),
         )
         asyncio.create_task(_expire_backup_output(progress_id))
     except Exception as exc:
