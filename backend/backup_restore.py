@@ -426,9 +426,10 @@ async def backup_create_progress(progress_id: str, current_user: User = Depends(
 async def create_backup(request: Request, current_user: User = Depends(get_current_user)):
     _require_backup_access(current_user)
 
-    # Accept both multipart/form-data and JSON so backup creation cannot fail
-    # with FastAPI's automatic 422 response merely because an Axios/browser
-    # instance supplied a stale JSON Content-Type header.
+    # Accept both multipart/form-data and JSON. Large full-application
+    # backups can contain hundreds of thousands of documents, so the export
+    # runs as an in-process background job instead of holding an HTTP request
+    # open until the archive is complete.
     content_type = (request.headers.get("content-type") or "").lower()
     password = ""
     collections = ""
@@ -444,7 +445,6 @@ async def create_backup(request: Request, current_user: User = Depends(get_curre
                 password = str(payload.get("password") or "")
                 collections = str(payload.get("collections") or "")
         else:
-            # Last-resort parsing for clients/proxies that strip the content type.
             try:
                 payload = await request.json()
                 if isinstance(payload, dict):
@@ -459,28 +459,109 @@ async def create_backup(request: Request, current_user: User = Depends(get_curre
         raise HTTPException(status_code=400, detail="Backup password must be at least 8 characters.")
 
     requested = [item.strip() for item in collections.split(",") if item.strip()] or None
-    progress_id = (request.headers.get("x-backup-progress-id") or "").strip()[:120] or None
-    if progress_id:
+    progress_id = (request.headers.get("x-backup-progress-id") or "").strip()[:120]
+    if not progress_id:
+        progress_id = secrets.token_urlsafe(24)
+
+    _set_backup_progress(
+        progress_id,
+        owner_user_id=_s(current_user.id),
+        phase="queued",
+        percent=0.0,
+        processed_documents=0,
+        total_documents=0,
+        eta_seconds=None,
+        elapsed_seconds=0.0,
+        current_collection=None,
+        download_ready=False,
+    )
+
+    task = asyncio.create_task(
+        _run_backup_job(progress_id, current_user, password, requested)
+    )
+    _BACKUP_TASKS[progress_id] = task
+
+    return {
+        "success": True,
+        "progress_id": progress_id,
+        "status": "queued",
+        "message": "Backup job started.",
+    }
+
+
+async def _run_backup_job(
+    progress_id: str,
+    current_user: User,
+    password: str,
+    requested: list[str] | None,
+):
+    try:
+        output, _manifest = await _build_archive(
+            current_user,
+            password,
+            requested,
+            progress_id,
+        )
+        filename = f"taskosphere-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.taskosphere"
+        _BACKUP_OUTPUTS[progress_id] = {
+            "path": output,
+            "filename": filename,
+            "owner_user_id": _s(current_user.id),
+            "created_at": time.time(),
+        }
         _set_backup_progress(
             progress_id,
-            phase="queued",
-            percent=0.0,
-            processed_documents=0,
-            total_documents=0,
-            eta_seconds=None,
-            elapsed_seconds=0.0,
+            owner_user_id=_s(current_user.id),
+            phase="ready",
+            percent=100.0,
+            eta_seconds=0.0,
             current_collection=None,
+            file_size=os.path.getsize(output),
+            download_ready=True,
+            filename=filename,
         )
-    try:
-        output, _manifest = await _build_archive(current_user, password, requested, progress_id)
-    except HTTPException:
-        raise
+        asyncio.create_task(_expire_backup_output(progress_id))
     except Exception as exc:
-        logger.error("Backup creation failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail="Backup creation failed on the server. Check backend logs for details.") from exc
+        _set_backup_progress(
+            progress_id,
+            owner_user_id=_s(current_user.id),
+            phase="error",
+            percent=0.0,
+            eta_seconds=None,
+            current_collection=None,
+            error=str(exc) if isinstance(exc, HTTPException) else "Backup creation failed on the server.",
+            download_ready=False,
+        )
+        logger.error("Background backup creation failed for %s: %s", progress_id, exc, exc_info=True)
+    finally:
+        _BACKUP_TASKS.pop(progress_id, None)
 
-    filename = f"taskosphere-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.taskosphere"
-    return FileResponse(output, media_type="application/octet-stream", filename=filename, background=BackgroundTask(lambda: os.path.exists(output) and os.unlink(output)))
+
+@router.get("/create/download/{progress_id}")
+async def download_created_backup(progress_id: str, current_user: User = Depends(get_current_user)):
+    _require_backup_access(current_user)
+    if not progress_id or len(progress_id) > 120:
+        raise HTTPException(status_code=400, detail="Invalid backup progress id.")
+
+    state = _get_backup_progress(progress_id)
+    if _s(state.get("owner_user_id")) != _s(current_user.id):
+        raise HTTPException(status_code=404, detail="Backup progress session not found.")
+
+    item = _BACKUP_OUTPUTS.get(progress_id)
+    if not item or not item.get("path") or not os.path.exists(item["path"]):
+        raise HTTPException(status_code=409, detail="Backup is not ready for download or has expired.")
+    if state.get("phase") != "ready":
+        raise HTTPException(status_code=409, detail="Backup is still being created.")
+
+    path = item["path"]
+    filename = item["filename"]
+
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        filename=filename,
+        background=BackgroundTask(lambda: _cleanup_backup_output(progress_id)),
+    )
 
 
 async def _read_archive(zip_path: str):
