@@ -129,7 +129,11 @@ def _raw_db():
 
 
 def _job_crypto_key() -> bytes:
-    source = f"{MONGO_URL or ''}|{DB_NAME}".encode("utf-8")
+    source = (
+        os.getenv("SECRET_KEY")
+        or os.getenv("JWT_SECRET")
+        or f"{MONGO_URL or ''}|{DB_NAME}"
+    ).encode("utf-8")
     return hashlib.sha256(source).digest()
 
 
