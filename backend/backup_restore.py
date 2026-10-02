@@ -788,7 +788,14 @@ async def _run_backup_job(
     password: str,
     requested: list[str] | None,
 ):
+    output = None
     try:
+        _set_backup_progress(
+            progress_id,
+            phase="creating",
+            percent=0.0,
+            current_collection=None,
+        )
         output, manifest = await _build_archive(
             current_user,
             password,
@@ -797,12 +804,27 @@ async def _run_backup_job(
         )
         filename = f"onenexa-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}{NEW_BACKUP_EXTENSION}"
 
-        _BACKUP_OUTPUTS[progress_id] = {
-            "path": output,
-            "filename": filename,
-            "owner_user_id": _s(current_user.id),
-            "created_at": time.time(),
-        }
+        _set_backup_progress(
+            progress_id,
+            phase="storing",
+            percent=90.0,
+            current_collection=None,
+            file_size=os.path.getsize(output),
+        )
+        history_id = await _persist_backup_history(
+            output,
+            filename,
+            manifest,
+            current_user,
+        )
+
+        try:
+            os.unlink(output)
+        except FileNotFoundError:
+            pass
+        output = None
+
+        elapsed = _BACKUP_PROGRESS.get(progress_id, {}).get("elapsed_seconds", 0.0)
         _set_backup_progress(
             progress_id,
             owner_user_id=_s(current_user.id),
@@ -810,24 +832,13 @@ async def _run_backup_job(
             percent=100.0,
             eta_seconds=0.0,
             current_collection=None,
-            file_size=os.path.getsize(output),
             download_ready=True,
             filename=filename,
+            history_id=str(history_id),
+            history_persisted=True,
+            history_warning=None,
+            elapsed_seconds=elapsed,
         )
-
-        try:
-            history_id = await _persist_backup_history(output, filename, manifest, current_user)
-            _BACKUP_OUTPUTS[progress_id]["history_id"] = str(history_id)
-            _set_backup_progress(progress_id, history_id=str(history_id), history_persisted=True, history_warning=None)
-        except Exception as history_exc:
-            logger.error("Backup completed but History persistence failed for %s: %s", progress_id, history_exc, exc_info=True)
-            _set_backup_progress(
-                progress_id,
-                history_persisted=False,
-                history_warning="Backup completed successfully, but History storage failed. Download the backup now; it remains available from this completed job.",
-            )
-
-        asyncio.create_task(_expire_backup_output(progress_id))
     except Exception as exc:
         previous = _BACKUP_PROGRESS.get(progress_id, {})
         _set_backup_progress(
@@ -839,12 +850,16 @@ async def _run_backup_job(
             total_documents=previous.get("total_documents", 0),
             eta_seconds=None,
             current_collection=previous.get("current_collection"),
-            error=str(exc) if isinstance(exc, HTTPException) else f"Backup creation failed on the server: {exc}",
+            error=str(exc) if isinstance(exc, HTTPException) else f"Backup worker failed: {exc}",
             download_ready=False,
         )
-        logger.error("Background backup creation failed for %s: %s", progress_id, exc, exc_info=True)
-    finally:
-        _BACKUP_TASKS.pop(progress_id, None)
+        logger.error("Backup worker job %s failed: %s", progress_id, exc, exc_info=True)
+        if output:
+            try:
+                os.unlink(output)
+            except FileNotFoundError:
+                pass
+        raise
 
 
 @router.get("/create/download/{progress_id}")
