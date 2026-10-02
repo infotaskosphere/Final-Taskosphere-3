@@ -402,7 +402,7 @@ export default function BackupRestore() {
         try {
           const { data: progress } = await api.get(
             '/app-backup/create/progress/' + encodeURIComponent(serverProgressId),
-            { _skipReadyGate: true, _silent: true }
+            { _skipReadyGate: true, _silent: true, timeout: 5000 }
           );
 
           if (!progress) return null;
