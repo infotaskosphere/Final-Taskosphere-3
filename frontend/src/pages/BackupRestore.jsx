@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Archive, AlertTriangle, Database, Download, HardDriveDownload, LockKeyhole, RefreshCw, RotateCcw, ShieldCheck, Upload, Users } from 'lucide-react';
+import { Archive, AlertTriangle, Database, Download, HardDriveDownload, History, LockKeyhole, RefreshCw, RotateCcw, ShieldCheck, Trash2, Upload, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import api, { BASE_URL, getToken } from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
@@ -161,6 +161,9 @@ export default function BackupRestore() {
   const [restoreConfirm, setRestoreConfirm] = useState('');
   const [selectedModule, setSelectedModule] = useState('taskosphere');
   const [selectedCollections, setSelectedCollections] = useState([]);
+  const [activeTab, setActiveTab] = useState('backup');
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [transfer, setTransfer] = useState({
     active: false,
     phase: '',
@@ -185,7 +188,47 @@ export default function BackupRestore() {
 
   useEffect(() => {
     loadInfo();
+    void loadHistory();
   }, []);
+
+  const loadHistory = async () => {
+    setHistoryLoading(true);
+    try {
+      const { data } = await api.get('/app-backup/history');
+      setHistory(Array.isArray(data?.history) ? data.history : []);
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || 'Unable to load backup history');
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const downloadHistoryBackup = async (record) => {
+    try {
+      const response = await api.get('/app-backup/history/' + encodeURIComponent(record.id) + '/download', {
+        responseType: 'blob',
+      });
+      downloadBlob(response.data, record.filename || ('onenexa-backup-' + record.id + '.onenexa'));
+      toast.success('Historical backup downloaded.');
+    } catch (error) {
+      toast.error(await getBackupErrorMessage(error));
+    }
+  };
+
+  const deleteHistoryBackup = async (record) => {
+    if (!record?.id) return;
+    if (!window.confirm('Delete this backup permanently? This removes the history record and the stored backup data. This cannot be undone.')) return;
+    setBusy(true);
+    try {
+      await api.delete('/app-backup/history/' + encodeURIComponent(record.id));
+      setHistory((current) => current.filter((item) => item.id !== record.id));
+      toast.success('Backup history record and stored backup data deleted.');
+    } catch (error) {
+      toast.error(await getBackupErrorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const moduleCollections = info?.modules?.[selectedModule] || [];
   const customSelection = useMemo(() => {
