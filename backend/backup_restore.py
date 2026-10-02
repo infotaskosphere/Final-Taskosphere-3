@@ -184,6 +184,8 @@ async def _persist_backup_progress(progress_id: str, values: dict):
         payload = dict(values)
         payload["status"] = status
         payload["updated_at"] = datetime.now(timezone.utc)
+        if status == "running":
+            payload["worker_heartbeat_at"] = datetime.now(timezone.utc)
         await raw[BACKUP_JOBS_COLLECTION].update_one(
             {"_id": progress_id},
             {"$set": payload},
