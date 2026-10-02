@@ -44,6 +44,12 @@ services:
           type: web
           envVarKey: MONGO_URL
 
+      - key: SECRET_KEY
+        fromService:
+          name: final-taskosphere-backend
+          type: web
+          envVarKey: SECRET_KEY
+
   # ── Frontend (React / Vite) ────────────────────────────────────────────────
   - type: web
     name: final-taskosphere-frontend
