@@ -668,6 +668,90 @@ async def download_created_backup(progress_id: str, current_user: User = Depends
     )
 
 
+
+@router.get("/history")
+async def list_backup_history(current_user: User = Depends(get_current_user)):
+    _require_backup_access(current_user)
+    raw = _raw_db()
+    await _ensure_backup_history_indexes(raw)
+    cursor = raw[BACKUP_HISTORY_COLLECTION].find({}).sort("created_at", -1)
+    records = []
+    async for doc in cursor:
+        records.append(_history_document(doc))
+    return {"history": records, "count": len(records)}
+
+
+@router.get("/history/{backup_id}/download")
+async def download_backup_history(backup_id: str, current_user: User = Depends(get_current_user)):
+    _require_backup_access(current_user)
+    if not ObjectId.is_valid(backup_id):
+        raise HTTPException(status_code=400, detail="Invalid backup history id.")
+    raw = _raw_db()
+    doc = await raw[BACKUP_HISTORY_COLLECTION].find_one({"_id": ObjectId(backup_id)})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Backup history record not found.")
+    artifact_id = doc.get("artifact_file_id")
+    if not isinstance(artifact_id, ObjectId):
+        artifact_id = ObjectId(artifact_id) if ObjectId.is_valid(str(artifact_id)) else None
+    if artifact_id is None:
+        raise HTTPException(status_code=410, detail="The backup artifact is no longer available.")
+    bucket = _backup_gridfs(raw)
+    try:
+        grid_out = bucket.open_download_stream(artifact_id)
+    except Exception as exc:
+        raise HTTPException(status_code=410, detail="The backup artifact is no longer available.") from exc
+
+    async def stream_backup():
+        try:
+            while chunk := await grid_out.read(CHUNK_SIZE):
+                yield chunk
+        finally:
+            try:
+                await grid_out.close()
+            except Exception:
+                pass
+
+    filename = doc.get("filename") or f"onenexa-backup-{backup_id}{NEW_BACKUP_EXTENSION}"
+    return StreamingResponse(
+        stream_backup(),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.delete("/history/{backup_id}")
+async def delete_backup_history(backup_id: str, current_user: User = Depends(get_current_user)):
+    _require_admin(current_user)
+    if not ObjectId.is_valid(backup_id):
+        raise HTTPException(status_code=400, detail="Invalid backup history id.")
+    raw = _raw_db()
+    collection = raw[BACKUP_HISTORY_COLLECTION]
+    doc = await collection.find_one({"_id": ObjectId(backup_id)})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Backup history record not found.")
+
+    deleted = await collection.delete_one({"_id": ObjectId(backup_id)})
+    if deleted.deleted_count != 1:
+        raise HTTPException(status_code=409, detail="Backup history record changed before deletion. Refresh and retry.")
+
+    artifact_id = doc.get("artifact_file_id")
+    if not isinstance(artifact_id, ObjectId):
+        artifact_id = ObjectId(artifact_id) if ObjectId.is_valid(str(artifact_id)) else None
+    if artifact_id is not None:
+        try:
+            await _backup_gridfs(raw).delete(artifact_id)
+        except Exception as exc:
+            try:
+                await collection.insert_one(doc)
+            except Exception:
+                logger.critical("Backup history rollback failed: %s", exc, exc_info=True)
+            raise HTTPException(status_code=500, detail="Backup data could not be deleted completely. The history record was restored; please retry.") from exc
+
+    return {"success": True, "deleted_backup_id": backup_id}
+
+
+
+
 async def _read_archive(zip_path: str):
     try:
         with zipfile.ZipFile(zip_path, "r") as archive:
