@@ -948,129 +948,9 @@ async def restore_backup(backup: UploadFile = File(...), password: str = Form(..
 
 
 # ---------------------------------------------------------------------------
-# Render-safe backup builder
-# ---------------------------------------------------------------------------
-# The original implementation above is intentionally preserved. This
-# production override writes each MongoDB document directly into the ZIP
-# member instead of constructing a giant in-memory JSON string with join().
-# This materially reduces peak RAM during full-application backups.
-async def _build_archive_streaming(user: User, password: str, requested: list[str] | None):
-    selected = await _resolve_collections(user, requested)
-    raw = _raw_db()
-    manifest = {
-        "format": "taskosphere-backup",
-        "version": FORMAT_VERSION,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "database": DB_NAME,
-        "scope": "single_application",
-        "owner_user_id": _s(user.id),
-        "bson_encoding": "MongoDB Extended JSON v2 canonical",
-        "encryption": "AES-256-GCM + PBKDF2-HMAC-SHA256",
-        "selection": "full" if not requested else "custom",
-        "collections": {},
-        "excluded_collections": sorted(EXCLUDED_COLLECTIONS),
-    }
-
-    fd, zip_path = tempfile.mkstemp(prefix="taskosphere-backup-", suffix=".zip")
-    os.close(fd)
-    output = None
-
-    try:
-        with zipfile.ZipFile(
-            zip_path,
-            "w",
-            compression=zipfile.ZIP_DEFLATED,
-            compresslevel=1,
-            allowZip64=True,
-        ) as archive:
-            for name in selected:
-                safe = name.replace("/", "_")
-                document_count = 0
-
-                # Motor and the local mock both support async iteration over
-                # collection.find(). Keep one BSON document in memory at a
-                # time rather than building the whole collection as a string.
-                with archive.open(
-                    f"collections/{safe}.jsonl",
-                    mode="w",
-                    force_zip64=True,
-                ) as entry:
-                    cursor = raw[name].find({})
-                    pending_lines = []
-                    async for doc in cursor:
-                        entry.write((_dump(doc) + "\n").encode("utf-8"))
-                        document_count += 1
-
-                        # Yield periodically so the FastAPI event loop can
-                        # continue serving health/auth requests during large
-                        # backups instead of appearing frozen.
-                        if document_count % 250 == 0:
-                            await asyncio.sleep(0)
-
-                try:
-                    list_indexes = getattr(raw[name], "list_indexes", None)
-                    indexes = (
-                        await list_indexes().to_list(1000)
-                        if callable(list_indexes)
-                        else []
-                    )
-                    indexes = [idx for idx in indexes if idx.get("name") != "_id_"]
-                    if indexes:
-                        archive.writestr(
-                            f"indexes/{safe}.json",
-                            _dump(indexes),
-                        )
-                except Exception:
-                    # Index export is supplementary; document backup must
-                    # continue even when an index cannot be inspected.
-                    pass
-
-                manifest["collections"][name] = {
-                    "documents": document_count,
-                    "safe_name": safe,
-                }
-
-            archive.writestr(
-                "manifest.json",
-                json.dumps(manifest, indent=2, sort_keys=True),
-            )
-
-        fd, output = tempfile.mkstemp(
-            prefix="onenexa-backup-",
-            suffix=NEW_BACKUP_EXTENSION,
-        )
-        os.close(fd)
-
-        # AES encryption is intentionally performed in a bounded file-to-file
-        # loop, so the encrypted payload is never held entirely in RAM.
-        _encrypt(zip_path, output, password)
-        return output, manifest
-
-    except Exception:
-        if output:
-            try:
-                os.unlink(output)
-            except FileNotFoundError:
-                pass
-        raise
-    finally:
-        try:
-            os.unlink(zip_path)
-        except FileNotFoundError:
-            pass
-
-
-# create_backup() resolves _build_archive at request time, so the
-# production-safe implementation above can replace only the builder while
-# preserving the existing route, authentication, password validation,
-# encryption format, and response filename.
-_build_archive = _build_archive_streaming
-
-
-# ---------------------------------------------------------------------------
 # Progressive backup builder
 # ---------------------------------------------------------------------------
-async def _build_archive_with_progress(
+async def _build_archive(
     user: User,
     password: str,
     requested: list[str] | None,
@@ -1272,5 +1152,3 @@ async def _build_archive_with_progress(
         except FileNotFoundError:
             pass
 
-
-_build_archive = _build_archive_with_progress
