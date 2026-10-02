@@ -387,7 +387,7 @@ export default function BackupRestore() {
       );
 
       const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-      downloadBlob(backupBlob, 'taskosphere-backup-' + timestamp + '.taskosphere');
+      downloadBlob(backupBlob, 'onenexa-backup-' + timestamp + '.onenexa');
       setTransfer({
         active: false,
         phase: 'Complete',
@@ -417,7 +417,7 @@ export default function BackupRestore() {
 
 
   const restoreBackup = async () => {
-    if (!restoreFile) return toast.error('Choose a .taskosphere backup file.');
+    if (!restoreFile) return toast.error('Choose a .onenexa backup file, or a legacy .taskosphere backup file.');
     if (restorePassword.length < 8) return toast.error('Enter the backup password.');
     if (restoreConfirm !== 'RESTORE') return toast.error('Type RESTORE exactly to confirm.');
     if (!window.confirm('Restore will replace the application data covered by this backup. Continue?')) return;
@@ -610,7 +610,7 @@ export default function BackupRestore() {
         <div className="flex items-start gap-3"><RotateCcw className="h-5 w-5 text-amber-500 mt-0.5" /><div><h2 className={'font-bold ' + heading}>Restore Backup</h2><p className={'text-xs mt-1 ' + muted}>Restore the application from an encrypted backup. The current administrator's live authentication credentials are preserved.</p></div></div>
         <div className={'mt-4 rounded-xl border p-3 flex gap-2 ' + (isDark ? 'border-amber-900/50 bg-amber-950/20' : 'border-amber-200 bg-amber-50')}><AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" /><p className={'text-xs leading-relaxed ' + (isDark ? 'text-amber-300' : 'text-amber-800')}>Restore replaces data covered by the backup. It is intentionally restricted to administrators and requires the exact word <b>RESTORE</b>.</p></div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
-          <div><label className={'text-xs font-bold ' + heading}>Backup file</label><div className="mt-1.5 flex gap-2"><input ref={fileRef} type="file" accept=".taskosphere,application/octet-stream" onChange={(e) => setRestoreFile(e.target.files?.[0] || null)} className={input + ' file:mr-3 file:rounded-lg file:border-0 file:px-2 file:py-1 file:text-xs'} /><Upload className="h-4 w-4 text-slate-400 shrink-0 mt-3 -ml-10 pointer-events-none" /></div>{restoreFile && <p className={'text-[11px] mt-1 ' + muted}>{restoreFile.name}</p>}</div>
+          <div><label className={'text-xs font-bold ' + heading}>Backup file</label><div className="mt-1.5 flex gap-2"><input ref={fileRef} type="file" accept=".onenexa,.taskosphere,application/octet-stream" onChange={(e) => setRestoreFile(e.target.files?.[0] || null)} className={input + ' file:mr-3 file:rounded-lg file:border-0 file:px-2 file:py-1 file:text-xs'} /><Upload className="h-4 w-4 text-slate-400 shrink-0 mt-3 -ml-10 pointer-events-none" /></div>{restoreFile && <p className={'text-[11px] mt-1 ' + muted}>{restoreFile.name}</p>}</div>
           <div><label className={'text-xs font-bold ' + heading}>Backup password</label><input type="password" value={restorePassword} onChange={(e) => setRestorePassword(e.target.value)} className={input + ' mt-1.5'} autoComplete="off" /></div>
           <div><label className={'text-xs font-bold ' + heading}>Confirmation</label><input value={restoreConfirm} onChange={(e) => setRestoreConfirm(e.target.value)} className={input + ' mt-1.5'} placeholder="Type RESTORE" /></div>
           <div className="flex items-end"><button type="button" onClick={restoreBackup} disabled={busy} className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-amber-600 text-white text-sm font-bold hover:bg-amber-700 disabled:opacity-50 w-full"><RotateCcw className="h-4 w-4" />{busy ? 'Restoring…' : 'Restore Backup'}</button></div>
