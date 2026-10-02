@@ -243,9 +243,6 @@ const DEDUP_WINDOW_MS = 300;
 // BACKEND READINESS GATE
 // ─────────────────────────────────────────────────────────────
 
-const HEALTH_URL =
-  `${BASE_URL.replace(/\/api$/, "")}/health`;
-
 let _readyPromise = null;
 let _isReady = false;
 
@@ -258,76 +255,14 @@ export function markBackendNotReady() {
 }
 
 export function ensureBackendReady() {
-  if (_isReady) {
-    return Promise.resolve(true);
-  }
-
-  if (_readyPromise) {
-    return _readyPromise;
-  }
-
-  _readyPromise = (async () => {
-    // FIX: the old backoff sequence summed to 75s of *scheduled* waiting,
-    // plus up to 15s per attempt if the health check itself hung — worst
-    // case, several minutes. And because EVERY request in the app (see the
-    // request interceptor above) awaits this same function before it's
-    // allowed to fire, a single 502/503/504 anywhere would silently freeze
-    // every page's data loading for that entire window. Worse, if it gave
-    // up without ever setting `_isReady = true`, the NEXT request would
-    // restart the whole multi-minute sequence from scratch — so once the
-    // backend hiccuped once, every subsequent page navigation could look
-    // permanently broken until a hard refresh happened to land on a moment
-    // the backend was responsive again.
-    //
-    // This is now a short, bounded check: a couple of quick retries, then
-    // we fail OPEN (treat backend as ready) instead of failing closed.
-    // Individual requests still have their own error handling / the
-    // collection-retry logic below for genuine cold-start responses — this
-    // gate should only smooth over the first second or two of a cold start,
-    // never hold the whole app hostage.
-    const backoffs = [0, 500, 1500];
-
-    for (const wait of backoffs) {
-      if (wait) {
-        await _sleep(wait);
-      }
-
-      try {
-        await axios.get(HEALTH_URL, {
-          timeout: 4000,
-        });
-
-        _isReady = true;
-        _reportNetworkResult(true);
-
-        return true;
-      } catch (err) {
-        const status = err?.response?.status;
-
-        // Any normal HTTP response proves that the server is reachable.
-        if (
-          status &&
-          ![404, 500, 502, 503, 504].includes(status)
-        ) {
-          _isReady = true;
-          return true;
-        }
-      }
-    }
-
-    // Give up waiting, but fail OPEN: let requests proceed as normal rather
-    // than re-running this multi-second gate again for every single request
-    // that follows. A genuinely down backend will still surface as normal
-    // request failures (network error / 502 / 503), handled where those
-    // requests are called, instead of an invisible app-wide freeze.
-    _isReady = true;
-    _readyPromise = null;
-
-    return false;
-  })();
-
-  return _readyPromise;
+  // Production API requests do not require a separate /health probe.
+  // This avoids any stale localhost health URL in previously bundled clients
+  // and prevents a health-check failure from blocking real application calls.
+  _isReady = true;
+  _readyPromise = null;
+  return Promise.resolve(true);
 }
+
 
 // ─────────────────────────────────────────────────────────────
 // COLLECTION ROUTES
@@ -373,11 +308,6 @@ const api = axios.create({
 
 api.interceptors.request.use(
   async (config) => {
-    // Wait for Render backend cold start unless explicitly skipped.
-    if (!config._skipReadyGate) {
-      await ensureBackendReady();
-    }
-
     // Normalize known collection GET endpoints.
     const [requestPath, requestQuery = ""] =
       (config.url || "").split("?");
