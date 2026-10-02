@@ -752,7 +752,7 @@ export default function BackupRestore() {
         </div>
       )}
 
-      <div className={'rounded-2xl border p-4 ' + card}><div className="flex items-start gap-2.5"><ShieldCheck className="h-4 w-4 text-emerald-500 mt-0.5" /><div><p className={'text-xs font-bold ' + heading}>Recommended backup policy</p><p className={'text-[11px] mt-1 leading-relaxed ' + muted}>Keep at least one full encrypted backup outside the application server. The .taskosphere file is portable and includes MongoDB data automatically; because hosted app disks can be ephemeral, long-term retention should use your MongoDB provider/object-storage backup facility rather than relying on local server files.</p></div></div></div>
+      <div className={'rounded-2xl border p-4 ' + card}><div className="flex items-start gap-2.5"><ShieldCheck className="h-4 w-4 text-emerald-500 mt-0.5" /><div><p className={'text-xs font-bold ' + heading}>Recommended backup policy</p><p className={'text-[11px] mt-1 leading-relaxed ' + muted}>Keep at least one full encrypted backup outside the application server. The .onenexa file is portable and includes MongoDB data automatically; legacy .taskosphere files remain accepted for migration; because hosted app disks can be ephemeral, long-term retention should use your MongoDB provider/object-storage backup facility rather than relying on local server files.</p></div></div></div>
     </div>
   );
 }
