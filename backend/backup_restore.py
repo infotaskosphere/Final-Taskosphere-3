@@ -327,6 +327,24 @@ async def _application_context(user: User):
     return user_ids
 
 
+async def _resolve_collections(user: User, requested: list[str] | None):
+    raw = _raw_db()
+    list_names = getattr(raw, "list_collection_names", None)
+    available = (
+        sorted(set(await list_names()) - EXCLUDED_COLLECTIONS)
+        if callable(list_names)
+        else sorted(set(getattr(raw, "_collections", {}).keys()) - EXCLUDED_COLLECTIONS)
+    )
+    if not requested:
+        selected = available
+    else:
+        requested_set = {name for name in requested if name in available}
+        if not requested_set:
+            raise HTTPException(status_code=400, detail="No valid backup collections were selected.")
+        selected = sorted(requested_set)
+    return selected
+
+
 # ---------------------------------------------------------------------------
 # Resumable, proxy-safe artifact streaming
 # ---------------------------------------------------------------------------
