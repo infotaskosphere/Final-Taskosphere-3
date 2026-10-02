@@ -124,6 +124,96 @@ def _raw_db():
     return db
 
 
+def _backup_gridfs(raw):
+    return AsyncIOMotorGridFSBucket(raw, bucket_name=BACKUP_GRIDFS_BUCKET, chunk_size_bytes=CHUNK_SIZE)
+
+
+async def _ensure_backup_history_indexes(raw):
+    await raw[BACKUP_HISTORY_COLLECTION].create_index([("created_at", -1)])
+    await raw[BACKUP_HISTORY_COLLECTION].create_index([("artifact_file_id", 1)], sparse=True)
+
+
+def _history_document(doc: dict) -> dict:
+    size = int(doc.get("file_size_bytes") or 0)
+    return {
+        "id": str(doc.get("_id")),
+        "filename": doc.get("filename"),
+        "created_at": doc.get("created_at"),
+        "created_by": doc.get("created_by_name") or "Administrator",
+        "mode": doc.get("mode") or "full",
+        "source_application": doc.get("source_application") or "Final-Taskosphere-3",
+        "collection_count": int(doc.get("collection_count") or 0),
+        "document_count": int(doc.get("document_count") or 0),
+        "file_size_bytes": size,
+        "collections": doc.get("collections") or [],
+        "deletable": bool(doc.get("artifact_file_id")),
+    }
+
+
+async def _persist_backup_history(output: str, filename: str, manifest: dict, current_user: User):
+    raw = _raw_db()
+    await _ensure_backup_history_indexes(raw)
+    bucket = _backup_gridfs(raw)
+    history_id = ObjectId()
+    artifact_id = None
+    stream = None
+    file_size = os.path.getsize(output)
+    try:
+        stream = bucket.open_upload_stream(
+            filename,
+            chunk_size_bytes=CHUNK_SIZE,
+            metadata={
+                "format": "onenexa",
+                "backupHistoryId": str(history_id),
+                "sourceApplication": manifest.get("source_application") or "Final-Taskosphere-3",
+                "version": manifest.get("version", FORMAT_VERSION),
+            },
+        )
+        artifact_id = stream._id
+        with open(output, "rb") as source:
+            while True:
+                chunk = source.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                await stream.write(chunk)
+        await stream.close()
+        stream = None
+
+        collections = sorted((manifest.get("collections") or {}).keys())
+        document_count = sum(
+            int(meta.get("documents") or 0)
+            for meta in (manifest.get("collections") or {}).values()
+        )
+        await raw[BACKUP_HISTORY_COLLECTION].insert_one({
+            "_id": history_id,
+            "created_at": datetime.now(timezone.utc),
+            "created_by": _s(getattr(current_user, "id", None)),
+            "created_by_name": getattr(current_user, "full_name", None) or getattr(current_user, "name", None) or getattr(current_user, "email", None) or "Administrator",
+            "filename": filename,
+            "mode": "full" if manifest.get("selection") == "full" else "custom",
+            "source_application": manifest.get("source_application") or "Final-Taskosphere-3",
+            "collections": collections,
+            "collection_count": len(collections),
+            "document_count": document_count,
+            "file_size_bytes": file_size,
+            "artifact_file_id": artifact_id,
+            "format_version": manifest.get("version", FORMAT_VERSION),
+        })
+        return history_id
+    except Exception:
+        if stream is not None:
+            try:
+                await stream.abort()
+            except Exception:
+                pass
+        if artifact_id is not None:
+            try:
+                await bucket.delete(artifact_id)
+            except Exception:
+                pass
+        raise
+
+
 def _key(password: str, salt: bytes) -> bytes:
     if len(password or "") < 8:
         raise HTTPException(status_code=400, detail="Backup password must be at least 8 characters.")
