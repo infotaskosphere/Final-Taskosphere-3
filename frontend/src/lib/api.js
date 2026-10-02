@@ -11,9 +11,6 @@ const PRODUCTION_API_URL =
   "https://final-taskosphere-backend.onrender.com";
 
 // Local development backend.
-const LOCAL_API_URL =
-  "http://localhost:7432";
-
 // Detect browser hostname.
 const _hostname =
   typeof window !== "undefined"
@@ -56,9 +53,7 @@ let BASE_URL;
 if (_isTaskosphereProduction) {
   BASE_URL = PRODUCTION_API_URL;
 } else if (_isLocalHost) {
-  BASE_URL =
-    import.meta.env.VITE_API_URL ||
-    LOCAL_API_URL;
+  BASE_URL = import.meta.env.VITE_API_URL || PRODUCTION_API_URL;
 } else {
   // Preview / staging / other deployments.
   BASE_URL =
