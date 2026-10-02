@@ -922,6 +922,7 @@ async def _build_archive_streaming(user: User, password: str, requested: list[st
                     force_zip64=True,
                 ) as entry:
                     cursor = raw[name].find({})
+                    pending_lines = []
                     async for doc in cursor:
                         entry.write((_dump(doc) + "\n").encode("utf-8"))
                         document_count += 1
@@ -1056,8 +1057,7 @@ async def _build_archive_with_progress(
         with zipfile.ZipFile(
             zip_path,
             "w",
-            compression=zipfile.ZIP_DEFLATED,
-            compresslevel=6,
+            compression=zipfile.ZIP_STORED,
             allowZip64=True,
         ) as archive:
             for name in selected:
@@ -1100,6 +1100,10 @@ async def _build_archive_with_progress(
                         if processed_documents % 500 == 0:
                             await asyncio.sleep(0)
 
+                    if pending_lines:
+                        entry.write(("\n".join(pending_lines) + "\n").encode("utf-8"))
+                        pending_lines.clear()
+
                 try:
                     list_indexes = getattr(raw[name], "list_indexes", None)
                     indexes = (
@@ -1141,14 +1145,15 @@ async def _build_archive_with_progress(
             current_collection=None,
         )
 
-        _encrypt(
+        await asyncio.to_thread(
+            _encrypt,
             zip_path,
             output,
             password,
-            progress_id=progress_id,
-            progress_start=90.0,
-            progress_end=100.0,
-            started_at=started_at,
+            progress_id,
+            90.0,
+            100.0,
+            started_at,
         )
 
         file_size = os.path.getsize(output)
