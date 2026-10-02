@@ -508,7 +508,7 @@ async def _run_backup_job(
             requested,
             progress_id,
         )
-        filename = f"taskosphere-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.taskosphere"
+        filename = f"onenexa-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}{NEW_BACKUP_EXTENSION}"
         _BACKUP_OUTPUTS[progress_id] = {
             "path": output,
             "filename": filename,
@@ -778,8 +778,8 @@ async def _build_archive_streaming(user: User, password: str, requested: list[st
             )
 
         fd, output = tempfile.mkstemp(
-            prefix="taskosphere-backup-",
-            suffix=".taskosphere",
+            prefix="onenexa-backup-",
+            suffix=NEW_BACKUP_EXTENSION,
         )
         os.close(fd)
 
