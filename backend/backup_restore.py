@@ -17,9 +17,6 @@ import asyncio
 import inspect
 import json
 import logging
-import hashlib
-import sys
-from types import SimpleNamespace
 import os
 import secrets
 import tempfile
@@ -64,7 +61,6 @@ LEGACY_BACKUP_EXTENSIONS = {".taskosphere"}
 SUPPORTED_BACKUP_EXTENSIONS = {NEW_BACKUP_EXTENSION, *LEGACY_BACKUP_EXTENSIONS}
 BACKUP_HISTORY_COLLECTION = "backup_history"
 BACKUP_GRIDFS_BUCKET = "taskosphere_backups"
-BACKUP_JOBS_COLLECTION = "backup_jobs"
 
 EXCLUDED_COLLECTIONS = {
     "sessions", "refresh_tokens", "access_tokens", "password_resets",
@@ -128,80 +124,6 @@ def _raw_db():
     # directly through backend.dependencies.db.
     return db
 
-
-def _job_secret_key():
-    secret = os.getenv("SECRET_KEY") or os.getenv("JWT_SECRET") or ""
-    if not secret:
-        raise RuntimeError("A server secret is required for durable backup jobs.")
-    return hashlib.sha256(secret.encode("utf-8")).digest()
-
-
-def _protect_job_password(password: str) -> str:
-    nonce = secrets.token_bytes(12)
-    encryptor = Cipher(algorithms.AES(_job_secret_key()), modes.GCM(nonce)).encryptor()
-    ciphertext = encryptor.update(password.encode("utf-8")) + encryptor.finalize()
-    return base64.b64encode(nonce + encryptor.tag + ciphertext).decode("ascii")
-
-
-def _unprotect_job_password(value: str) -> str:
-    try:
-        payload = base64.b64decode(value.encode("ascii"))
-        nonce, tag, ciphertext = payload[:12], payload[12:28], payload[28:]
-        decryptor = Cipher(algorithms.AES(_job_secret_key()), modes.GCM(nonce, tag)).decryptor()
-        return (decryptor.update(ciphertext) + decryptor.finalize()).decode("utf-8")
-    except Exception as exc:
-        raise RuntimeError("Backup job secret could not be decrypted.") from exc
-
-
-async def _persist_backup_job(raw, progress_id: str, current_user: User, password: str, requested):
-    await raw[BACKUP_JOBS_COLLECTION].update_one(
-        {"_id": progress_id},
-        {"$set": {
-            "type": "application_backup",
-            "owner_user_id": _s(current_user.id),
-            "role": getattr(current_user, "role", "admin"),
-            "requested": requested,
-            "password_encrypted": _protect_job_password(password),
-            "status": "queued",
-            "phase": "queued",
-            "percent": 0.0,
-            "processed_documents": 0,
-            "total_documents": 0,
-            "created_at": datetime.now(timezone.utc),
-            "updated_at": datetime.now(timezone.utc),
-        }},
-        upsert=True,
-    )
-
-
-async def _mirror_backup_progress(progress_id: str, stop_event: asyncio.Event):
-    raw = _raw_db()
-    while not stop_event.is_set():
-        await asyncio.sleep(0.5)
-        state = _BACKUP_PROGRESS.get(progress_id)
-        if not state:
-            continue
-        values = dict(state)
-        values["updated_at"] = datetime.now(timezone.utc)
-        await raw[BACKUP_JOBS_COLLECTION].update_one(
-            {"_id": progress_id},
-            {"$set": values},
-        )
-
-
-async def _claim_backup_job(raw):
-    stale_before = datetime.now(timezone.utc).timestamp() - 300
-    stale = datetime.fromtimestamp(stale_before, timezone.utc)
-    await raw[BACKUP_JOBS_COLLECTION].update_many(
-        {"type": "application_backup", "status": "running", "worker_heartbeat_at": {"$lt": stale}},
-        {"$set": {"status": "queued", "phase": "queued", "worker_heartbeat_at": None, "error": "Previous backup worker stopped; job re-queued."}},
-    )
-    return await raw[BACKUP_JOBS_COLLECTION].find_one_and_update(
-        {"type": "application_backup", "status": "queued"},
-        {"$set": {"status": "running", "phase": "queued", "worker_heartbeat_at": datetime.now(timezone.utc), "updated_at": datetime.now(timezone.utc)}},
-        sort=[("created_at", 1)],
-        return_document=1,
-    )
 
 def _backup_gridfs(raw):
     return AsyncIOMotorGridFSBucket(raw, bucket_name=BACKUP_GRIDFS_BUCKET, chunk_size_bytes=CHUNK_SIZE)
@@ -643,13 +565,6 @@ async def backup_create_progress(progress_id: str, current_user: User = Depends(
     _require_backup_access(current_user)
     if not progress_id or len(progress_id) > 120:
         raise HTTPException(status_code=400, detail="Invalid backup progress id.")
-    raw = _raw_db()
-    job = await raw[BACKUP_JOBS_COLLECTION].find_one({"_id": progress_id, "owner_user_id": _s(current_user.id)})
-    if job:
-        job.pop("password_encrypted", None)
-        job.pop("worker_heartbeat_at", None)
-        job.pop("_id", None)
-        return job
     return _get_backup_progress(progress_id)
 
 
@@ -707,13 +622,10 @@ async def create_backup(request: Request, current_user: User = Depends(get_curre
         download_ready=False,
     )
 
-    await _persist_backup_job(
-        _raw_db(),
-        progress_id,
-        current_user,
-        password,
-        requested,
+    task = asyncio.create_task(
+        _run_backup_job(progress_id, current_user, password, requested)
     )
+    _BACKUP_TASKS[progress_id] = task
 
     return {
         "success": True,
@@ -793,10 +705,10 @@ async def download_created_backup(progress_id: str, request: Request, current_us
     _require_backup_access(current_user)
     if not progress_id or len(progress_id) > 120:
         raise HTTPException(status_code=400, detail="Invalid backup progress id.")
-    raw = _raw_db()
-    state = await raw[BACKUP_JOBS_COLLECTION].find_one({"_id": progress_id, "owner_user_id": _s(current_user.id)})
-    if not state:
+    state = _get_backup_progress(progress_id)
+    if _s(state.get("owner_user_id")) != _s(current_user.id):
         raise HTTPException(status_code=404, detail="Backup progress session not found.")
+    if state.get("phase") != "ready":
         raise HTTPException(status_code=409, detail="Backup is still being created.")
     history_id = _s(state.get("history_id"))
     if ObjectId.is_valid(history_id):
