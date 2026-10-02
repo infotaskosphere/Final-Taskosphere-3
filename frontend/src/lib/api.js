@@ -50,9 +50,13 @@ const _isTaskosphereProduction =
 
 let BASE_URL;
 
-if (_isTaskosphereProduction) {
+const _isProductionBuild = Boolean(import.meta.env.PROD);
+
+if (_isProductionBuild || _isTaskosphereProduction) {
+  // Never allow a production bundle to resolve the API to localhost.
   BASE_URL = PRODUCTION_API_URL;
 } else if (_isLocalHost) {
+  // Local development may override the backend explicitly.
   BASE_URL = import.meta.env.VITE_API_URL || PRODUCTION_API_URL;
 } else {
   // Preview / staging / other deployments.
