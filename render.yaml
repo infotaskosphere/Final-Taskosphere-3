@@ -29,6 +29,21 @@ services:
         generateValue: true
     healthCheckPath: /health
 
+  # ── Backup Worker (Python) ────────────────────────────────────────────────
+  # Long-running backup exports run here so they cannot block the public API.
+  - type: worker
+    name: final-taskosphere-backup-worker
+    runtime: python
+    rootDir: .
+    buildCommand: bash build.sh
+    startCommand: python -m backend.backup_restore
+    envVars:
+      - key: MONGO_URL
+        fromService:
+          name: final-taskosphere-backend
+          type: web
+          envVarKey: MONGO_URL
+
   # ── Frontend (React / Vite) ────────────────────────────────────────────────
   - type: web
     name: final-taskosphere-frontend
