@@ -717,7 +717,7 @@ async def _build_archive_streaming(user: User, password: str, requested: list[st
             zip_path,
             "w",
             compression=zipfile.ZIP_DEFLATED,
-            compresslevel=6,
+            compresslevel=1,
             allowZip64=True,
         ) as archive:
             for name in selected:
@@ -908,7 +908,7 @@ async def _build_archive_with_progress(
                             current_collection=name,
                         )
 
-                        if processed_documents % 50 == 0:
+                        if processed_documents % 500 == 0:
                             await asyncio.sleep(0)
 
                 try:
