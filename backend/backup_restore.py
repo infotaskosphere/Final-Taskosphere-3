@@ -980,11 +980,12 @@ async def _build_archive(
                     cursor = raw[name].find({})
                     pending_lines = []
                     async for doc in cursor:
-                        pending_lines.append(_dump(doc))
+                        pending_lines.append(doc)
                         document_count += 1
                         processed_documents += 1
                         if len(pending_lines) >= 500:
-                            entry.write(("\n".join(pending_lines) + "\n").encode("utf-8"))
+                            payload = await asyncio.to_thread(_dump_batch, pending_lines)
+                            await asyncio.to_thread(entry.write, payload)
                             pending_lines.clear()
 
                         if processed_documents % 500 == 0 or processed_documents == total_documents:
@@ -1014,7 +1015,8 @@ async def _build_archive(
                             await asyncio.sleep(0)
 
                     if pending_lines:
-                        entry.write(("\n".join(pending_lines) + "\n").encode("utf-8"))
+                        payload = await asyncio.to_thread(_dump_batch, pending_lines)
+                        await asyncio.to_thread(entry.write, payload)
                         pending_lines.clear()
 
                 try:
