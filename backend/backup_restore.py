@@ -1070,10 +1070,14 @@ async def _build_archive_with_progress(
                     force_zip64=True,
                 ) as entry:
                     cursor = raw[name].find({})
+                    pending_lines = []
                     async for doc in cursor:
-                        entry.write((_dump(doc) + "\n").encode("utf-8"))
+                        pending_lines.append(_dump(doc))
                         document_count += 1
                         processed_documents += 1
+                        if len(pending_lines) >= 500:
+                            entry.write(("\n".join(pending_lines) + "\n").encode("utf-8"))
+                            pending_lines.clear()
 
                         elapsed = max(0.001, time.monotonic() - started_at)
                         ratio = (
