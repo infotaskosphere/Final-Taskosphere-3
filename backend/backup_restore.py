@@ -304,6 +304,10 @@ def _dump(value: Any) -> str:
     return json_util.dumps(value, json_options=CANONICAL_JSON_OPTIONS)
 
 
+def _dump_batch(values: list[Any]) -> bytes:
+    return (chr(10).join(_dump(value) for value in values) + chr(10)).encode("utf-8")
+
+
 def _load(value: str) -> Any:
     return json_util.loads(value, json_options=CANONICAL_JSON_OPTIONS)
 
