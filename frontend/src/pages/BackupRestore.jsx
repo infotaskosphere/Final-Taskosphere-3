@@ -207,10 +207,18 @@ export default function BackupRestore() {
     try {
       const response = await api.get('/app-backup/history/' + encodeURIComponent(record.id) + '/download', {
         responseType: 'blob',
+        onDownloadProgress: (event) => {
+          const loaded = Number(event.loaded || 0);
+          const total = Number(event.total || record.file_size_bytes || 0);
+          const percent = total > 0 ? Math.min(100, (loaded / total) * 100) : 0;
+          setTransfer((current) => ({ ...current, active: percent < 100, phase: 'Downloading stored backup…', percent, processed: loaded, total, detail: total ? formatBytes(loaded) + ' / ' + formatBytes(total) : formatBytes(loaded) + ' downloaded' }));
+        },
       });
       downloadBlob(response.data, record.filename || ('onenexa-backup-' + record.id + '.onenexa'));
+      setTransfer({ active: false, phase: 'Complete', percent: 100, etaSeconds: 0, processed: record.file_size_bytes || 0, total: record.file_size_bytes || 0, detail: 'Historical backup downloaded successfully.' });
       toast.success('Historical backup downloaded.');
     } catch (error) {
+      setTransfer((current) => ({ ...current, active: false, phase: 'Failed', etaSeconds: null }));
       toast.error(await getBackupErrorMessage(error));
     }
   };
