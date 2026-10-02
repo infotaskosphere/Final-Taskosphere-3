@@ -160,7 +160,7 @@ async def _persist_backup_history(output: str, filename: str, manifest: dict, cu
     stream = None
     file_size = os.path.getsize(output)
     try:
-        stream = await bucket.open_upload_stream(
+        stream = bucket.open_upload_stream(
             filename,
             chunk_size_bytes=CHUNK_SIZE,
             metadata={
