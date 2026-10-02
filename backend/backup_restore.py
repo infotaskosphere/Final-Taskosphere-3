@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from bson import ObjectId, json_util
+from motor.motor_asyncio import AsyncIOMotorGridFSBucket
 from bson.json_util import CANONICAL_JSON_OPTIONS
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -57,11 +58,16 @@ MAX_BACKUP_UPLOAD_BYTES = 100 * 1024 * 1024
 NEW_BACKUP_EXTENSION = ".onenexa"
 LEGACY_BACKUP_EXTENSIONS = {".taskosphere"}
 SUPPORTED_BACKUP_EXTENSIONS = {NEW_BACKUP_EXTENSION, *LEGACY_BACKUP_EXTENSIONS}
+BACKUP_HISTORY_COLLECTION = "backup_history"
+BACKUP_GRIDFS_BUCKET = "taskosphere_backups"
 
 EXCLUDED_COLLECTIONS = {
     "sessions", "refresh_tokens", "access_tokens", "password_resets",
     "password_reset_tokens", "verification_tokens", "email_verification_tokens",
     "oauth_states", "oauth_tokens", "rate_limits",
+    BACKUP_HISTORY_COLLECTION,
+    f"{BACKUP_GRIDFS_BUCKET}.files",
+    f"{BACKUP_GRIDFS_BUCKET}.chunks",
 }
 
 AUTH_FIELDS_TO_PRESERVE = {
