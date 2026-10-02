@@ -605,6 +605,7 @@ async def _run_backup_job(
             progress_id,
         )
         filename = f"onenexa-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}{NEW_BACKUP_EXTENSION}"
+        history_id = await _persist_backup_history(output, filename, _manifest, current_user)
         _BACKUP_OUTPUTS[progress_id] = {
             "path": output,
             "filename": filename,
