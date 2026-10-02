@@ -393,7 +393,7 @@ async def _build_archive(user: User, password: str, requested: list[str] | None)
                     pass
                 manifest["collections"][name] = {"documents": len(docs), "safe_name": safe}
             archive.writestr("manifest.json", json.dumps(manifest, indent=2, sort_keys=True))
-        fd, output = tempfile.mkstemp(prefix="taskosphere-backup-", suffix=".taskosphere")
+        fd, output = tempfile.mkstemp(prefix="taskosphere-backup-", suffix=NEW_BACKUP_EXTENSION)
         os.close(fd)
         _encrypt(zip_path, output, password)
         return output, manifest
@@ -845,9 +845,10 @@ async def restore_backup(backup: UploadFile = File(...), password: str = Form(..
     _require_admin(current_user)
     if confirmation.strip() != "RESTORE":
         raise HTTPException(status_code=400, detail="Type RESTORE exactly to confirm the operation.")
-    if not backup.filename or not backup.filename.endswith(".taskosphere"):
-        raise HTTPException(status_code=400, detail="Upload a .taskosphere backup file.")
-    fd, source_path = tempfile.mkstemp(prefix="taskosphere-upload-", suffix=".taskosphere")
+    backup_extension = os.path.splitext(backup.filename or "")[1].lower()
+    if backup_extension not in SUPPORTED_BACKUP_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Upload a .onenexa backup file. Legacy .taskosphere backups are also supported.")
+    fd, source_path = tempfile.mkstemp(prefix="onenexa-upload-", suffix=backup_extension)
     os.close(fd)
     zip_path = None
     try:
