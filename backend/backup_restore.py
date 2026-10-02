@@ -160,7 +160,7 @@ async def _persist_backup_history(output: str, filename: str, manifest: dict, cu
     stream = None
     file_size = os.path.getsize(output)
     try:
-        stream = bucket.open_upload_stream(
+        stream = await bucket.open_upload_stream(
             filename,
             chunk_size_bytes=CHUNK_SIZE,
             metadata={
@@ -648,14 +648,17 @@ async def _run_backup_job(
         )
         asyncio.create_task(_expire_backup_output(progress_id))
     except Exception as exc:
+        previous = _BACKUP_PROGRESS.get(progress_id, {})
         _set_backup_progress(
             progress_id,
             owner_user_id=_s(current_user.id),
             phase="error",
-            percent=0.0,
+            percent=float(previous.get("percent") or 0.0),
+            processed_documents=previous.get("processed_documents", 0),
+            total_documents=previous.get("total_documents", 0),
             eta_seconds=None,
-            current_collection=None,
-            error=str(exc) if isinstance(exc, HTTPException) else "Backup creation failed on the server.",
+            current_collection=previous.get("current_collection"),
+            error=str(exc) if isinstance(exc, HTTPException) else f"Backup creation failed on the server: {exc}",
             download_ready=False,
         )
         logger.error("Background backup creation failed for %s: %s", progress_id, exc, exc_info=True)
