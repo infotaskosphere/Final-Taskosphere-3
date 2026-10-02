@@ -643,6 +643,13 @@ async def backup_create_progress(progress_id: str, current_user: User = Depends(
     _require_backup_access(current_user)
     if not progress_id or len(progress_id) > 120:
         raise HTTPException(status_code=400, detail="Invalid backup progress id.")
+    raw = _raw_db()
+    job = await raw[BACKUP_JOBS_COLLECTION].find_one({"_id": progress_id, "owner_user_id": _s(current_user.id)})
+    if job:
+        job.pop("password_encrypted", None)
+        job.pop("worker_heartbeat_at", None)
+        job.pop("_id", None)
+        return job
     return _get_backup_progress(progress_id)
 
 
@@ -700,10 +707,13 @@ async def create_backup(request: Request, current_user: User = Depends(get_curre
         download_ready=False,
     )
 
-    task = asyncio.create_task(
-        _run_backup_job(progress_id, current_user, password, requested)
+    await _persist_backup_job(
+        _raw_db(),
+        progress_id,
+        current_user,
+        password,
+        requested,
     )
-    _BACKUP_TASKS[progress_id] = task
 
     return {
         "success": True,
@@ -783,10 +793,10 @@ async def download_created_backup(progress_id: str, request: Request, current_us
     _require_backup_access(current_user)
     if not progress_id or len(progress_id) > 120:
         raise HTTPException(status_code=400, detail="Invalid backup progress id.")
-    state = _get_backup_progress(progress_id)
-    if _s(state.get("owner_user_id")) != _s(current_user.id):
+    raw = _raw_db()
+    state = await raw[BACKUP_JOBS_COLLECTION].find_one({"_id": progress_id, "owner_user_id": _s(current_user.id)})
+    if not state:
         raise HTTPException(status_code=404, detail="Backup progress session not found.")
-    if state.get("phase") != "ready":
         raise HTTPException(status_code=409, detail="Backup is still being created.")
     history_id = _s(state.get("history_id"))
     if ObjectId.is_valid(history_id):
