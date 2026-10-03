@@ -202,7 +202,12 @@ async def _persist_backup_progress(progress_id: str, values: dict):
             else "running"
         )
         payload = dict(values)
-        payload["status"] = status
+        # Queued state is written atomically by _persist_backup_job(). Do not
+        # write status="queued" from this asynchronous progress callback after
+        # a worker has already claimed the job, otherwise a second worker can
+        # claim the same job while the first worker is still running.
+        if status != "queued":
+            payload["status"] = status
         payload["updated_at"] = datetime.now(timezone.utc)
         if status == "running":
             payload["worker_heartbeat_at"] = datetime.now(timezone.utc)
