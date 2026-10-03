@@ -5,6 +5,10 @@ import { useState, useEffect } from "react";
 // API BASE URL
 // ─────────────────────────────────────────────────────────────
 
+// PRODUCTION BUILD MARKER: 2026-10-03-backup-api-redeploy
+// This marker intentionally changes the frontend bundle so Render performs
+// a fresh production build. The live site must never use localhost:7432.
+ 
 // Production backend.
 // This is the ONLY backend used by the production Taskosphere website.
 const PRODUCTION_API_URL =
@@ -83,19 +87,6 @@ export { BASE_URL };
 
 const TOKEN_KEY = "token";
 
-/**
- * IMPORTANT:
- * Token may be stored in either localStorage or sessionStorage.
- *
- * localStorage:
- *   Keep me signed in
- *
- * sessionStorage:
- *   Normal browser session
- *
- * Always check both so hard refresh does not accidentally
- * make the application think the user is logged out.
- */
 export const getToken = () => {
   return (
     localStorage.getItem(TOKEN_KEY) ||
@@ -104,15 +95,6 @@ export const getToken = () => {
   );
 };
 
-/**
- * Store token according to rememberMe preference.
- *
- * rememberMe = true:
- *   localStorage
- *
- * rememberMe = false:
- *   sessionStorage
- */
 export const setToken = (tok, rememberMe = true) => {
   if (!tok) return;
 
@@ -125,9 +107,6 @@ export const setToken = (tok, rememberMe = true) => {
   }
 };
 
-/**
- * Remove authentication token from BOTH storages.
- */
 export const clearToken = () => {
   localStorage.removeItem(TOKEN_KEY);
   sessionStorage.removeItem(TOKEN_KEY);
@@ -268,14 +247,6 @@ export function ensureBackendReady() {
 // COLLECTION ROUTES
 // ─────────────────────────────────────────────────────────────
 
-/**
- * These collection endpoints may exist with or without a
- * trailing slash depending on the deployed backend version.
- *
- * IMPORTANT:
- * /recruitment is included here because the Recruitment page
- * uses GET /api/recruitment.
- */
 const SLASH_COMPATIBLE_COLLECTIONS = new Set([
   "/notifications",
   "/visits",
@@ -308,7 +279,6 @@ const api = axios.create({
 
 api.interceptors.request.use(
   async (config) => {
-    // Normalize known collection GET endpoints.
     const [requestPath, requestQuery = ""] =
       (config.url || "").split("?");
 
@@ -326,10 +296,6 @@ api.interceptors.request.use(
         `${requestQuery ? `?${requestQuery}` : ""}`;
     }
 
-    // ─────────────────────────────────────────────────────────
-    // AUTH TOKEN
-    // ─────────────────────────────────────────────────────────
-
     const token = getToken();
 
     if (token) {
@@ -337,7 +303,6 @@ api.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
 
-    // Global loading indicator.
     if (!config._silent) {
       _setLoading(1);
     }
@@ -371,12 +336,7 @@ api.interceptors.response.use(
       _setLoading(-1);
     }
 
-    // No HTTP response = network-level problem.
     _reportNetworkResult(Boolean(error.response));
-
-    // ─────────────────────────────────────────────────────────
-    // COLLECTION RETRY HANDLING
-    // ─────────────────────────────────────────────────────────
 
     const requestUrl = error.config?.url || "";
 
@@ -398,32 +358,17 @@ api.interceptors.response.use(
       error.response?.status === 503 ||
       error.response?.status === 504;
 
-    // FIX: a plain 404 means "this resource/route doesn't exist" — it is NOT
-    // evidence the backend is cold-starting. Only 502/503/504 (or no response
-    // at all, handled elsewhere via _reportNetworkResult) are real signs the
-    // server itself isn't up yet. Previously ANY 404 anywhere in the app —
-    // even a harmless "task not found" — reset the single shared readiness
-    // flag, which forced every other in-flight and future request across the
-    // ENTIRE app (every page, not just the one that got the 404) to sit and
-    // wait through the ~75s backoff sequence in ensureBackendReady() before
-    // proceeding. That produced exactly the symptom of "one page loads fine,
-    // then every other page goes blank for a long time with no console error."
     const isColdStartStatus =
       error.response?.status === 502 ||
       error.response?.status === 503 ||
       error.response?.status === 504;
 
-    // Mark backend as not ready once.
     if (
       isColdStartStatus &&
       !error.config?._coldStartAttempt
     ) {
       markBackendNotReady();
     }
-
-    // ─────────────────────────────────────────────────────────
-    // RETRY COLLECTION GET
-    // ─────────────────────────────────────────────────────────
 
     if (
       isCollectionGet &&
@@ -450,12 +395,8 @@ api.interceptors.response.use(
             api
               .request({
                 ...error.config,
-
                 _coldStartAttempt:
                   attempt + 1,
-
-                // The backend already answered this request,
-                // therefore don't run /health again.
                 _skipReadyGate: true,
               })
               .then(resolve)
@@ -464,10 +405,6 @@ api.interceptors.response.use(
         });
       }
 
-      // ───────────────────────────────────────────────────────
-      // LEGACY TRAILING-SLASH RETRY
-      // ───────────────────────────────────────────────────────
-
       if (
         error.response?.status === 404 &&
         !error.config?._slashRetry
@@ -475,16 +412,12 @@ api.interceptors.response.use(
         return api
           .request({
             ...error.config,
-
             url:
               `${normalisedPath}/` +
               `${requestQuery ? `?${requestQuery}` : ""}`,
-
             _slashRetry: true,
-
             _coldStartAttempt:
               backoffs.length,
-
             _skipReadyGate: true,
           })
           .catch(() =>
@@ -501,10 +434,6 @@ api.interceptors.response.use(
           );
       }
 
-      // ───────────────────────────────────────────────────────
-      // DEGRADED EMPTY COLLECTION
-      // ───────────────────────────────────────────────────────
-
       return Promise.resolve({
         data: [],
         status: 200,
@@ -516,10 +445,6 @@ api.interceptors.response.use(
         _degraded: true,
       });
     }
-
-    // ─────────────────────────────────────────────────────────
-    // 401 — AUTHENTICATION
-    // ─────────────────────────────────────────────────────────
 
     if (error.response?.status === 401) {
       clearToken();
@@ -535,10 +460,6 @@ api.interceptors.response.use(
       }
     }
 
-    // ─────────────────────────────────────────────────────────
-    // 403 — PERMISSION DENIED
-    // ─────────────────────────────────────────────────────────
-
     if (error.response?.status === 403) {
       if (typeof window !== "undefined") {
         window.dispatchEvent(
@@ -546,10 +467,6 @@ api.interceptors.response.use(
         );
       }
     }
-
-    // ─────────────────────────────────────────────────────────
-    // 422 — VALIDATION ERROR
-    // ─────────────────────────────────────────────────────────
 
     if (error.response?.status === 422) {
       const detail =
@@ -573,10 +490,6 @@ api.interceptors.response.use(
   }
 );
 
-// ─────────────────────────────────────────────────────────────
-// SILENT GET
-// ─────────────────────────────────────────────────────────────
-
 export const silentGet = (
   url,
   config = {}
@@ -585,10 +498,6 @@ export const silentGet = (
     ...config,
     _silent: true,
   });
-
-// ─────────────────────────────────────────────────────────────
-// FILE UPLOAD
-// ─────────────────────────────────────────────────────────────
 
 export const upload = (
   url,
@@ -602,10 +511,6 @@ export const upload = (
       ...config.headers,
     },
   });
-
-// ─────────────────────────────────────────────────────────────
-// DEDUPLICATED GET
-// ─────────────────────────────────────────────────────────────
 
 export const deduplicatedGet = (
   url,
@@ -636,10 +541,6 @@ export const deduplicatedGet = (
   return promise;
 };
 
-// ─────────────────────────────────────────────────────────────
-// PARALLEL GET
-// ─────────────────────────────────────────────────────────────
-
 export const parallelGet = async (
   urlMap,
   config = {}
@@ -665,10 +566,6 @@ export const parallelGet = async (
     ])
   );
 };
-
-// ─────────────────────────────────────────────────────────────
-// ERROR FORMATTER
-// ─────────────────────────────────────────────────────────────
 
 export function getErrorMessage(error) {
   if (!error) {
@@ -701,9 +598,5 @@ export function getErrorMessage(error) {
 
   return "Request failed";
 }
-
-// ─────────────────────────────────────────────────────────────
-// DEFAULT EXPORT
-// ─────────────────────────────────────────────────────────────
 
 export default api;
