@@ -41,13 +41,13 @@ services:
     envVars:
       - key: MONGO_URL
         fromService:
-          name: final-taskosphere-backend
+          name: Taskosphere-backend
           type: web
           envVarKey: MONGO_URL
 
       - key: SECRET_KEY
         fromService:
-          name: final-taskosphere-backend
+          name: Taskosphere-backend
           type: web
           envVarKey: SECRET_KEY
       # The worker MUST use the exact same Mongo database as the API.
@@ -55,7 +55,7 @@ services:
       # polling a different database and every backup remains "queued".
       - key: DB_NAME
         fromService:
-          name: final-taskosphere-backend
+          name: Taskosphere-backend
           type: web
           envVarKey: DB_NAME
 
