@@ -690,6 +690,31 @@ async def _resolve_collections(user: User, requested: list[str] | None):
 
 
 # ---------------------------------------------------------------------------
+# Module-wise cumulative backup helpers
+# ---------------------------------------------------------------------------
+def _backup_module_for_collection(name: str) -> str:
+    for module_name, module_collections in MODULE_COLLECTION_MAP.items():
+        if name in module_collections:
+            return module_name
+    return "other"
+
+
+def _order_backup_collections(selected: list[str]) -> tuple[list[str], dict[str, list[str]]]:
+    groups: dict[str, list[str]] = {}
+    for name in selected:
+        module_name = _backup_module_for_collection(name)
+        groups.setdefault(module_name, []).append(name)
+
+    ordered: list[str] = []
+    module_order = list(MODULE_COLLECTION_MAP.keys()) + ["other"]
+    for module_name in module_order:
+        for name in sorted(groups.get(module_name, [])):
+            ordered.append(name)
+
+    return ordered, groups
+
+
+# ---------------------------------------------------------------------------
 # Resumable, proxy-safe artifact streaming
 # ---------------------------------------------------------------------------
 # Motor's ``open_download_stream`` is a coroutine and MUST be awaited. It was
@@ -1312,6 +1337,11 @@ async def _build_archive(
     raw = _raw_db()
     started_at = time.monotonic()
 
+    # Full application backups are exported module-by-module into ONE
+    # cumulative archive. "other" contains collections not mapped to a module.
+    selected, module_groups = _order_backup_collections(selected)
+    module_order = [name for name in list(MODULE_COLLECTION_MAP.keys()) + ["other"] if name in module_groups]
+
     _set_backup_progress(
         progress_id,
         phase="preparing",
@@ -1321,10 +1351,14 @@ async def _build_archive(
         eta_seconds=None,
         elapsed_seconds=0.0,
         current_collection=None,
+        backup_strategy="module_wise_cumulative" if not requested else "selected_cumulative",
+        module_count=len(module_order),
+        completed_modules=0,
+        current_module=module_order[0] if module_order else None,
     )
 
-    # Count first so the UI can display a real percentage rather than a
-    # collection-index approximation.
+    # Count first so the UI can display a real cumulative percentage. The
+    # actual export below still processes one module at a time.
     total_documents = 0
     for name in selected:
         total_documents += await _count_collection_documents(raw, name)
@@ -1350,6 +1384,13 @@ async def _build_archive(
         "bson_encoding": "MongoDB Extended JSON v2 canonical",
         "encryption": "AES-256-GCM + PBKDF2-HMAC-SHA256",
         "selection": "full" if not requested else "custom",
+        "backup_strategy": "module_wise_cumulative" if not requested else "selected_cumulative",
+        "modules": {
+            module_name: {
+                "collections": list(collection_names),
+            }
+            for module_name, collection_names in module_groups.items()
+        },
         "collections": {},
         "excluded_collections": sorted(EXCLUDED_COLLECTIONS),
     }
@@ -1366,7 +1407,33 @@ async def _build_archive(
             compression=zipfile.ZIP_STORED,
             allowZip64=True,
         ) as archive:
+            previous_module = None
+            completed_modules = 0
             for name in selected:
+                module_name = _backup_module_for_collection(name)
+                if module_name != previous_module:
+                    _set_backup_progress(
+                        progress_id,
+                        phase="creating",
+                        percent=round(
+                            (processed_documents / total_documents) * 90.0,
+                            2,
+                        ) if total_documents else 0.0,
+                        processed_documents=processed_documents,
+                        total_documents=total_documents,
+                        eta_seconds=None,
+                        elapsed_seconds=round(time.monotonic() - started_at, 1),
+                        current_collection=f"Starting module: {module_name}",
+                        current_module=module_name,
+                        completed_modules=completed_modules,
+                        module_count=len(module_order),
+                    )
+                    if previous_module is not None:
+                        import gc
+                        gc.collect()
+                        completed_modules += 1
+                    previous_module = module_name
+
                 safe = name.replace("/", "_")
                 document_count = 0
 
@@ -1418,7 +1485,10 @@ async def _build_archive(
                                 total_documents=total_documents,
                                 eta_seconds=round(eta, 1) if eta is not None else None,
                                 elapsed_seconds=round(elapsed, 1),
-                                current_collection=name,
+                                current_collection=f"{module_name}: {name}",
+                                current_module=module_name,
+                                completed_modules=completed_modules,
+                                module_count=len(module_order),
                             )
 
                         if processed_documents % 50 == 0:
@@ -1447,6 +1517,25 @@ async def _build_archive(
                         "documents": document_count,
                         "safe_name": safe,
                     }
+
+            if previous_module is not None:
+                import gc
+                gc.collect()
+                completed_modules = len(module_order)
+
+            _set_backup_progress(
+                progress_id,
+                phase="creating",
+                percent=90.0 if total_documents else 90.0,
+                processed_documents=processed_documents,
+                total_documents=total_documents,
+                eta_seconds=None,
+                elapsed_seconds=round(time.monotonic() - started_at, 1),
+                current_collection="All modules exported; building cumulative manifest…",
+                current_module=None,
+                completed_modules=completed_modules,
+                module_count=len(module_order),
+            )
 
             archive.writestr(
                 "manifest.json",
