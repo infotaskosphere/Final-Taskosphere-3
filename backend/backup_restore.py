@@ -26,6 +26,7 @@ import zipfile
 from datetime import datetime, timezone
 from typing import Any
 
+import bson
 from bson import ObjectId, json_util
 from pymongo import ReturnDocument
 from motor.motor_asyncio import AsyncIOMotorGridFSBucket
@@ -200,7 +201,7 @@ async def _persist_backup_progress(progress_id: str, values: dict):
 
 
 async def _claim_backup_job(raw):
-    stale = datetime.now(timezone.utc).timestamp() - 900
+    stale = datetime.now(timezone.utc).timestamp() - 120
     stale_dt = datetime.fromtimestamp(stale, timezone.utc)
     try:
         return await raw[BACKUP_JOBS_COLLECTION].find_one_and_update(
@@ -258,7 +259,25 @@ async def run_backup_worker_forever():
                 raise RuntimeError("Backup owner account no longer exists.")
             current_user = User.model_validate(user_doc)
             password = _unprotect_job_password(job.get("password_encrypted") or "")
-            await _run_backup_job(progress_id, current_user, password, job.get("requested"))
+
+            async def _heartbeat():
+                # Keeps the job marked alive during long silent phases
+                # (encrypting / uploading) so it is not re-claimed as stale.
+                while True:
+                    await asyncio.sleep(20)
+                    try:
+                        await raw[BACKUP_JOBS_COLLECTION].update_one(
+                            {"_id": progress_id, "status": "running"},
+                            {"$set": {"worker_heartbeat_at": datetime.now(timezone.utc)}},
+                        )
+                    except Exception:
+                        pass
+
+            hb = asyncio.get_running_loop().create_task(_heartbeat())
+            try:
+                await _run_backup_job(progress_id, current_user, password, job.get("requested"))
+            finally:
+                hb.cancel()
         except Exception as exc:
             logger.error("Backup worker job %s failed: %s", progress_id, exc, exc_info=True)
             await raw[BACKUP_JOBS_COLLECTION].update_one(
@@ -1180,18 +1199,27 @@ async def _build_archive(
                     mode="w",
                     force_zip64=True,
                 ) as entry:
-                    cursor = raw[name].find({})
+                    cursor = raw[name].find({}).batch_size(100)
                     pending_lines = []
+                    pending_bytes = 0
                     async for doc in cursor:
                         pending_lines.append(doc)
+                        try:
+                            pending_bytes += len(bson.encode(doc))
+                        except Exception:
+                            pending_bytes += 4096
                         document_count += 1
                         processed_documents += 1
-                        if len(pending_lines) >= 500:
+                        # Flush by size as well as count so collections with
+                        # large documents cannot exhaust server memory.
+                        if len(pending_lines) >= 200 or pending_bytes >= 4 * 1024 * 1024:
                             payload = await asyncio.to_thread(_dump_batch, pending_lines)
                             await asyncio.to_thread(entry.write, payload)
                             pending_lines.clear()
+                            pending_bytes = 0
+                            del payload
 
-                        if processed_documents % 500 == 0 or processed_documents == total_documents:
+                        if processed_documents % 200 == 0 or processed_documents == total_documents:
                             elapsed = max(0.001, time.monotonic() - started_at)
                             ratio = (
                                 processed_documents / total_documents
