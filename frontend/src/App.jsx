@@ -12,6 +12,8 @@ import BulkWASenderWidget from "@/contexts/BulkWASenderWidget";
 import { MinimizedFormsProvider } from "@/contexts/MinimizedFormsContext";
 import MinimizedFormsDock from "@/components/layout/MinimizedFormsDock.jsx";
 import { DocumentUploadProvider } from "@/contexts/DocumentUploadContext.jsx";
+import { BackupProvider } from "@/contexts/BackupContext";
+import BackupWidget from "@/components/layout/BackupWidget.jsx";
 
 /* ── Bottom loading bar ─────────────────────────────────────────────── */
 const BottomLoadingBar = memo(function BottomLoadingBar() {
@@ -128,17 +130,20 @@ export default function App() {
           <MinimizedFormsProvider>
             <BulkWASenderProvider>
               <DocumentUploadProvider>
-                <BottomLoadingBar />
-                <RoutePrefetcher />
-                <ReminderPopupManager />
-                <BulkWASenderWidget />
-                <MinimizedFormsDock />
+                <BackupProvider>
+                  <BottomLoadingBar />
+                  <RoutePrefetcher />
+                  <ReminderPopupManager />
+                  <BulkWASenderWidget />
+                  <BackupWidget />
+                  <MinimizedFormsDock />
 
-                <Suspense fallback={<GifLoader />}>
-                  <AppRoutes />
-                </Suspense>
+                  <Suspense fallback={<GifLoader />}>
+                    <AppRoutes />
+                  </Suspense>
 
-                <Toaster position="top-right" richColors />
+                  <Toaster position="top-right" richColors />
+                </BackupProvider>
               </DocumentUploadProvider>
             </BulkWASenderProvider>
           </MinimizedFormsProvider>

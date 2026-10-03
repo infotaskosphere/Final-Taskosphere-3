@@ -1,8 +1,26 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Archive, AlertTriangle, Database, Download, HardDriveDownload, History, LockKeyhole, RefreshCw, RotateCcw, ShieldCheck, Trash2, Upload, Users } from 'lucide-react';
+import {
+  Archive,
+  AlertTriangle,
+  Database,
+  Download,
+  HardDriveDownload,
+  History,
+  LockKeyhole,
+  Maximize2,
+  Minimize2,
+  RefreshCw,
+  RotateCcw,
+  ShieldCheck,
+  Trash2,
+  Upload,
+  Users,
+  X,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import api, { BASE_URL, getToken } from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
+import { useBackupManager } from '@/contexts/BackupContext';
 
 const MODULE_LABELS = {
   taskosphere: 'Taskosphere',
@@ -251,15 +269,15 @@ export default function BackupRestore() {
   const [activeTab, setActiveTab] = useState('backup');
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [transfer, setTransfer] = useState({
-    active: false,
-    phase: '',
-    percent: 0,
-    etaSeconds: null,
-    processed: 0,
-    total: 0,
-    detail: '',
-  });
+  const {
+    transfer,
+    patchTransfer,
+    minimize,
+    maximize,
+    toggleMinimize,
+    dismiss,
+    startBackup,
+  } = useBackupManager();
 
   const loadInfo = async () => {
     setLoadingInfo(true);
@@ -298,14 +316,32 @@ export default function BackupRestore() {
           const loaded = Number(event.loaded || 0);
           const total = Number(event.total || record.file_size_bytes || 0);
           const percent = total > 0 ? Math.min(100, (loaded / total) * 100) : 0;
-          setTransfer((current) => ({ ...current, active: percent < 100, phase: 'Downloading stored backup…', percent, processed: loaded, total, detail: total ? formatBytes(loaded) + ' / ' + formatBytes(total) : formatBytes(loaded) + ' downloaded' }));
+          patchTransfer({
+            active: percent < 100,
+            visible: true,
+            isMinimized: false,
+            phase: 'Downloading stored backup…',
+            percent,
+            processed: loaded,
+            total,
+            detail: total ? formatBytes(loaded) + ' / ' + formatBytes(total) : formatBytes(loaded) + ' downloaded',
+          });
         },
       });
       downloadBlob(response.data, record.filename || ('onenexa-backup-' + record.id + '.onenexa'));
-      setTransfer({ active: false, phase: 'Complete', percent: 100, etaSeconds: 0, processed: record.file_size_bytes || 0, total: record.file_size_bytes || 0, detail: 'Historical backup downloaded successfully.' });
+      patchTransfer({
+        active: false,
+        visible: true,
+        phase: 'Complete',
+        percent: 100,
+        etaSeconds: 0,
+        processed: record.file_size_bytes || 0,
+        total: record.file_size_bytes || 0,
+        detail: 'Historical backup downloaded successfully.',
+      });
       toast.success('Historical backup downloaded.');
     } catch (error) {
-      setTransfer((current) => ({ ...current, active: false, phase: 'Failed', etaSeconds: null }));
+      patchTransfer({ active: false, phase: 'Failed', etaSeconds: null });
       toast.error(await getBackupErrorMessage(error));
     }
   };
@@ -348,217 +384,20 @@ export default function BackupRestore() {
       return;
     }
 
-    const progressId =
-      (typeof crypto !== 'undefined' && crypto.randomUUID)
-        ? crypto.randomUUID()
-        : Date.now() + '-' + Math.random().toString(36).slice(2);
-
     setBusy(true);
-    setTransfer({
-      active: true,
-      phase: 'Preparing backup…',
-      percent: 0,
-      etaSeconds: null,
-      processed: 0,
-      total: 0,
-      detail: 'Starting background backup job…',
-    });
-
-    let stopped = false;
-    let pollTimer = null;
-
     try {
-      const form = new FormData();
-      form.append('password', password);
-      if (mode !== 'full') form.append('collections', customSelection.join(','));
-
-      const response = await fetch(BASE_URL + '/app-backup/create', {
-        method: 'POST',
-        headers: {
-          Authorization: getToken() ? 'Bearer ' + getToken() : '',
-          'X-Backup-Progress-ID': progressId,
-        },
-        body: form,
+      await startBackup({
+        password,
+        mode,
+        collections: customSelection,
       });
-
-      const rawResponse = await response.text();
-      let data = {};
-      try {
-        data = rawResponse ? JSON.parse(rawResponse) : {};
-      } catch {
-        data = {};
-      }
-
-      if (!response.ok) {
-        const detail = normalizeBackupDetail(data?.detail) || normalizeBackupDetail(data?.message) || rawResponse;
-        throw new Error(detail || 'Backup could not be started (' + response.status + ')');
-      }
-
-      const serverProgressId = String(data?.progress_id || progressId);
-      if (!serverProgressId) throw new Error('Backup server did not return a progress id.');
-
-      const pollProgress = async () => {
-        if (stopped) return null;
-        try {
-          const { data: progress } = await api.get(
-            '/app-backup/create/progress/' + encodeURIComponent(serverProgressId),
-            { _skipReadyGate: true, _silent: true, timeout: 5000 }
-          );
-
-          if (!progress) return null;
-
-          const phase = progress.phase;
-          setTransfer((current) => ({
-            ...current,
-            active: !['ready', 'error'].includes(phase),
-            phase: phase === 'creating'
-              ? 'Creating encrypted backup…'
-              : phase === 'encrypting'
-                ? 'Encrypting backup…'
-                : phase === 'preparing'
-                  ? 'Preparing backup…'
-                  : phase === 'queued'
-                    ? 'Backup queued…'
-                    : phase === 'ready'
-                      ? 'Backup ready. Starting download…'
-                      : phase === 'error'
-                        ? 'Failed'
-                        : phase || current.phase,
-            percent: Number.isFinite(Number(progress.percent)) ? Number(progress.percent) : current.percent,
-            etaSeconds: progress.eta_seconds ?? current.etaSeconds,
-            processed: progress.processed_documents ?? progress.processed_bytes ?? current.processed,
-            total: progress.total_documents ?? progress.total_bytes ?? current.total,
-            detail: progress.error
-              ? progress.error
-              : progress.download_ready
-                ? 'Backup is ready for download.'
-                : progress.current_collection
-                  ? 'Collection: ' + progress.current_collection
-                  : phase === 'queued'
-                    ? 'Waiting for backup worker to claim the job…'
-                    : phase === 'preparing'
-                      ? 'Preparing backup data…'
-                      : phase === 'creating'
-                        ? 'Exporting application data…'
-                        : phase === 'encrypting'
-                          ? 'Encrypting backup…'
-                          : phase === 'storing'
-                            ? 'Saving encrypted backup to history…'
-                            : current.detail,
-          }));
-
-          if (phase === 'error') {
-            throw new Error(progress.error || 'Backup creation failed on the server.');
-          }
-
-          if (phase === 'ready' && progress.download_ready) {
-            return progress;
-          }
-        } catch (error) {
-          if (error?.response?.status === 404) {
-            return null;
-          }
-          throw error;
-        }
-        return null;
-      };
-
-      const readyState = await new Promise((resolve, reject) => {
-        let transientFailures = 0;
-        const finish = async () => {
-          try {
-            const pollState = await pollProgress();
-            transientFailures = 0;
-            if (pollState?.download_ready) {
-              window.clearInterval(pollTimer);
-              stopped = true;
-              resolve(pollState);
-            }
-          } catch (error) {
-            const status = error?.response?.status;
-            if (!error?.response || [502, 503, 504].includes(status)) {
-              transientFailures += 1;
-              // The server may be restarting (Render takes 1-2 minutes); the
-              // backup job is stored in the database and continues afterwards.
-              if (transientFailures < 400) {
-                setTransfer((current) => ({
-                  ...current,
-                  active: true,
-                  detail: 'Server is temporarily unreachable. Reconnecting…',
-                }));
-                return;
-              }
-            }
-            window.clearInterval(pollTimer);
-            stopped = true;
-            reject(error);
-          }
-        };
-
-        pollTimer = window.setInterval(finish, 700);
-        void finish();
-      });
-
-      setTransfer((current) => ({
-        ...current,
-        active: true,
-        phase: 'Downloading backup…',
-        percent: 0,
-        etaSeconds: null,
-        processed: 0,
-        total: 0,
-        detail: 'Transferring encrypted backup to your device…',
-      }));
-
-      const downloadUrl = readyState?.history_id
-        ? BASE_URL + '/app-backup/history/' + encodeURIComponent(readyState.history_id) + '/download'
-        : BASE_URL + '/app-backup/create/download/' + encodeURIComponent(serverProgressId);
-      const backupBlob = await downloadBackupWithResume(
-        downloadUrl,
-        ({ loaded, total, percent, etaSeconds, attempt }) => {
-          setTransfer((current) => ({
-            ...current,
-            active: true,
-            phase: 'Downloading backup…',
-            percent,
-            etaSeconds,
-            processed: loaded,
-            total,
-            detail: (total ? formatBytes(loaded) + ' / ' + formatBytes(total) : formatBytes(loaded) + ' downloaded')
-              + (attempt > 0 ? ' · resumed after interruption' : ''),
-          }));
-        }
-      );
-
-      const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-      downloadBlob(backupBlob, 'onenexa-backup-' + timestamp + '.onenexa');
-      setTransfer({
-        active: false,
-        phase: 'Complete',
-        percent: 100,
-        etaSeconds: 0,
-        processed: backupBlob.size,
-        total: backupBlob.size,
-        detail: 'Backup downloaded successfully.',
-      });
-      toast.success(mode === 'full' ? 'Full application backup downloaded.' : 'Custom backup downloaded.');
+      void loadHistory();
     } catch (error) {
-      setTransfer((current) => ({
-        ...current,
-        active: false,
-        phase: 'Failed',
-        etaSeconds: null,
-        detail: error?.message || '',
-      }));
       toast.error(error?.message || 'Backup failed');
     } finally {
-      stopped = true;
-      if (pollTimer) window.clearInterval(pollTimer);
       setBusy(false);
     }
   };
-
-
 
   const restoreBackup = async () => {
     if (!restoreFile) return toast.error('Choose a .onenexa backup file, or a legacy .taskosphere backup file.');
@@ -567,8 +406,10 @@ export default function BackupRestore() {
     if (!window.confirm('Restore will replace the application data covered by this backup. Continue?')) return;
 
     setBusy(true);
-    setTransfer({
+    patchTransfer({
       active: true,
+      visible: true,
+      isMinimized: false,
       phase: 'Uploading backup…',
       percent: 0,
       etaSeconds: null,
@@ -593,7 +434,7 @@ export default function BackupRestore() {
           const percent = total > 0 ? Math.min(100, (loaded / total) * 100) : 0;
           const remaining = total > 0 ? Math.max(0, total - loaded) : 0;
 
-          setTransfer({
+          patchTransfer({
             active: true,
             phase: percent >= 100 ? 'Restoring backup…' : 'Uploading backup…',
             percent,
@@ -607,8 +448,9 @@ export default function BackupRestore() {
         },
       });
 
-      setTransfer({
+      patchTransfer({
         active: false,
+        visible: true,
         phase: 'Complete',
         percent: 100,
         etaSeconds: 0,
@@ -680,33 +522,120 @@ export default function BackupRestore() {
       </div>
 
       {transfer.phase && (
-        <div className={'rounded-2xl border p-4 ' + card}>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className={'text-sm font-bold ' + heading}>{transfer.phase}</p>
-              <p className={'text-[11px] mt-1 ' + muted}>{transfer.detail || 'Working…'}</p>
+        transfer.isMinimized ? (
+          /* Minimized Compact Card */
+          <div className={'rounded-2xl border p-3.5 flex items-center justify-between gap-4 transition-all ' + card}>
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="h-9 w-9 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                <HardDriveDownload className="h-4 w-4 animate-pulse" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className={'text-xs font-bold truncate ' + heading}>{transfer.phase}</span>
+                  <span className="text-xs font-extrabold text-blue-600 dark:text-blue-400">
+                    {Math.min(100, Math.max(0, Number(transfer.percent || 0))).toFixed(1)}%
+                  </span>
+                  <span className={'text-[10px] px-2 py-0.5 rounded-full font-medium bg-slate-100 dark:bg-slate-700 ' + muted}>
+                    Minimized · Running in background
+                  </span>
+                </div>
+                <p className={'text-[11px] truncate ' + muted}>
+                  {transfer.detail || 'Backup is progressing safely… You can continue using the application.'}
+                </p>
+              </div>
             </div>
-            <div className="text-right shrink-0">
-              <p className="text-lg font-extrabold text-blue-600">{Math.min(100, Math.max(0, Number(transfer.percent || 0))).toFixed(2)}%</p>
-              <p className={'text-[10px] ' + muted}>
-                {transfer.percent >= 100 ? 'Complete' : formatEta(transfer.etaSeconds)}
-              </p>
+
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="w-28 sm:w-44 h-2 rounded-full overflow-hidden bg-slate-200 dark:bg-slate-700 hidden sm:block">
+                <div
+                  className="h-full rounded-full bg-blue-600 transition-all duration-300"
+                  style={{ width: `${Math.min(100, Math.max(0, Number(transfer.percent || 0)))}%` }}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={maximize}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-blue-500/30 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-slate-700/60 text-xs font-bold transition-all shadow-sm"
+                title="Expand backup view"
+              >
+                <Maximize2 className="h-3.5 w-3.5" /> Expand
+              </button>
+              {(!transfer.active || transfer.percent >= 100) && (
+                <button
+                  type="button"
+                  onClick={dismiss}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                  title="Dismiss"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
           </div>
-          <div className="mt-3 h-2.5 rounded-full overflow-hidden bg-slate-200 dark:bg-slate-700">
-            <div
-              className="h-full rounded-full bg-blue-600 transition-[width] duration-300"
-              style={{ width: Math.min(100, Math.max(0, Number(transfer.percent || 0))) + '%' }}
-            />
+        ) : (
+          /* Full Expanded Card */
+          <div className={'rounded-2xl border p-4 sm:p-5 transition-all ' + card}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className={'text-sm font-bold ' + heading}>{transfer.phase}</p>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 font-bold uppercase">
+                    {transfer.mode || 'full'} backup
+                  </span>
+                </div>
+                <p className={'text-[11px] mt-1 ' + muted}>{transfer.detail || 'Working…'}</p>
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <div className="text-right">
+                  <p className="text-lg font-extrabold text-blue-600 dark:text-blue-400">
+                    {Math.min(100, Math.max(0, Number(transfer.percent || 0))).toFixed(2)}%
+                  </p>
+                  <p className={'text-[10px] ' + muted}>
+                    {transfer.percent >= 100 ? 'Complete' : formatEta(transfer.etaSeconds)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={minimize}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60 text-xs font-semibold transition-all"
+                  title="Minimize backup card so you can work while backup runs"
+                >
+                  <Minimize2 className="h-3.5 w-3.5" /> Minimize
+                </button>
+                {(!transfer.active || transfer.percent >= 100) && (
+                  <button
+                    type="button"
+                    onClick={dismiss}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                    title="Dismiss"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-3.5 h-2.5 rounded-full overflow-hidden bg-slate-200 dark:bg-slate-700">
+              <div
+                className="h-full rounded-full bg-blue-600 transition-[width] duration-300"
+                style={{ width: Math.min(100, Math.max(0, Number(transfer.percent || 0))) + '%' }}
+              />
+            </div>
+
+            <div className="mt-2.5 flex items-center justify-between text-[11px]">
+              <span className={muted}>
+                {transfer.total > 0
+                  ? (['queued', 'preparing', 'creating'].includes(String(transfer.phase || '').toLowerCase())
+                      ? `${Number(transfer.processed || 0).toLocaleString('en-IN')} / ${Number(transfer.total || 0).toLocaleString('en-IN')} documents`
+                      : `${formatBytes(transfer.processed)} / ${formatBytes(transfer.total)}`)
+                  : 'Processing application data…'}
+              </span>
+              <span className={'text-[10px] italic ' + muted}>
+                💡 You can minimize this card or use other pages — backup continues in background
+              </span>
+            </div>
           </div>
-          {transfer.total > 0 && (
-            <p className={'text-[10px] mt-2 ' + muted}>
-              {['queued', 'preparing', 'creating'].includes(String(transfer.phase || '').toLowerCase())
-                ? Number(transfer.processed || 0).toLocaleString('en-IN') + ' / ' + Number(transfer.total || 0).toLocaleString('en-IN') + ' documents'
-                : formatBytes(transfer.processed) + ' / ' + formatBytes(transfer.total)}
-            </p>
-          )}
-        </div>
+        )
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

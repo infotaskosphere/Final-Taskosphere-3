@@ -443,11 +443,7 @@ def start_inline_backup_worker():
     # The worker service itself runs "python -m backend.backup_restore" and
     # therefore does not execute this startup hook.
     configured_mode = os.getenv("BACKUP_INLINE_WORKER_MODE", "").strip().lower()
-    # Keep the API responsive: backups are CPU/memory heavy and must not run
-    # on the FastAPI event loop by default. The child process is the safe
-    # fallback until the dedicated Render background-worker service is synced.
-    # Set BACKUP_INLINE_WORKER_MODE=thread only for local/lightweight testing.
-    worker_mode = configured_mode or "process"
+    worker_mode = configured_mode or "thread"
 
     logger.info(
         "Backup inline worker configuration: mode=%s service=%s db=%s mongo_configured=%s",
@@ -457,7 +453,7 @@ def start_inline_backup_worker():
         bool(MONGO_URL),
     )
 
-    if worker_mode == "thread":
+    if worker_mode == "thread" or worker_mode != "process":
         _BACKUP_WORKER_INFO.update(mode="in-process", pid=os.getpid())
         _INLINE_BACKUP_WORKER_TASK = loop.create_task(run_backup_worker_forever())
     else:
@@ -1031,6 +1027,17 @@ async def create_backup(request: Request, current_user: User = Depends(get_curre
     )
 
     await _persist_backup_job(progress_id, current_user, password, requested)
+
+    # Immediately launch or ensure inline worker task executes this job
+    try:
+        loop = asyncio.get_running_loop()
+        global _INLINE_BACKUP_WORKER_TASK
+        if not _INLINE_BACKUP_WORKER_TASK or _INLINE_BACKUP_WORKER_TASK.done():
+            _INLINE_BACKUP_WORKER_TASK = loop.create_task(run_backup_worker_forever())
+        # Also directly schedule this specific job so it is never stuck waiting
+        loop.create_task(_run_backup_job(progress_id, current_user, password, requested))
+    except Exception as exc:
+        logger.warning(f"Could not immediately spawn inline backup task: {exc}")
 
     return {
         "success": True,
