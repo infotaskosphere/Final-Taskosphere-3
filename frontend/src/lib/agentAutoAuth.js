@@ -26,19 +26,84 @@ let isAuthed = false;
 let lastAuthTime = 0;
 const AUTH_COOLDOWN = 30000; // 30 seconds between auth attempts
 
+// ── Probe throttling ───────────────────────────────────────────────────────
+// The desktop agent is optional (Windows only). Every request to a closed
+// localhost port makes Chrome print "net::ERR_CONNECTION_REFUSED" in the
+// console, and that log cannot be suppressed with try/catch. So we avoid
+// sending the request unless it is likely to succeed:
+//   • never on non-Windows devices (the agent only exists for Windows)
+//   • at most once per page session
+//   • after a miss, not again for ABSENT_TTL_MS (stored in localStorage)
+//   • users who have the agent are remembered (INSTALLED_KEY) and always probed
+const ABSENT_KEY = 'taskosphere_agent_absent_until';
+const INSTALLED_KEY = 'taskosphere_agent_installed';
+const ABSENT_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+let probeInFlight = null;
+let absentThisSession = false;
+
+function readFlag(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function writeFlag(key, value) {
+  try { localStorage.setItem(key, value); } catch { /* storage unavailable */ }
+}
+function clearFlag(key) {
+  try { localStorage.removeItem(key); } catch { /* storage unavailable */ }
+}
+
+function shouldSkipProbe() {
+  if (typeof window === 'undefined') return true;
+  if (absentThisSession) return true;
+  if (readFlag(INSTALLED_KEY) === '1') return false;
+  const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
+  if (!/Windows/i.test(ua)) return true;
+  const until = Number(readFlag(ABSENT_KEY) || 0);
+  return until > Date.now();
+}
+
+/**
+ * Force the next check to hit localhost again (e.g. right after the user
+ * installs the agent). Call from a "Connect agent" button if you add one.
+ */
+export function resetAgentProbeCache() {
+  absentThisSession = false;
+  clearFlag(ABSENT_KEY);
+}
+
 /**
  * Check if agent is running on localhost
  */
 export async function isAgentRunning() {
-  try {
-    const response = await axios.get(`${AGENT_URL}/health`, {
-      timeout: 2000,
-      validateStatus: () => true,
-    });
-    return response.status === 200;
-  } catch {
-    return false;
-  }
+  if (shouldSkipProbe()) return false;
+  if (probeInFlight) return probeInFlight;
+
+  probeInFlight = (async () => {
+    try {
+      const response = await axios.get(`${AGENT_URL}/health`, {
+        timeout: 2000,
+        validateStatus: () => true,
+      });
+      const ok = response.status === 200;
+      if (ok) {
+        writeFlag(INSTALLED_KEY, '1');
+        clearFlag(ABSENT_KEY);
+      } else {
+        absentThisSession = true;
+      }
+      return ok;
+    } catch {
+      absentThisSession = true;
+      if (readFlag(INSTALLED_KEY) !== '1') {
+        writeFlag(ABSENT_KEY, String(Date.now() + ABSENT_TTL_MS));
+      }
+      return false;
+    } finally {
+      probeInFlight = null;
+    }
+  })();
+
+  return probeInFlight;
 }
 
 /**
