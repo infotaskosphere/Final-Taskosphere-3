@@ -430,11 +430,21 @@ export default function BackupRestore() {
             total: progress.total_documents ?? progress.total_bytes ?? current.total,
             detail: progress.error
               ? progress.error
-              : progress.current_collection
-                ? 'Collection: ' + progress.current_collection
-                : progress.download_ready
-                  ? 'Backup is ready for download.'
-                  : current.detail,
+              : progress.download_ready
+                ? 'Backup is ready for download.'
+                : progress.current_collection
+                  ? 'Collection: ' + progress.current_collection
+                  : phase === 'queued'
+                    ? 'Waiting for backup worker to claim the job…'
+                    : phase === 'preparing'
+                      ? 'Preparing backup data…'
+                      : phase === 'creating'
+                        ? 'Exporting application data…'
+                        : phase === 'encrypting'
+                          ? 'Encrypting backup…'
+                          : phase === 'storing'
+                            ? 'Saving encrypted backup to history…'
+                            : current.detail,
           }));
 
           if (phase === 'error') {
