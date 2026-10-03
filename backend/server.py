@@ -1004,6 +1004,15 @@ async def startup_event():
 
     asyncio.create_task(_keep_alive_ping())
 
+    # Backup jobs are queued in MongoDB; make sure a worker is always consuming
+    # them even when the separate Render backup-worker service isn't running.
+    try:
+        from backend.backup_restore import start_inline_backup_worker
+        start_inline_backup_worker()
+        logger.info("Inline backup worker started.")
+    except Exception as _bw_err:
+        logger.error(f"Failed to start inline backup worker: {_bw_err}")
+
     # 🔥 AUTO MIGRATION: Add consent_given for old users
     try:
         result = await db.users.update_many(
