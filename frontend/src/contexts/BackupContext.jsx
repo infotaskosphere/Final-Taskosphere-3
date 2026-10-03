@@ -195,6 +195,16 @@ export function BackupProvider({ children }) {
     setTransfer(initialTransferState);
   }, []);
 
+  const cancelBackup = useCallback(() => {
+    if (activePollRef.current) {
+      clearInterval(activePollRef.current);
+      activePollRef.current = null;
+    }
+    stoppedRef.current = true;
+    setTransfer(initialTransferState);
+    toast.info('Backup operation cancelled.');
+  }, []);
+
   const startBackup = useCallback(async ({ password, mode = 'full', collections = [] }) => {
     if (transfer.active) {
       toast.warning('A backup operation is already in progress.');
@@ -212,8 +222,8 @@ export function BackupProvider({ children }) {
       visible: true,
       isMinimized: false,
       phase: 'Preparing backup…',
-      percent: 5,
-      etaSeconds: 4,
+      percent: 2,
+      etaSeconds: null,
       processed: 0,
       total: 0,
       detail: 'Starting backup job…',
@@ -427,6 +437,7 @@ export function BackupProvider({ children }) {
     maximize,
     toggleMinimize,
     dismiss,
+    cancelBackup,
     startBackup,
   };
 

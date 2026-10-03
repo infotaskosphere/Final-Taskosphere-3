@@ -911,6 +911,7 @@ async def _expire_backup_output(progress_id: str):
 
 
 _MAIN_EVENT_LOOP = None
+_RUNNING_BACKUP_JOBS = set()
 
 def _set_backup_progress(progress_id: str | None, **values):
     if not progress_id:
@@ -955,26 +956,31 @@ def _get_backup_progress(progress_id: str):
 
 
 async def _count_collection_documents(raw, name: str) -> int:
-    collection = raw[name]
-    counter = getattr(collection, "count_documents", None)
-    if callable(counter):
-        try:
-            return int(await counter({}))
-        except Exception:
-            pass
+    try:
+        collection = raw[name]
+        estimator = getattr(collection, "estimated_document_count", None)
+        if callable(estimator):
+            try:
+                return int(await asyncio.wait_for(estimator(), timeout=1.0))
+            except Exception:
+                pass
 
-    estimator = getattr(collection, "estimated_document_count", None)
-    if callable(estimator):
-        try:
-            return int(await estimator())
-        except Exception:
-            pass
+        counter = getattr(collection, "count_documents", None)
+        if callable(counter):
+            try:
+                return int(await asyncio.wait_for(counter({}), timeout=1.0))
+            except Exception:
+                pass
 
-    count = 0
-    cursor = collection.find({}, {"_id": 1})
-    async for _doc in cursor:
-        count += 1
-    return count
+        count = 0
+        cursor = collection.find({}, {"_id": 1})
+        async for _doc in cursor:
+            count += 1
+            if count > 50000:
+                break
+        return count
+    except Exception:
+        return 0
 
 
 @router.get("/worker-status")
@@ -1011,7 +1017,7 @@ async def backup_create_progress(progress_id: str, current_user: User = Depends(
     if not progress_id or len(progress_id) > 120:
         raise HTTPException(status_code=400, detail="Invalid backup progress id.")
 
-    # In-memory progress is updated live in real-time by the active worker
+    # In-memory progress is updated live in real-time by the active task
     in_memory = _BACKUP_PROGRESS.get(progress_id)
     if in_memory:
         state = dict(in_memory)
@@ -1023,6 +1029,17 @@ async def backup_create_progress(progress_id: str, current_user: User = Depends(
         {"_id": progress_id, "owner_user_id": _s(current_user.id)}
     )
     if job:
+        # Self-healing: if job is sitting in 'queued' state and not yet executing, immediately launch it!
+        if job.get("status") == "queued" and progress_id not in _RUNNING_BACKUP_JOBS:
+            try:
+                raw_pwd = _unprotect_job_password(job.get("password_encrypted") or "")
+                req = job.get("requested")
+                loop = asyncio.get_running_loop()
+                loop.create_task(_run_backup_job(progress_id, current_user, raw_pwd, req))
+                logger.info(f"Self-healed and launched queued backup job {progress_id}")
+            except Exception as e:
+                logger.warning(f"Could not auto-start queued backup job {progress_id}: {e}")
+
         job.pop("password_encrypted", None)
         job.pop("worker_heartbeat_at", None)
         job.pop("_id", None)
@@ -1034,10 +1051,6 @@ async def backup_create_progress(progress_id: str, current_user: User = Depends(
 async def create_backup(request: Request, current_user: User = Depends(get_current_user)):
     _require_backup_access(current_user)
 
-    # Accept both multipart/form-data and JSON. Large full-application
-    # backups can contain hundreds of thousands of documents, so the export
-    # runs as an in-process background job instead of holding an HTTP request
-    # open until the archive is complete.
     content_type = (request.headers.get("content-type") or "").lower()
     password = ""
     collections = ""
@@ -1071,34 +1084,38 @@ async def create_backup(request: Request, current_user: User = Depends(get_curre
     if not progress_id:
         progress_id = secrets.token_urlsafe(24)
 
+    # Immediately mark progress as preparing so the client sees instant progress
     _set_backup_progress(
         progress_id,
         owner_user_id=_s(current_user.id),
-        phase="queued",
-        percent=0.0,
+        phase="preparing",
+        percent=2.0,
         processed_documents=0,
         total_documents=0,
         eta_seconds=None,
         elapsed_seconds=0.0,
-        current_collection=None,
+        current_collection="Initializing application backup…",
         download_ready=False,
     )
 
+    # Persist job record in database
     await _persist_backup_job(progress_id, current_user, password, requested)
 
-    # Ensure inline worker task is active to claim and process the queued job
+    # Launch execution IMMEDIATELY in background without waiting for worker poll
     try:
         loop = asyncio.get_running_loop()
-        global _INLINE_BACKUP_WORKER_TASK
-        if not _INLINE_BACKUP_WORKER_TASK or _INLINE_BACKUP_WORKER_TASK.done():
-            _INLINE_BACKUP_WORKER_TASK = loop.create_task(run_backup_worker_forever())
+        global _MAIN_EVENT_LOOP
+        _MAIN_EVENT_LOOP = loop
+        loop.create_task(_run_backup_job(progress_id, current_user, password, requested))
+        logger.info(f"Directly launched backup job {progress_id}")
     except Exception as exc:
-        logger.warning(f"Could not ensure inline backup worker task: {exc}")
+        logger.error(f"Failed to launch inline backup task for {progress_id}: {exc}")
 
     return {
         "success": True,
         "progress_id": progress_id,
-        "status": "queued",
+        "status": "running",
+        "phase": "preparing",
         "message": "Backup job started.",
     }
 
@@ -1109,13 +1126,18 @@ async def _run_backup_job(
     password: str,
     requested: list[str] | None,
 ):
+    global _RUNNING_BACKUP_JOBS
+    if progress_id in _RUNNING_BACKUP_JOBS:
+        return
+    _RUNNING_BACKUP_JOBS.add(progress_id)
     output = None
     try:
         _set_backup_progress(
             progress_id,
-            phase="creating",
-            percent=0.0,
-            current_collection=None,
+            owner_user_id=_s(current_user.id),
+            phase="preparing",
+            percent=5.0,
+            current_collection="Scanning collections…",
         )
         output, manifest = await _build_archive(
             current_user,
@@ -1184,6 +1206,8 @@ async def _run_backup_job(
             except FileNotFoundError:
                 pass
         raise
+    finally:
+        _RUNNING_BACKUP_JOBS.discard(progress_id)
 
 
 @router.get("/create/download/{progress_id}")

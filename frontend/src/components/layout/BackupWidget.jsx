@@ -15,7 +15,7 @@ import {
 import { useBackupManager, formatEta, formatBytes, downloadBlob } from '@/contexts/BackupContext';
 
 export default function BackupWidget() {
-  const { transfer, minimize, maximize, dismiss, toggleMinimize } = useBackupManager();
+  const { transfer, minimize, maximize, dismiss, cancelBackup, toggleMinimize } = useBackupManager();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -122,16 +122,14 @@ export default function BackupWidget() {
               >
                 <Maximize2 className="h-3.5 w-3.5" />
               </button>
-              {isFinished && (
-                <button
-                  type="button"
-                  onClick={dismiss}
-                  className="p-1 rounded-md hover:bg-slate-700 text-slate-400 hover:text-white"
-                  title="Dismiss"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={transfer.active ? cancelBackup : dismiss}
+                className="p-1 rounded-md hover:bg-slate-700 text-slate-400 hover:text-white"
+                title={transfer.active ? 'Cancel backup' : 'Dismiss'}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
             </div>
           </motion.div>
         ) : (
@@ -166,9 +164,9 @@ export default function BackupWidget() {
                 </button>
                 <button
                   type="button"
-                  onClick={dismiss}
+                  onClick={transfer.active ? cancelBackup : dismiss}
                   className="p-1.5 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
-                  title="Close widget"
+                  title={transfer.active ? 'Cancel backup' : 'Close widget'}
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>

@@ -276,6 +276,7 @@ export default function BackupRestore() {
     maximize,
     toggleMinimize,
     dismiss,
+    cancelBackup,
     startBackup,
   } = useBackupManager();
 
@@ -386,15 +387,18 @@ export default function BackupRestore() {
 
     setBusy(true);
     try {
-      await startBackup({
+      startBackup({
         password,
         mode,
         collections: customSelection,
+      }).catch((err) => {
+        toast.error(err?.message || 'Backup failed');
+      }).finally(() => {
+        void loadHistory();
       });
-      void loadHistory();
+      setTimeout(() => setBusy(false), 500);
     } catch (error) {
       toast.error(error?.message || 'Backup failed');
-    } finally {
       setBusy(false);
     }
   };
@@ -560,16 +564,14 @@ export default function BackupRestore() {
               >
                 <Maximize2 className="h-3.5 w-3.5" /> Expand
               </button>
-              {(!transfer.active || transfer.percent >= 100) && (
-                <button
-                  type="button"
-                  onClick={dismiss}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                  title="Dismiss"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={transfer.active ? cancelBackup : dismiss}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                title={transfer.active ? "Cancel backup operation" : "Dismiss"}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
             </div>
           </div>
         ) : (
@@ -585,8 +587,8 @@ export default function BackupRestore() {
                 </div>
                 <p className={'text-[11px] mt-1 ' + muted}>{transfer.detail || 'Working…'}</p>
               </div>
-              <div className="flex items-center gap-3 shrink-0">
-                <div className="text-right">
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="text-right mr-1">
                   <p className="text-lg font-extrabold text-blue-600 dark:text-blue-400">
                     {Math.min(100, Math.max(0, Number(transfer.percent || 0))).toFixed(2)}%
                   </p>
@@ -602,7 +604,17 @@ export default function BackupRestore() {
                 >
                   <Minimize2 className="h-3.5 w-3.5" /> Minimize
                 </button>
-                {(!transfer.active || transfer.percent >= 100) && (
+                {transfer.active && (
+                  <button
+                    type="button"
+                    onClick={cancelBackup}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-red-200 dark:border-red-900/40 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 text-xs font-semibold transition-all"
+                    title="Cancel backup operation"
+                  >
+                    <X className="h-3.5 w-3.5" /> Cancel
+                  </button>
+                )}
+                {!transfer.active && (
                   <button
                     type="button"
                     onClick={dismiss}
@@ -703,7 +715,27 @@ export default function BackupRestore() {
 
         <div className="mt-4 flex flex-col sm:flex-row gap-3 items-end">
           <div className="flex-1 w-full"><label className={'text-xs font-bold ' + heading}>Backup password</label><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className={input + ' mt-1.5'} placeholder="Minimum 8 characters" autoComplete="new-password" /></div>
-          <button type="button" onClick={createBackup} disabled={busy || loadingInfo} className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 disabled:opacity-50 w-full sm:w-auto"><Download className="h-4 w-4" />{busy ? 'Preparing…' : mode === 'full' ? 'Download Full Backup' : 'Download Custom Backup'}</button>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <button
+              type="button"
+              onClick={createBackup}
+              disabled={busy || loadingInfo || transfer.active}
+              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 disabled:opacity-50 w-full sm:w-auto"
+            >
+              <Download className="h-4 w-4" />
+              {busy ? 'Starting…' : transfer.active ? 'Backup in Progress…' : mode === 'full' ? 'Download Full Backup' : 'Download Custom Backup'}
+            </button>
+            {transfer.active && (
+              <button
+                type="button"
+                onClick={cancelBackup}
+                className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border border-red-300 dark:border-red-800 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 text-xs font-bold transition-all w-full sm:w-auto"
+                title="Cancel ongoing backup"
+              >
+                <X className="h-3.5 w-3.5" /> Cancel
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
