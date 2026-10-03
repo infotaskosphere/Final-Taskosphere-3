@@ -406,8 +406,33 @@ def start_inline_backup_worker():
     if _INLINE_BACKUP_WORKER_TASK and not _INLINE_BACKUP_WORKER_TASK.done():
         return _INLINE_BACKUP_WORKER_TASK
     loop = asyncio.get_running_loop()
-    if os.getenv("BACKUP_INLINE_WORKER_MODE", "process").strip().lower() == "thread":
-        _BACKUP_WORKER_INFO.update(mode="in-process")
+
+    # On the Render API service, prefer the in-process worker unless an
+    # explicit mode is configured. This is the reliable fallback when the
+    # dedicated Render background-worker service has not been synced yet.
+    # The worker service itself runs "python -m backend.backup_restore" and
+    # therefore does not execute this startup hook.
+    configured_mode = os.getenv("BACKUP_INLINE_WORKER_MODE", "").strip().lower()
+    if configured_mode:
+        worker_mode = configured_mode
+    else:
+        render_service = os.getenv("RENDER_SERVICE_NAME", "").strip().lower()
+        worker_mode = (
+            "thread"
+            if render_service and "backup-worker" not in render_service
+            else "process"
+        )
+
+    logger.info(
+        "Backup inline worker configuration: mode=%s service=%s db=%s mongo_configured=%s",
+        worker_mode,
+        os.getenv("RENDER_SERVICE_NAME", "unknown"),
+        DB_NAME,
+        bool(MONGO_URL),
+    )
+
+    if worker_mode == "thread":
+        _BACKUP_WORKER_INFO.update(mode="in-process", pid=os.getpid())
         _INLINE_BACKUP_WORKER_TASK = loop.create_task(run_backup_worker_forever())
     else:
         _INLINE_BACKUP_WORKER_TASK = loop.create_task(_supervise_backup_worker_process())
