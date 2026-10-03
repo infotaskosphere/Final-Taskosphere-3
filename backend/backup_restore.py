@@ -208,7 +208,7 @@ async def _claim_backup_job(raw):
     stale = datetime.now(timezone.utc).timestamp() - 120
     stale_dt = datetime.fromtimestamp(stale, timezone.utc)
     try:
-        return await raw[BACKUP_JOBS_COLLECTION].find_one_and_update(
+        job = await raw[BACKUP_JOBS_COLLECTION].find_one_and_update(
             {
                 "type": "application_backup",
                 "$or": [
@@ -229,6 +229,15 @@ async def _claim_backup_job(raw):
             sort=[("created_at", 1)],
             return_document=ReturnDocument.AFTER,
         )
+        if job:
+            logger.info(
+                "Backup job claimed: id=%s attempt=%s owner=%s db=%s",
+                job.get("_id"),
+                job.get("attempts"),
+                job.get("owner_user_id"),
+                DB_NAME,
+            )
+        return job
     except (AttributeError, TypeError):
         job = await raw[BACKUP_JOBS_COLLECTION].find_one({"type": "application_backup", "status": "queued"})
         if not job:
