@@ -37,6 +37,7 @@ services:
     rootDir: .
     buildCommand: bash build.sh
     startCommand: python -m backend.backup_restore
+    maxShutdownDelaySeconds: 300
     envVars:
       - key: MONGO_URL
         fromService:
@@ -49,6 +50,14 @@ services:
           name: final-taskosphere-backend
           type: web
           envVarKey: SECRET_KEY
+      # The worker MUST use the exact same Mongo database as the API.
+      # Without this, a custom DB_NAME on the backend leaves the worker
+      # polling a different database and every backup remains "queued".
+      - key: DB_NAME
+        fromService:
+          name: final-taskosphere-backend
+          type: web
+          envVarKey: DB_NAME
 
   # ── Frontend (React / Vite) ────────────────────────────────────────────────
   - type: web
