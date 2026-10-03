@@ -237,7 +237,16 @@ async def run_backup_worker_forever():
     logger.info("Backup worker started.")
     raw = _raw_db()
     while True:
-        job = await _claim_backup_job(raw)
+        try:
+            job = await _claim_backup_job(raw)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # A transient Mongo error must never kill the worker loop,
+            # otherwise every later backup would sit in "queued" forever.
+            logger.error("Backup worker could not poll for jobs: %s", exc, exc_info=True)
+            await asyncio.sleep(5)
+            continue
         if not job:
             await asyncio.sleep(1)
             continue
@@ -262,6 +271,31 @@ async def run_backup_worker_forever():
                     "updated_at": datetime.now(timezone.utc),
                 }},
             )
+
+
+_INLINE_BACKUP_WORKER_TASK = None
+
+
+def start_inline_backup_worker():
+    """Run the backup worker inside the API process.
+
+    Backup jobs are queued in MongoDB and are only processed by
+    run_backup_worker_forever(). If the separate Render worker service is not
+    deployed/running, jobs stay "queued" at 0% forever. Starting the worker
+    here guarantees backups always run. Job claiming is atomic
+    (find_one_and_update), so running this alongside a dedicated worker is safe.
+    Set BACKUP_INLINE_WORKER=false to disable it when a dedicated worker is used.
+    """
+    global _INLINE_BACKUP_WORKER_TASK
+    if os.getenv("BACKUP_INLINE_WORKER", "true").strip().lower() in {"0", "false", "no", "off"}:
+        logger.info("Inline backup worker disabled via BACKUP_INLINE_WORKER.")
+        return None
+    if _INLINE_BACKUP_WORKER_TASK and not _INLINE_BACKUP_WORKER_TASK.done():
+        return _INLINE_BACKUP_WORKER_TASK
+    _INLINE_BACKUP_WORKER_TASK = asyncio.get_running_loop().create_task(
+        run_backup_worker_forever()
+    )
+    return _INLINE_BACKUP_WORKER_TASK
 
 
 def _backup_gridfs(raw):
@@ -1242,13 +1276,15 @@ async def _build_archive(
 
         file_size = os.path.getsize(output)
         elapsed = max(0.001, time.monotonic() - started_at)
+        # Not "ready" yet: the archive still has to be stored in history.
+        # _run_backup_job marks the job ready once the artifact is saved.
         _set_backup_progress(
             progress_id,
-            phase="ready",
-            percent=100.0,
+            phase="storing",
+            percent=90.0,
             processed_documents=processed_documents,
             total_documents=total_documents,
-            eta_seconds=0.0,
+            eta_seconds=None,
             elapsed_seconds=round(elapsed, 1),
             current_collection=None,
             file_size=file_size,
