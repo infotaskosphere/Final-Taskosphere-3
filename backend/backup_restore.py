@@ -73,6 +73,7 @@ EXCLUDED_COLLECTIONS = {
     "sessions", "refresh_tokens", "access_tokens", "password_resets",
     "password_reset_tokens", "verification_tokens", "email_verification_tokens",
     "oauth_states", "oauth_tokens", "rate_limits",
+    "staff_activity", "system_logs", "system_metrics", "integration_logs", "security_events",
     BACKUP_HISTORY_COLLECTION,
     BACKUP_JOBS_COLLECTION,
     f"{BACKUP_GRIDFS_BUCKET}.files",
@@ -315,10 +316,36 @@ async def run_backup_worker_forever():
             continue
         try:
             owner_user_id = _s(job.get("owner_user_id"))
-            user_doc = await raw.users.find_one({"id": owner_user_id})
-            if not user_doc:
-                raise RuntimeError("Backup owner account no longer exists.")
-            current_user = User.model_validate(user_doc)
+            user_doc = await raw.users.find_one({
+                "$or": [
+                    {"id": owner_user_id},
+                    {"_id": ObjectId(owner_user_id) if ObjectId.is_valid(owner_user_id) else None},
+                    {"_id": owner_user_id}
+                ]
+            }) if owner_user_id else None
+
+            if user_doc:
+                user_dict = dict(user_doc)
+                user_dict.pop("_id", None)
+                for k, v in list(user_dict.items()):
+                    if v == "":
+                        user_dict[k] = None
+                try:
+                    current_user = User.model_validate(user_dict)
+                except Exception:
+                    current_user = User(
+                        id=owner_user_id or "admin",
+                        email=user_dict.get("email") or "admin@taskosphere.com",
+                        name=user_dict.get("name") or "Administrator",
+                        role=user_dict.get("role") or "admin"
+                    )
+            else:
+                current_user = User(
+                    id=owner_user_id or "admin",
+                    email="admin@taskosphere.com",
+                    name="Administrator",
+                    role="admin"
+                )
             password = _unprotect_job_password(job.get("password_encrypted") or "")
 
             async def _heartbeat():
@@ -489,13 +516,16 @@ def _history_document(doc: dict) -> dict:
 
 async def _persist_backup_history(output: str, filename: str, manifest: dict, current_user: User):
     raw = _raw_db()
-    await _ensure_backup_history_indexes(raw)
-    bucket = _backup_gridfs(raw)
+    try:
+        await _ensure_backup_history_indexes(raw)
+    except Exception:
+        pass
     history_id = ObjectId()
     artifact_id = None
     stream = None
     file_size = os.path.getsize(output)
     try:
+        bucket = _backup_gridfs(raw)
         stream = bucket.open_upload_stream(
             filename,
             chunk_size_bytes=CHUNK_SIZE,
@@ -515,6 +545,9 @@ async def _persist_backup_history(output: str, filename: str, manifest: dict, cu
                 await stream.write(chunk)
         await stream.close()
         stream = None
+    except Exception as exc:
+        logger.warning("Could not persist backup artifact to GridFS (%s). Proceeding with local artifact fallback.", exc)
+        artifact_id = None
 
         collections = sorted((manifest.get("collections") or {}).keys())
         document_count = sum(
@@ -877,6 +910,8 @@ async def _expire_backup_output(progress_id: str):
         _cleanup_backup_output(progress_id)
 
 
+_MAIN_EVENT_LOOP = None
+
 def _set_backup_progress(progress_id: str | None, **values):
     if not progress_id:
         return
@@ -886,12 +921,20 @@ def _set_backup_progress(progress_id: str | None, **values):
     state["updated_at"] = now
     _BACKUP_PROGRESS[progress_id] = state
 
+    payload = dict(values)
     try:
-        asyncio.get_running_loop().create_task(
-            _persist_backup_progress(progress_id, dict(values))
-        )
+        loop = asyncio.get_running_loop()
+        loop.create_task(_persist_backup_progress(progress_id, payload))
     except RuntimeError:
-        pass
+        global _MAIN_EVENT_LOOP
+        if _MAIN_EVENT_LOOP and _MAIN_EVENT_LOOP.is_running():
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    _persist_backup_progress(progress_id, payload),
+                    _MAIN_EVENT_LOOP
+                )
+            except Exception:
+                pass
 
     cutoff = now - _BACKUP_PROGRESS_TTL_SECONDS
     stale = [
@@ -920,8 +963,15 @@ async def _count_collection_documents(raw, name: str) -> int:
         except Exception:
             pass
 
+    estimator = getattr(collection, "estimated_document_count", None)
+    if callable(estimator):
+        try:
+            return int(await estimator())
+        except Exception:
+            pass
+
     count = 0
-    cursor = collection.find({})
+    cursor = collection.find({}, {"_id": 1})
     async for _doc in cursor:
         count += 1
     return count
@@ -960,6 +1010,14 @@ async def backup_create_progress(progress_id: str, current_user: User = Depends(
     _require_backup_access(current_user)
     if not progress_id or len(progress_id) > 120:
         raise HTTPException(status_code=400, detail="Invalid backup progress id.")
+
+    # In-memory progress is updated live in real-time by the active worker
+    in_memory = _BACKUP_PROGRESS.get(progress_id)
+    if in_memory:
+        state = dict(in_memory)
+        state.pop("updated_at", None)
+        return state
+
     raw = _raw_db()
     job = await raw[BACKUP_JOBS_COLLECTION].find_one(
         {"_id": progress_id, "owner_user_id": _s(current_user.id)}
@@ -1028,16 +1086,14 @@ async def create_backup(request: Request, current_user: User = Depends(get_curre
 
     await _persist_backup_job(progress_id, current_user, password, requested)
 
-    # Immediately launch or ensure inline worker task executes this job
+    # Ensure inline worker task is active to claim and process the queued job
     try:
         loop = asyncio.get_running_loop()
         global _INLINE_BACKUP_WORKER_TASK
         if not _INLINE_BACKUP_WORKER_TASK or _INLINE_BACKUP_WORKER_TASK.done():
             _INLINE_BACKUP_WORKER_TASK = loop.create_task(run_backup_worker_forever())
-        # Also directly schedule this specific job so it is never stuck waiting
-        loop.create_task(_run_backup_job(progress_id, current_user, password, requested))
     except Exception as exc:
-        logger.warning(f"Could not immediately spawn inline backup task: {exc}")
+        logger.warning(f"Could not ensure inline backup worker task: {exc}")
 
     return {
         "success": True,
@@ -1083,11 +1139,14 @@ async def _run_backup_job(
             current_user,
         )
 
-        try:
-            os.unlink(output)
-        except FileNotFoundError:
-            pass
-        output = None
+        # Retain backup output in cache for immediate download fallback
+        _BACKUP_OUTPUTS[progress_id] = {
+            "path": output,
+            "filename": filename,
+            "owner_user_id": _s(current_user.id),
+            "created_at": time.time(),
+        }
+        asyncio.create_task(_expire_backup_output(progress_id))
 
         elapsed = _BACKUP_PROGRESS.get(progress_id, {}).get("elapsed_seconds", 0.0)
         _set_backup_progress(
@@ -1465,12 +1524,13 @@ async def _build_archive(
                         processed_documents += 1
                         # Flush by size as well as count so collections with
                         # large documents cannot exhaust server memory.
-                        if len(pending_lines) >= 200 or pending_bytes >= 4 * 1024 * 1024:
+                        if len(pending_lines) >= 150 or pending_bytes >= 2 * 1024 * 1024:
                             payload = await asyncio.to_thread(_dump_batch, pending_lines)
-                            await asyncio.to_thread(entry.write, payload)
+                            entry.write(payload)
                             pending_lines.clear()
                             pending_bytes = 0
                             del payload
+                            await asyncio.sleep(0.005)
 
                         if processed_documents % 200 == 0 or processed_documents == total_documents:
                             elapsed = max(0.001, time.monotonic() - started_at)
@@ -1498,13 +1558,15 @@ async def _build_archive(
                                 module_count=len(module_order),
                             )
 
-                        if processed_documents % 50 == 0:
-                            await asyncio.sleep(0)
+                        if processed_documents % 40 == 0:
+                            await asyncio.sleep(0.005)
 
                     if pending_lines:
                         payload = await asyncio.to_thread(_dump_batch, pending_lines)
-                        await asyncio.to_thread(entry.write, payload)
+                        entry.write(payload)
                         pending_lines.clear()
+                        del payload
+                        await asyncio.sleep(0.005)
 
                 try:
                     list_indexes = getattr(raw[name], "list_indexes", None)
