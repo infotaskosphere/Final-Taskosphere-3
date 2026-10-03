@@ -20,6 +20,8 @@ import logging
 import hashlib
 import os
 import secrets
+import subprocess
+import sys
 import tempfile
 import time
 import zipfile
@@ -65,12 +67,14 @@ SUPPORTED_BACKUP_EXTENSIONS = {NEW_BACKUP_EXTENSION, *LEGACY_BACKUP_EXTENSIONS}
 BACKUP_HISTORY_COLLECTION = "backup_history"
 BACKUP_GRIDFS_BUCKET = "taskosphere_backups"
 BACKUP_JOBS_COLLECTION = "backup_jobs"
+MAX_BACKUP_ATTEMPTS = 2
 
 EXCLUDED_COLLECTIONS = {
     "sessions", "refresh_tokens", "access_tokens", "password_resets",
     "password_reset_tokens", "verification_tokens", "email_verification_tokens",
     "oauth_states", "oauth_tokens", "rate_limits",
     BACKUP_HISTORY_COLLECTION,
+    BACKUP_JOBS_COLLECTION,
     f"{BACKUP_GRIDFS_BUCKET}.files",
     f"{BACKUP_GRIDFS_BUCKET}.chunks",
 }
@@ -213,12 +217,15 @@ async def _claim_backup_job(raw):
                     {"status": "running", "worker_heartbeat_at": None},
                 ],
             },
-            {"$set": {
-                "status": "running",
-                "phase": "queued",
-                "worker_heartbeat_at": datetime.now(timezone.utc),
-                "updated_at": datetime.now(timezone.utc),
-            }},
+            {
+                "$set": {
+                    "status": "running",
+                    "phase": "queued",
+                    "worker_heartbeat_at": datetime.now(timezone.utc),
+                    "updated_at": datetime.now(timezone.utc),
+                },
+                "$inc": {"attempts": 1},
+            },
             sort=[("created_at", 1)],
             return_document=ReturnDocument.AFTER,
         )
@@ -228,9 +235,13 @@ async def _claim_backup_job(raw):
             return None
         await raw[BACKUP_JOBS_COLLECTION].update_one(
             {"_id": job["_id"]},
-            {"$set": {"status": "running", "phase": "queued", "worker_heartbeat_at": datetime.now(timezone.utc)}},
+            {
+                "$set": {"status": "running", "phase": "queued", "worker_heartbeat_at": datetime.now(timezone.utc)},
+                "$inc": {"attempts": 1},
+            },
         )
         job["status"] = "running"
+        job["attempts"] = int(job.get("attempts") or 0) + 1
         return job
 
 
@@ -252,6 +263,26 @@ async def run_backup_worker_forever():
             await asyncio.sleep(1)
             continue
         progress_id = _s(job.get("_id"))
+        if int(job.get("attempts") or 0) > MAX_BACKUP_ATTEMPTS:
+            # This job was already claimed several times and never finished,
+            # i.e. it keeps crashing the worker (typically out of memory).
+            # Fail it permanently instead of crash-looping the server.
+            logger.error("Backup job %s abandoned after %s attempts.", progress_id, job.get("attempts"))
+            await raw[BACKUP_JOBS_COLLECTION].update_one(
+                {"_id": progress_id},
+                {"$set": {
+                    "status": "error",
+                    "phase": "error",
+                    "error": (
+                        "Backup stopped: it was attempted repeatedly and the server "
+                        "ran out of resources or restarted each time. Try a smaller "
+                        "selection (One Module / Selected Data) or increase server memory."
+                    ),
+                    "download_ready": False,
+                    "updated_at": datetime.now(timezone.utc),
+                }},
+            )
+            continue
         try:
             owner_user_id = _s(job.get("owner_user_id"))
             user_doc = await raw.users.find_one({"id": owner_user_id})
@@ -293,17 +324,80 @@ async def run_backup_worker_forever():
 
 
 _INLINE_BACKUP_WORKER_TASK = None
+_BACKUP_WORKER_PROC = None
+_BACKUP_WORKER_INFO = {
+    "mode": None,
+    "pid": None,
+    "restarts": 0,
+    "last_exit_code": None,
+    "last_exit_at": None,
+}
+
+
+async def _supervise_backup_worker_process():
+    """Run the backup worker as a separate, low-priority OS process.
+
+    Exporting a database is CPU/memory heavy. Doing it inside the web process
+    starves the API (health checks and polling time out -> 502 / "Network
+    Error") and an out-of-memory kill takes the whole API down. A child
+    process keeps the API responsive and, if the child dies, the API keeps
+    running and the child is restarted with a back-off.
+    """
+    global _BACKUP_WORKER_PROC
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    backoff = 5
+    while True:
+        started = time.monotonic()
+        try:
+            def _lower_priority():
+                try:
+                    os.nice(10)
+                except Exception:
+                    pass
+
+            _BACKUP_WORKER_PROC = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "backend.backup_restore",
+                cwd=root,
+                env={**os.environ, "BACKUP_WORKER_CHILD": "1", "PYTHONUNBUFFERED": "1"},
+                preexec_fn=_lower_priority,
+            )
+            _BACKUP_WORKER_INFO.update(mode="process", pid=_BACKUP_WORKER_PROC.pid)
+            logger.info("Backup worker process started (pid=%s).", _BACKUP_WORKER_PROC.pid)
+            code = await _BACKUP_WORKER_PROC.wait()
+            _BACKUP_WORKER_INFO.update(
+                last_exit_code=code,
+                last_exit_at=datetime.now(timezone.utc).isoformat(),
+                pid=None,
+                restarts=_BACKUP_WORKER_INFO["restarts"] + 1,
+            )
+            logger.error("Backup worker process exited with code %s; restarting in %ss.", code, backoff)
+        except asyncio.CancelledError:
+            proc = _BACKUP_WORKER_PROC
+            if proc and proc.returncode is None:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+            raise
+        except Exception as exc:
+            # Could not spawn a subprocess on this platform: fall back to
+            # running the worker inside this process.
+            logger.error("Could not start backup worker process (%s); running in-process.", exc)
+            _BACKUP_WORKER_INFO.update(mode="in-process")
+            await run_backup_worker_forever()
+            return
+        backoff = 5 if (time.monotonic() - started) > 60 else min(backoff * 2, 120)
+        await asyncio.sleep(backoff)
 
 
 def start_inline_backup_worker():
-    """Run the backup worker inside the API process.
+    """Start the backup worker from the API process (see supervisor above).
 
-    Backup jobs are queued in MongoDB and are only processed by
-    run_backup_worker_forever(). If the separate Render worker service is not
-    deployed/running, jobs stay "queued" at 0% forever. Starting the worker
-    here guarantees backups always run. Job claiming is atomic
-    (find_one_and_update), so running this alongside a dedicated worker is safe.
-    Set BACKUP_INLINE_WORKER=false to disable it when a dedicated worker is used.
+    Backup jobs are queued in MongoDB and only processed by a worker. If the
+    separate Render worker service is not deployed, jobs stay "queued" at 0%.
+    Job claiming is atomic, so running this next to a dedicated worker is safe.
+    Env: BACKUP_INLINE_WORKER=false disables it;
+         BACKUP_INLINE_WORKER_MODE=thread runs it inside the API process.
     """
     global _INLINE_BACKUP_WORKER_TASK
     if os.getenv("BACKUP_INLINE_WORKER", "true").strip().lower() in {"0", "false", "no", "off"}:
@@ -311,9 +405,12 @@ def start_inline_backup_worker():
         return None
     if _INLINE_BACKUP_WORKER_TASK and not _INLINE_BACKUP_WORKER_TASK.done():
         return _INLINE_BACKUP_WORKER_TASK
-    _INLINE_BACKUP_WORKER_TASK = asyncio.get_running_loop().create_task(
-        run_backup_worker_forever()
-    )
+    loop = asyncio.get_running_loop()
+    if os.getenv("BACKUP_INLINE_WORKER_MODE", "process").strip().lower() == "thread":
+        _BACKUP_WORKER_INFO.update(mode="in-process")
+        _INLINE_BACKUP_WORKER_TASK = loop.create_task(run_backup_worker_forever())
+    else:
+        _INLINE_BACKUP_WORKER_TASK = loop.create_task(_supervise_backup_worker_process())
     return _INLINE_BACKUP_WORKER_TASK
 
 
@@ -758,6 +855,34 @@ async def _count_collection_documents(raw, name: str) -> int:
     return count
 
 
+@router.get("/worker-status")
+async def backup_worker_status(current_user: User = Depends(get_current_user)):
+    """Diagnostics: is the backup worker alive and what happened to recent jobs."""
+    _require_backup_access(current_user)
+    raw = _raw_db()
+    jobs = await raw[BACKUP_JOBS_COLLECTION].find(
+        {"type": "application_backup"},
+        {"password_encrypted": 0, "requested": 0},
+    ).sort("created_at", -1).limit(5).to_list(5)
+    for job in jobs:
+        job["id"] = _s(job.pop("_id", None))
+    proc = _BACKUP_WORKER_PROC
+    try:
+        import resource
+        api_rss_mb = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1)
+    except Exception:
+        api_rss_mb = None
+    return {
+        "worker": {
+            **_BACKUP_WORKER_INFO,
+            "child_alive": bool(proc and proc.returncode is None),
+            "inline_task_running": bool(_INLINE_BACKUP_WORKER_TASK and not _INLINE_BACKUP_WORKER_TASK.done()),
+            "api_peak_memory_mb": api_rss_mb,
+        },
+        "recent_jobs": jobs,
+    }
+
+
 @router.get("/create/progress/{progress_id}")
 async def backup_create_progress(progress_id: str, current_user: User = Depends(get_current_user)):
     _require_backup_access(current_user)
@@ -1199,7 +1324,10 @@ async def _build_archive(
                     mode="w",
                     force_zip64=True,
                 ) as entry:
-                    cursor = raw[name].find({}).batch_size(100)
+                    cursor = raw[name].find({})
+                    _limit_batch = getattr(cursor, "batch_size", None)
+                    if callable(_limit_batch):
+                        cursor = _limit_batch(100) or cursor
                     pending_lines = []
                     pending_bytes = 0
                     async for doc in cursor:
@@ -1343,4 +1471,8 @@ async def _build_archive(
             pass
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s:%(name)s:%(message)s",
+    )
     asyncio.run(run_backup_worker_forever())
