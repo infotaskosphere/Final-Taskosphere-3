@@ -189,7 +189,18 @@ async def _persist_backup_progress(progress_id: str, values: dict):
     try:
         raw = _raw_db()
         phase = str(values.get("phase") or "")
-        status = "ready" if phase == "ready" else "error" if phase == "error" else "running"
+        # Keep queued jobs queued. The initial _set_backup_progress() runs
+        # asynchronously and must not race _persist_backup_job() by changing
+        # a fresh queued job into a heartbeat-protected running job.
+        status = (
+            "queued"
+            if phase == "queued"
+            else "ready"
+            if phase == "ready"
+            else "error"
+            if phase == "error"
+            else "running"
+        )
         payload = dict(values)
         payload["status"] = status
         payload["updated_at"] = datetime.now(timezone.utc)
@@ -255,7 +266,12 @@ async def _claim_backup_job(raw):
 
 
 async def run_backup_worker_forever():
-    logger.info("Backup worker started.")
+    logger.info(
+        "Backup worker started. pid=%s db=%s mongo_configured=%s",
+        os.getpid(),
+        DB_NAME,
+        bool(MONGO_URL),
+    )
     raw = _raw_db()
     while True:
         try:
@@ -422,15 +438,11 @@ def start_inline_backup_worker():
     # The worker service itself runs "python -m backend.backup_restore" and
     # therefore does not execute this startup hook.
     configured_mode = os.getenv("BACKUP_INLINE_WORKER_MODE", "").strip().lower()
-    if configured_mode:
-        worker_mode = configured_mode
-    else:
-        render_service = os.getenv("RENDER_SERVICE_NAME", "").strip().lower()
-        worker_mode = (
-            "thread"
-            if render_service and "backup-worker" not in render_service
-            else "process"
-        )
+    # The API service needs a working fallback even when the separate Render
+    # worker service has not been synced. Default to in-process; deployments
+    # that explicitly want the child-process supervisor can set
+    # BACKUP_INLINE_WORKER_MODE=process.
+    worker_mode = configured_mode or "thread"
 
     logger.info(
         "Backup inline worker configuration: mode=%s service=%s db=%s mongo_configured=%s",
