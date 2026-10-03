@@ -468,7 +468,16 @@ export default function BackupRestore() {
             const status = error?.response?.status;
             if (!error?.response || [502, 503, 504].includes(status)) {
               transientFailures += 1;
-              if (transientFailures < 15) return;
+              // The server may be restarting (Render takes 1-2 minutes); the
+              // backup job is stored in the database and continues afterwards.
+              if (transientFailures < 400) {
+                setTransfer((current) => ({
+                  ...current,
+                  active: true,
+                  detail: 'Server is temporarily unreachable. Reconnecting…',
+                }));
+                return;
+              }
             }
             window.clearInterval(pollTimer);
             stopped = true;
