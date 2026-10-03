@@ -188,6 +188,7 @@ export function BackupProvider({ children }) {
 
   const dismiss = useCallback(() => {
     if (activePollRef.current) {
+      clearTimeout(activePollRef.current);
       clearInterval(activePollRef.current);
       activePollRef.current = null;
     }
@@ -197,6 +198,7 @@ export function BackupProvider({ children }) {
 
   const cancelBackup = useCallback(() => {
     if (activePollRef.current) {
+      clearTimeout(activePollRef.current);
       clearInterval(activePollRef.current);
       activePollRef.current = null;
     }
@@ -278,10 +280,14 @@ export function BackupProvider({ children }) {
           try {
             const { data: progress } = await api.get(
               '/app-backup/create/progress/' + encodeURIComponent(serverProgressId),
-              { _skipReadyGate: true, _silent: true, timeout: 5000 }
+              { _skipReadyGate: true, _silent: true, timeout: 25000 }
             );
 
-            if (!progress) return;
+            if (stoppedRef.current) return;
+            if (!progress) {
+              activePollRef.current = setTimeout(poll, 1200);
+              return;
+            }
             const phase = progress.phase;
 
             setTransfer((current) => ({
@@ -333,27 +339,52 @@ export function BackupProvider({ children }) {
 
             if (phase === 'ready' && progress.download_ready) {
               if (activePollRef.current) {
-                clearInterval(activePollRef.current);
+                clearTimeout(activePollRef.current);
                 activePollRef.current = null;
               }
               resolve(progress);
+              return;
             }
           } catch (err) {
-            const status = err?.response?.status;
-            if (!err?.response || [502, 503, 504].includes(status)) {
-              transientFailures += 1;
-              if (transientFailures < 200) return;
+            if (stoppedRef.current) {
+              resolve(null);
+              return;
             }
+
+            const isTimeout =
+              err?.code === 'ECONNABORTED' ||
+              String(err?.message || '').toLowerCase().includes('timeout');
+            const status = err?.response?.status;
+            const isTransient =
+              !err?.response ||
+              isTimeout ||
+              [408, 425, 429, 500, 502, 503, 504].includes(status);
+
+            if (isTransient) {
+              transientFailures += 1;
+              if (transientFailures <= 120) {
+                if (!stoppedRef.current) {
+                  activePollRef.current = setTimeout(poll, 2000);
+                }
+                return;
+              }
+            }
+
             if (activePollRef.current) {
-              clearInterval(activePollRef.current);
+              clearTimeout(activePollRef.current);
               activePollRef.current = null;
             }
             reject(err);
+            return;
+          }
+
+          if (!stoppedRef.current) {
+            activePollRef.current = setTimeout(poll, 1200);
           }
         };
 
-        activePollRef.current = setInterval(poll, 700);
-        void poll();
+        // Start sequential polling loop
+        activePollRef.current = setTimeout(poll, 100);
       });
 
       if (!readyState || stoppedRef.current) return;
@@ -424,6 +455,7 @@ export function BackupProvider({ children }) {
       toast.error(err?.message || 'Backup failed');
     } finally {
       if (activePollRef.current) {
+        clearTimeout(activePollRef.current);
         clearInterval(activePollRef.current);
         activePollRef.current = null;
       }

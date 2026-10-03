@@ -1024,10 +1024,17 @@ async def backup_create_progress(progress_id: str, current_user: User = Depends(
         state.pop("updated_at", None)
         return state
 
-    raw = _raw_db()
-    job = await raw[BACKUP_JOBS_COLLECTION].find_one(
-        {"_id": progress_id, "owner_user_id": _s(current_user.id)}
-    )
+    try:
+        raw = _raw_db()
+        job = await asyncio.wait_for(
+            raw[BACKUP_JOBS_COLLECTION].find_one(
+                {"_id": progress_id, "owner_user_id": _s(current_user.id)}
+            ),
+            timeout=2.0
+        )
+    except Exception:
+        job = None
+
     if job:
         # Self-healing: if job is sitting in 'queued' state and not yet executing, immediately launch it!
         if job.get("status") == "queued" and progress_id not in _RUNNING_BACKUP_JOBS:
