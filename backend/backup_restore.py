@@ -443,11 +443,11 @@ def start_inline_backup_worker():
     # The worker service itself runs "python -m backend.backup_restore" and
     # therefore does not execute this startup hook.
     configured_mode = os.getenv("BACKUP_INLINE_WORKER_MODE", "").strip().lower()
-    # The API service needs a working fallback even when the separate Render
-    # worker service has not been synced. Default to in-process; deployments
-    # that explicitly want the child-process supervisor can set
-    # BACKUP_INLINE_WORKER_MODE=process.
-    worker_mode = configured_mode or "thread"
+    # Keep the API responsive: backups are CPU/memory heavy and must not run
+    # on the FastAPI event loop by default. The child process is the safe
+    # fallback until the dedicated Render background-worker service is synced.
+    # Set BACKUP_INLINE_WORKER_MODE=thread only for local/lightweight testing.
+    worker_mode = configured_mode or "process"
 
     logger.info(
         "Backup inline worker configuration: mode=%s service=%s db=%s mongo_configured=%s",
