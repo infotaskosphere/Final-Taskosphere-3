@@ -14597,6 +14597,8 @@ async def universal_exception_handler(request: Request, exc: Exception):
 
     origin = request.headers.get("origin", "")
     allowed_origins = [
+        "https://taskosphere.com",
+        "https://www.taskosphere.com",
         "https://final-taskosphere-frontend.onrender.com",
         "http://localhost:3000",
         "http://localhost:5173",
@@ -14606,7 +14608,7 @@ async def universal_exception_handler(request: Request, exc: Exception):
         "http://127.0.0.1:3000",
     ]
     is_allowed = (origin in allowed_origins) or bool(
-        _re.match(r"https://.*\.onrender\.com$", origin)
+        _re.match(r"https://.*(\.onrender\.com|\.run\.app|taskosphere\.com)$", origin)
     )
     cors_origin = (
         origin if is_allowed else "https://final-taskosphere-frontend.onrender.com"
