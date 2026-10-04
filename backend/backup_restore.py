@@ -1131,14 +1131,17 @@ async def create_backup(request: Request, current_user: User = Depends(get_curre
     await _persist_backup_job(progress_id, current_user, password, requested)
 
     # Launch execution IMMEDIATELY in background without waiting for worker poll
-    try:
-        loop = asyncio.get_running_loop()
-        global _MAIN_EVENT_LOOP
-        _MAIN_EVENT_LOOP = loop
-        loop.create_task(_run_backup_job(progress_id, current_user, password, requested))
-        logger.info(f"Directly launched backup job {progress_id}")
-    except Exception as exc:
-        logger.error(f"Failed to launch inline backup task for {progress_id}: {exc}")
+    # Disabled by default when a dedicated backup worker is deployed. This
+    # prevents the same full backup from running in both the API and worker.
+    if os.getenv("BACKUP_DIRECT_EXECUTION", "false").strip().lower() in {"1", "true", "yes", "on"}:
+        try:
+            loop = asyncio.get_running_loop()
+            global _MAIN_EVENT_LOOP
+            _MAIN_EVENT_LOOP = loop
+            loop.create_task(_run_backup_job(progress_id, current_user, password, requested))
+            logger.info(f"Directly launched backup job {progress_id}")
+        except Exception as exc:
+            logger.error(f"Failed to launch inline backup task for {progress_id}: {exc}")
 
     return {
         "success": True,
