@@ -545,6 +545,28 @@ async def _persist_backup_history(output: str, filename: str, manifest: dict, cu
                 await stream.write(chunk)
         await stream.close()
         stream = None
+
+        collections = sorted((manifest.get("collections") or {}).keys())
+        document_count = sum(
+            int(meta.get("documents") or 0)
+            for meta in (manifest.get("collections") or {}).values()
+        )
+        await raw[BACKUP_HISTORY_COLLECTION].insert_one({
+            "_id": history_id,
+            "created_at": datetime.now(timezone.utc),
+            "created_by": _s(getattr(current_user, "id", None)),
+            "created_by_name": getattr(current_user, "full_name", None) or getattr(current_user, "name", None) or getattr(current_user, "email", None) or "Administrator",
+            "filename": filename,
+            "mode": "full" if manifest.get("selection") == "full" else "custom",
+            "source_application": manifest.get("source_application") or "Final-Taskosphere-3",
+            "collections": collections,
+            "collection_count": len(collections),
+            "document_count": document_count,
+            "file_size_bytes": file_size,
+            "artifact_file_id": artifact_id,
+            "format_version": manifest.get("version", FORMAT_VERSION),
+        })
+        return history_id
     except Exception as exc:
         logger.warning("Could not persist backup artifact to GridFS (%s). Proceeding with local artifact fallback.", exc)
         artifact_id = None
@@ -1247,7 +1269,10 @@ async def download_created_backup(progress_id: str, request: Request, current_us
 async def list_backup_history(current_user: User = Depends(get_current_user)):
     _require_backup_access(current_user)
     raw = _raw_db()
-    await _ensure_backup_history_indexes(raw)
+    try:
+        await _ensure_backup_history_indexes(raw)
+    except Exception as exc:
+        logger.warning("Backup history index check failed; continuing with history read: %s", exc)
     cursor = raw[BACKUP_HISTORY_COLLECTION].find({}).sort("created_at", -1)
     records = []
     async for doc in cursor:
