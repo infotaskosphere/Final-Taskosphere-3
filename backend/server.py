@@ -3263,6 +3263,17 @@ async def handle_attendance(data: dict, current_user: User = Depends(get_current
         punch_in_ist = punch_in_utc.astimezone(ZoneInfo("Asia/Kolkata"))
         is_late = check_is_late(user_doc or {}, punch_in_ist)
         location_data = data.get("location")
+        # Browser geolocation can arrive with numeric values encoded as strings.
+        # Normalize them before distance calculations so a malformed optional
+        # location value cannot turn an otherwise valid punch-in into HTTP 500.
+        if isinstance(location_data, dict):
+            try:
+                if location_data.get("latitude") is not None:
+                    location_data["latitude"] = float(location_data["latitude"])
+                if location_data.get("longitude") is not None:
+                    location_data["longitude"] = float(location_data["longitude"])
+            except (TypeError, ValueError):
+                location_data = None
         update_fields = {
             "status": "present",
             "punch_in": punch_in_utc,
@@ -12475,11 +12486,34 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
 async def log_staff_activity(
     activity_data: StaffActivityCreate, current_user: User = Depends(get_current_user)
 ):
-    activity = StaffActivityLog(user_id=current_user.id, **activity_data.model_dump())
-    doc = activity.model_dump()
-    doc["timestamp"] = datetime.now(IST)
-    await db.staff_activity.insert_one(doc)
-    return {"message": "Activity logged successfully"}
+    # Keep the activity ingestion path deliberately defensive. Browser/agent
+    # activity payloads may contain optional fields that are not present in
+    # older StaffActivityLog documents. Build the persisted document from the
+    # validated request model instead of relying on model round-tripping.
+    try:
+        payload = activity_data.model_dump(exclude_none=True)
+        doc = {
+            "id": str(uuid.uuid4()),
+            "user_id": str(current_user.id),
+            "activity_type": payload.get("activity_type") or "active_time",
+            "app_name": payload.get("app_name") or "Taskosphere Web",
+            "window_title": payload.get("window_title"),
+            "url": payload.get("url"),
+            "website": payload.get("website"),
+            "category": payload.get("category") or "other",
+            "duration_seconds": int(payload.get("duration_seconds") or 0),
+            "idle": bool(payload.get("idle")) if payload.get("idle") is not None else False,
+            "description": payload.get("description"),
+            "metadata": payload.get("metadata"),
+            "timestamp": datetime.now(timezone.utc),
+        }
+        await db.staff_activity.insert_one(doc)
+        return {"message": "Activity logged successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Staff activity log failed for user %s: %s", current_user.id, e)
+        raise HTTPException(status_code=500, detail="Failed to log staff activity")
 
 
 @api_router.get("/activity/summary")
