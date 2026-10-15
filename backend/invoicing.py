@@ -1369,6 +1369,9 @@ class PaymentCreate(BaseModel):
     payment_mode: str = "neft"
     reference_no: str = ""
     notes: str = ""
+    # Distinguishes an advance from a later partial receipt while keeping
+    # both as canonical records in db.payments for the Party Ledger.
+    payment_type: str = "payment"
 
 
 class Payment(PaymentCreate):
@@ -4115,17 +4118,6 @@ async def update_invoice(inv_id: str, data: dict, background_tasks: BackgroundTa
         data.pop(f, None)
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     data = _compute_invoice_totals(data, await _company_has_gst(new_company_id))
-
-    # Keep the invoice's total advance synchronized with a real payment
-    # transaction.  The accounting engine and Party Ledger intentionally read
-    # from db.payments, so changing only advance_received would otherwise leave
-    # the ledger showing the full invoice as outstanding.
-    await _sync_invoice_advance_payment(
-        invoice_id=inv_id,
-        invoice=data,
-        current_user_id=getattr(current_user, "id", "system"),
-    )
-
     logger.info(
         f"UPDATE invoice {inv_id}: $set keys = {list(data.keys())}, "
         f"invoice_no = {data.get('invoice_no', 'NOT PRESENT')!r}, "
@@ -4612,7 +4604,12 @@ async def record_payment(data: PaymentCreate, current_user: User = Depends(check
     if not _perm(current_user): raise HTTPException(403, "Access denied")
     inv = await db.invoices.find_one({"id": data.invoice_id})
     if not inv: raise HTTPException(404, "Invoice not found")
+    payment_type = str(data.payment_type or "payment").strip().lower()
+    if payment_type not in {"advance", "partial", "payment"}:
+        raise HTTPException(400, "Invalid payment_type. Use advance, partial, or payment.")
+
     payment_data = {**data.model_dump(), "id": str(uuid.uuid4()),
+                    "payment_type": payment_type,
                     "company_id": inv.get("company_id") or "",
                     "client_name": inv.get("client_name") or "",
                     "created_by": current_user.id, "created_at": datetime.now(timezone.utc).isoformat()}
@@ -4628,24 +4625,6 @@ async def record_payment(data: PaymentCreate, current_user: User = Depends(check
 @router.get("/payments")
 async def list_payments(invoice_id: Optional[str] = None, current_user: User = Depends(check_module_permission("invoicing", "view"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
-
-    # Existing invoices created before the advance-payment synchronization fix
-    # can contain advance_received on the invoice but no corresponding
-    # db.payments transaction.  The Party Ledger reads db.payments, so reconcile
-    # the invoice before returning its payment history.  This also makes the fix
-    # self-healing for old invoices when their ledger/payment history is opened.
-    if invoice_id:
-        inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
-        if inv:
-            await _sync_invoice_advance_payment(
-                invoice_id=invoice_id,
-                invoice=inv,
-                current_user_id=getattr(current_user, "id", "system"),
-            )
-            # Keep amount_paid / amount_due / derived status synchronized with
-            # the payment transaction we may have just created or adjusted.
-            await recalculate_invoice_accounting(invoice_id)
-
     q: dict = {}
     if invoice_id: q["invoice_id"] = invoice_id
     return await db.payments.find(q, {"_id": 0}).sort("created_at", -1).to_list(1000)
@@ -4753,163 +4732,6 @@ async def create_debit_note(data: DebitNoteCreate, current_user: User = Depends(
 # ═══════════════════════════════════════════════════════════
 # ACCOUNTING ENGINE — single source of truth for Outstanding/Paid/Status
 # ═══════════════════════════════════════════════════════════
-
-async def _sync_invoice_advance_payment(
-    invoice_id: str,
-    invoice: dict,
-    current_user_id: str = "system",
-) -> None:
-    """Synchronize invoice.advance_received with its actual advance payment.
-
-    ``advance_received`` is a total, not an incremental payment.  When an
-    invoice is edited, this function adjusts only payments that were explicitly
-    created as invoice advances.  Normal/manual receipts are never changed.
-
-    This keeps the payment collection as the source of truth used by the Party
-    Ledger, dashboards and accounting engine, while preventing duplicate
-    receipts every time an invoice is edited.
-    """
-    desired_advance = round(
-        max(0.0, float(invoice.get("advance_received") or 0.0)),
-        2,
-    )
-
-    # All invoice-created advances use payment_mode="advance".  The notes
-    # fallback also catches older records created before the explicit mode was
-    # consistently used.
-    advance_payments = await db.payments.find(
-        {
-            "invoice_id": invoice_id,
-            "$or": [
-                {"payment_mode": "advance"},
-                {
-                    "notes": {
-                        "$regex": r"advance received at invoice creation",
-                        "$options": "i",
-                    }
-                },
-            ],
-        },
-        {"_id": 0},
-    ).to_list(1000)
-
-    recorded_advance = round(
-        sum(float(p.get("amount") or 0.0) for p in advance_payments),
-        2,
-    )
-
-    difference = round(desired_advance - recorded_advance, 2)
-    if abs(difference) <= 0.01:
-        return
-
-    company_id = invoice.get("company_id") or ""
-    invoice_date = invoice.get("invoice_date") or date.today().isoformat()
-    now_iso = datetime.now(timezone.utc).isoformat()
-
-    # ------------------------------------------------------------------
-    # Increase/create the advance payment.
-    # ------------------------------------------------------------------
-    if difference > 0:
-        if advance_payments:
-            # Keep a single primary advance transaction where possible.
-            primary = sorted(
-                advance_payments,
-                key=lambda p: str(
-                    p.get("created_at")
-                    or p.get("payment_date")
-                    or ""
-                ),
-            )[0]
-
-            new_amount = round(
-                float(primary.get("amount") or 0.0) + difference,
-                2,
-            )
-
-            await db.payments.update_one(
-                {"id": primary["id"]},
-                {
-                    "$set": {
-                        "amount": new_amount,
-                        "company_id": company_id,
-                        "payment_date": primary.get("payment_date") or invoice_date,
-                        "payment_mode": "advance",
-                        "updated_at": now_iso,
-                    }
-                },
-            )
-            await sync_payment_journal_entry(primary["id"])
-        else:
-            payment_id = str(uuid.uuid4())
-            await db.payments.insert_one(
-                {
-                    "id": payment_id,
-                    "invoice_id": invoice_id,
-                    "company_id": company_id,
-                    "client_name": invoice.get("client_name") or "",
-                    "amount": desired_advance,
-                    "payment_date": invoice_date,
-                    "payment_mode": "advance",
-                    "reference_no": "",
-                    "bank_account_id": "",
-                    "notes": "Advance received at invoice creation",
-                    "auto_generated": True,
-                    "created_by": current_user_id,
-                    "created_at": now_iso,
-                }
-            )
-            await sync_payment_journal_entry(payment_id)
-
-        return
-
-    # ------------------------------------------------------------------
-    # Reduce/remove the advance payment when advance_received is lowered.
-    # Work newest-first so the original/oldest advance transaction is kept.
-    # ------------------------------------------------------------------
-    remaining_reduction = round(-difference, 2)
-
-    for payment in sorted(
-        advance_payments,
-        key=lambda p: str(
-            p.get("created_at")
-            or p.get("payment_date")
-            or ""
-        ),
-        reverse=True,
-    ):
-        if remaining_reduction <= 0.01:
-            break
-
-        payment_amount = round(
-            max(0.0, float(payment.get("amount") or 0.0)),
-            2,
-        )
-        if payment_amount <= 0:
-            continue
-
-        reduction = min(payment_amount, remaining_reduction)
-        new_amount = round(payment_amount - reduction, 2)
-
-        if new_amount <= 0.01:
-            await db.payments.delete_one({"id": payment["id"]})
-            # sync_payment_journal_entry removes the journal entry when the
-            # payment document no longer exists.
-            await sync_payment_journal_entry(payment["id"])
-        else:
-            await db.payments.update_one(
-                {"id": payment["id"]},
-                {
-                    "$set": {
-                        "amount": new_amount,
-                        "company_id": company_id,
-                        "updated_at": now_iso,
-                    }
-                },
-            )
-            await sync_payment_journal_entry(payment["id"])
-
-        remaining_reduction = round(remaining_reduction - reduction, 2)
-
 
 async def recalculate_invoice_accounting(invoice_id: str) -> Optional[dict]:
     """The one place Outstanding, Amount Paid, and the derived (Paid/Partial)
