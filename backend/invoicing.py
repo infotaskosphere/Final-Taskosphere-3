@@ -4628,6 +4628,24 @@ async def record_payment(data: PaymentCreate, current_user: User = Depends(check
 @router.get("/payments")
 async def list_payments(invoice_id: Optional[str] = None, current_user: User = Depends(check_module_permission("invoicing", "view"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
+
+    # Existing invoices created before the advance-payment synchronization fix
+    # can contain advance_received on the invoice but no corresponding
+    # db.payments transaction.  The Party Ledger reads db.payments, so reconcile
+    # the invoice before returning its payment history.  This also makes the fix
+    # self-healing for old invoices when their ledger/payment history is opened.
+    if invoice_id:
+        inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+        if inv:
+            await _sync_invoice_advance_payment(
+                invoice_id=invoice_id,
+                invoice=inv,
+                current_user_id=getattr(current_user, "id", "system"),
+            )
+            # Keep amount_paid / amount_due / derived status synchronized with
+            # the payment transaction we may have just created or adjusted.
+            await recalculate_invoice_accounting(invoice_id)
+
     q: dict = {}
     if invoice_id: q["invoice_id"] = invoice_id
     return await db.payments.find(q, {"_id": 0}).sort("created_at", -1).to_list(1000)
