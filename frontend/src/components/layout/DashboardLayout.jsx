@@ -11,7 +11,7 @@ import {
   Building2, Zap, Briefcase, ShoppingBag, Landmark, BookOpen, NotebookPen,
   ScanLine, Lock, Search, Loader2,
   Wallet, CalendarOff, UserPlus, Cake,
-  Database, FolderOpen, MessagesSquare, FileBarChart2, Phone,
+  Database, FolderOpen, MessagesSquare, FileBarChart2, Phone, ClipboardCheck,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from './NotificationBell';
@@ -204,6 +204,7 @@ const NAV_GROUPS = [
       { path: '/master-data',    icon: Database,   label: 'Master Data', adminOnly: true },
       { path: '/roles',          icon: Fingerprint, label: 'Roles', adminOnly: true },
       { path: '/contact-details', icon: Phone,     label: 'Contact Details', adminOnly: true },
+      { path: '/commercial-onboarding-approval', icon: ClipboardCheck, label: 'Onboarding Approval', adminOnly: true },
       // Admin is a system-administration area, not an individually-grantable
       // permission module (see MODULE_HIERARCHY["admin"] in backend/models.py:
       // "Admin should NEVER require any permission" — role === 'admin' is
