@@ -140,23 +140,11 @@ def _validate_webhook_secret(supplied_secret: Optional[str]) -> None:
         raise HTTPException(status_code=403, detail="Invalid onboarding integration secret")
 
 
-@router.post("/google-form-submissions", status_code=201)
-async def create_google_form_submission(
-    body: OnboardingSubmission,
-    request: Request,
-):
-    """Protected endpoint for the installable Google Forms Apps Script trigger."""
-    supplied_secret = request.headers.get("X-Onenexa-Onboarding-Secret")
-    _validate_webhook_secret(supplied_secret)
-    body.source = "google_form"
-    return await create_submission(body)
-
-
-@router.post("/submissions", status_code=201)
-async def create_submission(body: OnboardingSubmission):
-    """Public intake. It creates a pending application only and never provisions."""
+async def _store_submission(body: OnboardingSubmission) -> dict:
+    """Shared persistence path for app-native and Google Form submissions."""
     if not body.declaration:
         raise HTTPException(status_code=422, detail="Declaration is required")
+
     email = str(body.email).strip().lower()
     duplicate_q = {
         "status": {"$in": ["pending", "under_review", "approved"]},
@@ -183,11 +171,29 @@ async def create_submission(body: OnboardingSubmission):
         "provisioning": {"status": "not_started"}, "tenant_id": None, "license_id": None,
     })
     await db.commercial_onboarding.insert_one(doc)
-    logger.info("New commercial onboarding application %s", application_id)
+    logger.info("New commercial onboarding application %s from %s", application_id, body.source)
     return {
         "success": True, "application_id": application_id, "status": "pending",
         "message": "Application received. License activation is subject to platform-owner approval.",
     }
+
+
+@router.post("/google-form-submissions", status_code=201)
+async def create_google_form_submission(
+    body: OnboardingSubmission,
+    request: Request,
+):
+    """Protected endpoint for the installable Google Forms Apps Script trigger."""
+    _validate_webhook_secret(request.headers.get("X-Onenexa-Onboarding-Secret"))
+    body.source = "google_form"
+    return await _store_submission(body)
+
+
+@router.post("/submissions", status_code=201)
+async def create_submission(body: OnboardingSubmission):
+    """Public intake. It creates a pending application only and never provisions."""
+    body.source = "onenexa_public_web_form" if body.source == "web_form" else body.source
+    return await _store_submission(body)
 
 
 @router.get("/submissions")
