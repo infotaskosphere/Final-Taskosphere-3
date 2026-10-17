@@ -292,9 +292,11 @@ async def review_submission(application_id: str, body: ReviewDecision, user=Depe
         }}, upsert=True)
         await db.commercial_onboarding.update_one({"application_id": application_id}, {"$set": {
             "tenant_id": tenant_id, "organization_id": organization_id, "license_id": license_id,
-            "provisioning": {"status": "completed", "completed_at": _now(), "tenant_id": tenant_id, "organization_id": organization_id, "license_id": license_id}, "provisioning.completed_at": _now(),
-            "provisioning.tenant_id": tenant_id, "provisioning.organization_id": organization_id,
-            "provisioning.license_id": license_id,
+            "provisioning": {
+                "status": "completed", "completed_at": _now(),
+                "tenant_id": tenant_id, "organization_id": organization_id, "license_id": license_id,
+            },
+            "updated_at": _now(),
         }})
         await db.audit_platform.insert_one({
             "id": str(uuid.uuid4()), "action": "commercial_onboarding_approved",
@@ -306,7 +308,7 @@ async def review_submission(application_id: str, body: ReviewDecision, user=Depe
     except Exception as exc:
         logger.exception("Provisioning failed for application %s", application_id)
         await db.commercial_onboarding.update_one({"application_id": application_id}, {"$set": {
-            "provisioning": {"status": "failed", "error": str(exc)[:1000]}, "provisioning.error": str(exc)[:1000], "updated_at": _now(),
+            "provisioning": {"status": "failed", "error": str(exc)[:1000]}, "updated_at": _now(),
         }})
         raise HTTPException(status_code=500, detail="Approval was recorded but provisioning failed. Check application provisioning status before retrying.")
 
