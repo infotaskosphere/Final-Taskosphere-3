@@ -1325,10 +1325,6 @@ def fetch_indian_holidays_task():
 # ROUTER
 api_router = APIRouter(prefix="/api")
 
-# Commercial licensee onboarding; public form submissions enter a pending-review queue.
-from backend.commercial_onboarding import router as commercial_onboarding_router
-api_router.include_router(commercial_onboarding_router, prefix="/v2")
-
 
 # HELPERS - Email Service Functions
 async def _brevo_send(
