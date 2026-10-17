@@ -264,11 +264,15 @@ async def review_submission(application_id: str, body: ReviewDecision, user=Depe
 
     if body.action == "reject":
         result = await db.commercial_onboarding.update_one(
-            {"application_id": application_id, "status": {"$in": ["pending", "under_review"]}},
+            {
+                "application_id": application_id,
+                "status": {"$in": ["pending", "under_review"]},
+                "provisioning.status": {"$nin": ["in_progress", "failed", "completed"]},
+            },
             {"$set": {"status": "rejected", "updated_at": now, "reviewed_at": now, "reviewed_by": getattr(user, "id", None), "review_notes": body.review_notes, "provisioning": {"status": "not_required"}}},
         )
         if getattr(result, "modified_count", 1) == 0:
-            raise HTTPException(status_code=409, detail="Application was changed by another reviewer")
+            raise HTTPException(status_code=409, detail="Application was changed by another reviewer or provisioning has already started")
         await db.audit_platform.insert_one({
             "id": str(uuid.uuid4()), "action": "commercial_onboarding_rejected",
             "status": "SUCCESS", "actor_user_id": getattr(user, "id", None),
