@@ -84,6 +84,7 @@ const Roles = lazy(() => import('./pages/governed/Roles.jsx'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard.jsx'));
 const PermissionMatrix = lazy(() => import('./pages/PermissionMatrix.jsx'));
 const ContactDetails = lazy(() => import('./pages/ContactDetails.jsx'));
+const CommercialOnboardingApproval = lazy(() => import('./pages/CommercialOnboardingApproval.jsx'));
 
 /* ── Settings ─────────────────────────────────────────────────────────── */
 const GeneralSettings = lazy(() => import('./pages/GeneralSettings.jsx'));
@@ -221,6 +222,7 @@ export default function AppRoutes() {
         <Route path="/master-data" element={<AdminOnly><PageGuard module="admin" page="can_view_master_data"><MasterData /></PageGuard></AdminOnly>} />
         <Route path="/roles" element={<AdminOnly><PageGuard module="admin" page="can_view_roles"><Roles /></PageGuard></AdminOnly>} />
         <Route path="/contact-details" element={<AdminOnly><ContactDetails /></AdminOnly>} />
+        <Route path="/commercial-onboarding-approval" element={<AdminOnly><CommercialOnboardingApproval /></AdminOnly>} />
 
         <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
         <Route path="/settings/general" element={<GeneralSettings />} />
