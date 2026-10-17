@@ -224,7 +224,7 @@ async def review_submission(application_id: str, body: ReviewDecision, user=Depe
     if body.action == "reject":
         await db.commercial_onboarding.update_one(
             {"application_id": application_id, "status": {"$in": ["pending", "under_review"]}},
-            {"$set": {"status": "rejected", "updated_at": now, "reviewed_at": now, "reviewed_by": getattr(user, "id", None), "review_notes": body.review_notes, "provisioning.status": "not_required"}},
+            {"$set": {"status": "rejected", "updated_at": now, "reviewed_at": now, "reviewed_by": getattr(user, "id", None), "review_notes": body.review_notes, "provisioning": {"status": "not_required"}}},
         )
         await db.audit_platform.insert_one({
             "id": str(uuid.uuid4()), "action": "commercial_onboarding_rejected",
@@ -249,7 +249,7 @@ async def review_submission(application_id: str, body: ReviewDecision, user=Depe
             "status": "approved", "updated_at": now, "reviewed_at": now,
             "reviewed_by": getattr(user, "id", None), "review_notes": body.review_notes,
             "approved_modules": modules, "approved_license_type": body.license_type or current.get("license_type") or "standard",
-            "approved_max_users": max_users, "provisioning.status": "in_progress",
+            "approved_max_users": max_users, "provisioning": {"status": "in_progress"},
         }},
     )
     if getattr(claim, "modified_count", 1) == 0:
@@ -292,7 +292,7 @@ async def review_submission(application_id: str, body: ReviewDecision, user=Depe
         }}, upsert=True)
         await db.commercial_onboarding.update_one({"application_id": application_id}, {"$set": {
             "tenant_id": tenant_id, "organization_id": organization_id, "license_id": license_id,
-            "provisioning.status": "completed", "provisioning.completed_at": _now(),
+            "provisioning": {"status": "completed", "completed_at": _now(), "tenant_id": tenant_id, "organization_id": organization_id, "license_id": license_id}, "provisioning.completed_at": _now(),
             "provisioning.tenant_id": tenant_id, "provisioning.organization_id": organization_id,
             "provisioning.license_id": license_id,
         }})
@@ -306,7 +306,7 @@ async def review_submission(application_id: str, body: ReviewDecision, user=Depe
     except Exception as exc:
         logger.exception("Provisioning failed for application %s", application_id)
         await db.commercial_onboarding.update_one({"application_id": application_id}, {"$set": {
-            "provisioning.status": "failed", "provisioning.error": str(exc)[:1000], "updated_at": _now(),
+            "provisioning": {"status": "failed", "error": str(exc)[:1000]}, "provisioning.error": str(exc)[:1000], "updated_at": _now(),
         }})
         raise HTTPException(status_code=500, detail="Approval was recorded but provisioning failed. Check application provisioning status before retrying.")
 
