@@ -1,12 +1,13 @@
 """Commercial licensee onboarding and platform-owner approval workflow."""
 import re
+import os
 import uuid
 import secrets
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from backend.dependencies import db, get_current_user
@@ -128,6 +129,27 @@ class ReviewDecision(BaseModel):
     modules: Optional[List[str]] = Field(default=None, min_length=1, max_length=30)
     schema_type: str = Field(default="isolated", pattern="^(isolated|shared)$")
     license_days: int = Field(default=365, ge=1, le=3650)
+
+
+def _validate_webhook_secret(supplied_secret: Optional[str]) -> None:
+    expected = os.getenv("COMMERCIAL_ONBOARDING_WEBHOOK_SECRET", "").strip()
+    if not expected:
+        logger.error("COMMERCIAL_ONBOARDING_WEBHOOK_SECRET is not configured")
+        raise HTTPException(status_code=503, detail="Google Form integration is not configured")
+    if not supplied_secret or not secrets.compare_digest(supplied_secret, expected):
+        raise HTTPException(status_code=403, detail="Invalid onboarding integration secret")
+
+
+@router.post("/google-form-submissions", status_code=201)
+async def create_google_form_submission(
+    body: OnboardingSubmission,
+    request: Request,
+):
+    """Protected endpoint for the installable Google Forms Apps Script trigger."""
+    supplied_secret = request.headers.get("X-Onenexa-Onboarding-Secret")
+    _validate_webhook_secret(supplied_secret)
+    body.source = "google_form"
+    return await create_submission(body)
 
 
 @router.post("/submissions", status_code=201)
