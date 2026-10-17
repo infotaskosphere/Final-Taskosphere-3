@@ -274,7 +274,7 @@ async def review_submission(application_id: str, body: ReviewDecision, user=Depe
     claim = await db.commercial_onboarding.update_one(
         {"application_id": application_id, "status": {"$in": ["pending", "under_review"]}},
         {"$set": {
-            "status": "approved", "updated_at": now, "reviewed_at": now,
+            "status": "under_review", "updated_at": now,
             "reviewed_by": getattr(user, "id", None), "review_notes": body.review_notes,
             "approved_modules": modules, "approved_license_type": body.license_type or current.get("license_type") or "standard",
             "approved_max_users": max_users, "provisioning": {"status": "in_progress"},
@@ -324,6 +324,7 @@ async def review_submission(application_id: str, body: ReviewDecision, user=Depe
                 "status": "completed", "completed_at": _now(),
                 "tenant_id": tenant_id, "organization_id": organization_id, "license_id": license_id,
             },
+            "status": "approved",
             "updated_at": _now(),
         }})
         await db.audit_platform.insert_one({
