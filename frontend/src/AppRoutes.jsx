@@ -16,6 +16,7 @@ const ForgotPassword = lazy(() => import('./pages/ForgotPassword.jsx'));
 /* ── Client portal (its own auth flow, no admin sidebar) ────────────── */
 const ClientPortalLogin = lazy(() => import('./pages/ClientPortalLogin.jsx'));
 const ClientPortalDashboard = lazy(() => import('./pages/ClientPortalDashboard.jsx'));
+const CommercialLicenseeOnboardingForm = lazy(() => import('./pages/CommercialLicenseeOnboardingForm.jsx'));
 
 /* ── Core ─────────────────────────────────────────────────────────────── */
 const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
@@ -144,6 +145,7 @@ export default function AppRoutes() {
         <Route path="/client-portal" element={<Navigate to="/client-portal/login" replace />} />
         <Route path="/client-portal/login" element={<PageTransition><ClientPortalLogin /></PageTransition>} />
         <Route path="/client-portal/dashboard" element={<PageTransition><ClientPortalDashboard /></PageTransition>} />
+        <Route path="/commercial-licensee-onboarding" element={<PageTransition><CommercialLicenseeOnboardingForm /></PageTransition>} />
 
         <Route element={<ProtectedLayout />}>
 
