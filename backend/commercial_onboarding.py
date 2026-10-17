@@ -238,8 +238,15 @@ async def review_submission(application_id: str, body: ReviewDecision, user=Depe
     if not current:
         raise HTTPException(status_code=404, detail="Application not found")
     status_now = current.get("status", "pending")
-    if status_now in {"approved", "rejected"}:
-        raise HTTPException(status_code=409, detail=f"Application is already {status_now}")
+    if status_now == "approved":
+        raise HTTPException(status_code=409, detail="Application is already approved")
+    if status_now == "rejected":
+        raise HTTPException(status_code=409, detail="Application is already rejected")
+    if (current.get("provisioning") or {}).get("status") in {"in_progress", "failed"}:
+        raise HTTPException(
+            status_code=409,
+            detail="Provisioning has already started or failed. Inspect the tenant/license records before retrying to avoid duplicates.",
+        )
 
     now = _now()
     if body.action == "under_review":
