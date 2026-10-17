@@ -69,6 +69,7 @@ const ROUTE_PREFETCHERS = {
   "/reports": () => import("./pages/Reports.jsx"),
   "/users": () => import("./pages/Users.jsx"),
   "/settings/backup": () => import("./pages/BackupRestore.jsx"),
+  "/commercial-onboarding-approval": () => import("./pages/CommercialOnboardingApproval.jsx"),
 };
 
 const prefetchedRoutes = new Set();
