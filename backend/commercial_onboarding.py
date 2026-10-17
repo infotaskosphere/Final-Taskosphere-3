@@ -350,7 +350,9 @@ async def review_submission(application_id: str, body: ReviewDecision, user=Depe
         await db.commercial_onboarding.update_one({"application_id": application_id}, {"$set": {
             "provisioning": {"status": "failed", "error": str(exc)[:1000]}, "updated_at": _now(),
         }})
-        raise HTTPException(status_code=500, detail="Approval was recorded but provisioning failed. Check application provisioning status before retrying.")
+        # Provisioning may have partially created records. Keep the application in
+        # under_review and block approval retries until an operator reconciles them.
+        raise HTTPException(status_code=500, detail="Provisioning failed or was partial. The application remains under review; reconcile tenant/license records before retrying.")
 
     return {
         "success": True, "application_id": application_id, "status": "approved",
