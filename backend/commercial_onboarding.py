@@ -210,13 +210,17 @@ async def list_submissions(
         query["status"] = status_filter
     if search and search.strip():
         term = re.escape(search.strip())
-        query["$or"] = [
+        search_terms = [
             {"application_id": {"$regex": term, "$options": "i"}},
             {"legal_name": {"$regex": term, "$options": "i"}},
             {"trade_name": {"$regex": term, "$options": "i"}},
             {"email": {"$regex": term, "$options": "i"}},
             {"pan": {"$regex": term, "$options": "i"}},
         ]
+        if status_filter:
+            query = {"$and": [query, {"$or": search_terms}]}
+        else:
+            query["$or"] = search_terms
     docs = await db.commercial_onboarding.find(query).sort("created_at", -1).to_list(1000)
     return {"items": [_clean(d) for d in docs], "total": len(docs)}
 
