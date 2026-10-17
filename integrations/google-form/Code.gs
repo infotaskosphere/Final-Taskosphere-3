@@ -117,7 +117,19 @@ function forwardOnboardingFormSubmit(event) {
     business_description: pick(['brief description of your business and intended use of onenexa', 'business description and intended use of onenexa']),
     client_count: pick(['approximate number of clients / entities to be managed', 'approximate number of clients / entities']) || null,
     modules: modules,
-    license_type: pick(['license model', 'license model '], 'standard'),
+    license_type: (function(value) {
+      var key = String(value || 'standard').trim().toLowerCase();
+      var map = {
+        'single company / licensee': 'standard',
+        'multi-company / group': 'enterprise',
+        'white label': 'white_label',
+        'reseller / partner': 'reseller',
+        'enterprise': 'enterprise',
+        'professional': 'professional',
+        'standard': 'standard'
+      };
+      return map[key] || key.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    })(pick(['license model', 'license model '], 'standard')),
     user_count: userCount,
     entity_count: pick(['expected number of companies / entities', 'expected companies / entities']) || null,
     commercial_notes: pick(['additional modules / commercial requirements']) || null,
