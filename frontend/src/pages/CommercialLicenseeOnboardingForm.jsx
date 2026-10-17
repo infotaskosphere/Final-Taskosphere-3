@@ -100,9 +100,29 @@ export default function CommercialLicenseeOnboardingForm() {
 
   const validate = () => {
     const root = document.getElementById('commercial-onboarding-form');
-    if (!root?.reportValidity()) return false;
-    if (step === 3 && !form.modules.length) {
-      toast.error('Select at least one module.');
+    if (step === 3) {
+      const userLimit = Number(form.user_count);
+      if (!Number.isInteger(userLimit) || userLimit < 1 || userLimit > 100000) {
+        toast.error('Enter an expected user count between 1 and 100,000.');
+        return false;
+      }
+      if (!form.modules.length) {
+        toast.error('Select at least one module.');
+        return false;
+      }
+    }
+    const activeStep = root?.querySelector('[data-onboarding-step="active"]');
+    if (activeStep) {
+      const fields = activeStep.querySelectorAll('input, textarea, select');
+      for (const field of fields) {
+        if (!field.checkValidity()) {
+          field.reportValidity();
+          return false;
+        }
+      }
+    }
+    if (step === 7 && !form.declaration) {
+      toast.error('Please confirm the declaration.');
       return false;
     }
     return true;
@@ -180,7 +200,7 @@ export default function CommercialLicenseeOnboardingForm() {
           </div>
 
           <form id="commercial-onboarding-form" onSubmit={submit}>
-            <section className="px-5 py-6 sm:px-8">
+            <section data-onboarding-step="active" className="px-5 py-6 sm:px-8">
               <div className="mb-5 flex items-center gap-2.5">
                 {[Building2, UserRound, Layers3, Layers3, Cloud, Palette, Plug, ShieldCheck][step] && React.createElement([Building2, UserRound, Layers3, Layers3, Cloud, Palette, Plug, ShieldCheck][step], { className: 'h-5 w-5 text-violet-700' })}
                 <h2 className="text-lg font-semibold text-slate-900">{currentHeading}</h2>
