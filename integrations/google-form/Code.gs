@@ -65,6 +65,7 @@ function forwardOnboardingFormSubmit(event) {
       'accounting / finix': 'finix',
       'finix / accounting': 'finix',
       'gst / tax': 'gst',
+      'gst / tax systems': 'gst',
       'compliance': 'roc',
       'roc / compliance': 'roc',
       'trademark / ip': 'trademark',
