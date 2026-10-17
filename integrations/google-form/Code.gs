@@ -76,7 +76,11 @@ function forwardOnboardingFormSubmit(event) {
     return map[key] || key.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   }
 
-  var modules = asList(pick(['modules requested', 'modules requested '], []))
+  var rawModules = asList(pick(['modules requested', 'modules requested '], []));
+  if (rawModules.indexOf('Other') >= 0 && rawModules.length > 1) {
+    rawModules = rawModules.filter(function(value) { return value !== 'Other'; });
+  }
+  var modules = rawModules
     .map(normalizeModule)
     .filter(function(value) { return !!value; });
   var integrations = asList(pick(['required integrations'], []));
