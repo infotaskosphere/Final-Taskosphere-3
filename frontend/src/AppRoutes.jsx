@@ -16,7 +16,6 @@ const ForgotPassword = lazy(() => import('./pages/ForgotPassword.jsx'));
 /* ── Client portal (its own auth flow, no admin sidebar) ────────────── */
 const ClientPortalLogin = lazy(() => import('./pages/ClientPortalLogin.jsx'));
 const ClientPortalDashboard = lazy(() => import('./pages/ClientPortalDashboard.jsx'));
-const CommercialLicenseeOnboardingForm = lazy(() => import('./pages/CommercialLicenseeOnboardingForm.jsx'));
 
 /* ── Core ─────────────────────────────────────────────────────────────── */
 const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
@@ -85,7 +84,6 @@ const Roles = lazy(() => import('./pages/governed/Roles.jsx'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard.jsx'));
 const PermissionMatrix = lazy(() => import('./pages/PermissionMatrix.jsx'));
 const ContactDetails = lazy(() => import('./pages/ContactDetails.jsx'));
-const CommercialOnboardingApproval = lazy(() => import('./pages/CommercialOnboardingApproval.jsx'));
 
 /* ── Settings ─────────────────────────────────────────────────────────── */
 const GeneralSettings = lazy(() => import('./pages/GeneralSettings.jsx'));
@@ -145,7 +143,6 @@ export default function AppRoutes() {
         <Route path="/client-portal" element={<Navigate to="/client-portal/login" replace />} />
         <Route path="/client-portal/login" element={<PageTransition><ClientPortalLogin /></PageTransition>} />
         <Route path="/client-portal/dashboard" element={<PageTransition><ClientPortalDashboard /></PageTransition>} />
-        <Route path="/commercial-licensee-onboarding" element={<PageTransition><CommercialLicenseeOnboardingForm /></PageTransition>} />
 
         <Route element={<ProtectedLayout />}>
 
@@ -224,7 +221,6 @@ export default function AppRoutes() {
         <Route path="/master-data" element={<AdminOnly><PageGuard module="admin" page="can_view_master_data"><MasterData /></PageGuard></AdminOnly>} />
         <Route path="/roles" element={<AdminOnly><PageGuard module="admin" page="can_view_roles"><Roles /></PageGuard></AdminOnly>} />
         <Route path="/contact-details" element={<AdminOnly><ContactDetails /></AdminOnly>} />
-        <Route path="/commercial-onboarding-approval" element={<AdminOnly><CommercialOnboardingApproval /></AdminOnly>} />
 
         <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
         <Route path="/settings/general" element={<GeneralSettings />} />
