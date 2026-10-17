@@ -14,9 +14,11 @@ from backend.exports.json_export import JSONExport
 from backend.exports.xml_export import XMLExport
 from backend.exports.pdf_export import PDFExport
 from backend.licensing.activation_engine import ActivationEngine
+from backend.commercial_onboarding import router as commercial_onboarding_router
 
 logger = logging.getLogger("api_v2")
 router = APIRouter(prefix="/v2", tags=["enterprise_api_v2"])
+router.include_router(commercial_onboarding_router)
 
 # --- Request Schemas ---
 
